@@ -34,4 +34,4 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          files: quarkus/dist/keycloak-*.tar.gz
+          files: quarkus/dist/target/keycloak-*.tar.gz
