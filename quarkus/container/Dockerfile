@@ -28,9 +28,7 @@ RUN bash ./build.sh
 FROM registry.access.redhat.com/ubi9-micro
 ENV LANG en_US.UTF-8
 
-ARG USERNAME
-
-LABEL org.opencontainers.image.source https://github.com/$USERNAME/washington
+LABEL org.opencontainers.image.source https://github.com/vunetsystems/washington
 
 COPY --from=ubi-micro-build /tmp/null/rootfs/ /
 COPY --from=ubi-micro-build --chown=1000:0 /opt/keycloak /opt/keycloak
