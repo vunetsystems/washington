@@ -34,7 +34,7 @@ COPY --from=ubi-micro-build /tmp/null/rootfs/ /
 COPY --from=ubi-micro-build --chown=1000:0 /opt/keycloak /opt/keycloak
 
 # for healthcheck
-RUN djf install -y curl
+RUN dnf install -y curl
 
 # vunet specific files
 COPY --from=ubi-micro-build --chown=1000:0 /vunet/provisioning/realm.json /opt/keycloak/data/import/realm.json
