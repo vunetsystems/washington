@@ -4,7 +4,7 @@ ARG KEYCLOAK_VERSION 999.0.0-SNAPSHOT
 ARG USERNAME vunetsystems
 ARG KEYCLOAK_DIST=https://github.com/$USERNAME/washington/releases/download/$KEYCLOAK_VERSION/keycloak-$KEYCLOAK_VERSION.tar.gz
 
-RUN dnf install -y tar gzip zip
+RUN dnf install -y tar gzip zip curl
 
 ADD $KEYCLOAK_DIST /tmp/keycloak/
 
