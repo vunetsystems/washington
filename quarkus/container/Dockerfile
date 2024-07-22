@@ -4,7 +4,7 @@ ARG KEYCLOAK_VERSION 999.0.0-SNAPSHOT
 ARG USERNAME vunetsystems
 ARG KEYCLOAK_DIST=https://github.com/$USERNAME/washington/releases/download/$KEYCLOAK_VERSION/keycloak-$KEYCLOAK_VERSION.tar.gz
 
-RUN dnf install -y tar gzip zip curl
+RUN dnf install -y tar gzip zip
 
 ADD $KEYCLOAK_DIST /tmp/keycloak/
 
@@ -32,6 +32,9 @@ LABEL org.opencontainers.image.source https://github.com/vunetsystems/washington
 
 COPY --from=ubi-micro-build /tmp/null/rootfs/ /
 COPY --from=ubi-micro-build --chown=1000:0 /opt/keycloak /opt/keycloak
+
+# for healthcheck
+RUN djf install -y curl
 
 # vunet specific files
 COPY --from=ubi-micro-build --chown=1000:0 /vunet/provisioning/realm.json /opt/keycloak/data/import/realm.json
