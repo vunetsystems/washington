@@ -4,6 +4,8 @@ ARG KEYCLOAK_VERSION 999.0.0-SNAPSHOT
 ARG USERNAME vunetsystems
 ARG KEYCLOAK_DIST=https://github.com/$USERNAME/washington/releases/download/$KEYCLOAK_VERSION/keycloak-$KEYCLOAK_VERSION.tar.gz
 
+LABEL org.opencontainers.image.source https://github.com/$USERNAME/washington
+
 RUN dnf install -y tar gzip
 
 ADD $KEYCLOAK_DIST /tmp/keycloak/
