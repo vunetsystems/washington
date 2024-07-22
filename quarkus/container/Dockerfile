@@ -23,7 +23,7 @@ RUN bash /tmp/ubi-null.sh java-17-openjdk-headless glibc-langpack-en findutils
 # vunet specific changes
 WORKDIR /vunet
 COPY vunet .
-RUN build.sh
+RUN bash ./build.sh
 
 FROM registry.access.redhat.com/ubi9-micro
 ENV LANG en_US.UTF-8
