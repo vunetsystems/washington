@@ -4,8 +4,6 @@ ARG KEYCLOAK_VERSION 999.0.0-SNAPSHOT
 ARG USERNAME vunetsystems
 ARG KEYCLOAK_DIST=https://github.com/$USERNAME/washington/releases/download/$KEYCLOAK_VERSION/keycloak-$KEYCLOAK_VERSION.tar.gz
 
-LABEL org.opencontainers.image.source https://github.com/$USERNAME/washington
-
 RUN dnf install -y tar gzip
 
 ADD $KEYCLOAK_DIST /tmp/keycloak/
@@ -29,6 +27,10 @@ RUN build.sh
 
 FROM registry.access.redhat.com/ubi9-micro
 ENV LANG en_US.UTF-8
+
+ARG USERNAME
+
+LABEL org.opencontainers.image.source https://github.com/$USERNAME/washington
 
 COPY --from=ubi-micro-build /tmp/null/rootfs/ /
 COPY --from=ubi-micro-build --chown=1000:0 /opt/keycloak /opt/keycloak
