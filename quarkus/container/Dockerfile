@@ -46,4 +46,8 @@ USER 1000
 EXPOSE 8080
 EXPOSE 8443
 
+ENV KC_DB postgres
+ENV KC_HEALTH_ENABLED true
+RUN /opt/keycloak/bin/kc.sh build
+
 ENTRYPOINT [ "/opt/keycloak/bin/kc.sh" ]
