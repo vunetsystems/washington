@@ -54,4 +54,4 @@ jobs:
           tags: ghcr.io/${{ github.actor }}/washington:${{ steps.tag.outputs.new_tag }}
           build-args: |
             KEYCLOAK_VERSION=${{ steps.tag.outputs.new_tag }}
-            USERNAME=${{ github.actor }}
+            ORG_NAME=${{ github.actor }}
