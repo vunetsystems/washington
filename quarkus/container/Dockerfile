@@ -33,9 +33,6 @@ LABEL org.opencontainers.image.source https://github.com/vunetsystems/washington
 COPY --from=ubi-micro-build /tmp/null/rootfs/ /
 COPY --from=ubi-micro-build --chown=1000:0 /opt/keycloak /opt/keycloak
 
-# for healthcheck
-RUN dnf install -y curl
-
 # vunet specific files
 COPY --from=ubi-micro-build --chown=1000:0 /vunet/provisioning/realm.json /opt/keycloak/data/import/realm.json
 COPY --from=ubi-micro-build --chown=1000:0 /vunet/dist/vsmaps-extensions.jar /opt/keycloak/providers/vsmaps-extensions.jar
