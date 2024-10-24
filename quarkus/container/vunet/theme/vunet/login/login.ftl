@@ -50,6 +50,15 @@
           name="password"
           type="password"
         />
+        
+        <#if recaptchaRequired?? && recaptchaSiteKey??>
+            <div class="form-group">
+                <div class="${properties.kcInputWrapperClass!}">
+                    <div class="g-recaptcha" data-size="compact" data-sitekey="${recaptchaSiteKey}"></div>
+                </div>
+            </div>
+        </#if>
+        
         <#if realm.rememberMe && !usernameEditDisabled?? || realm.resetPasswordAllowed>
           <div class="flex items-center justify-between">
             <#if realm.rememberMe && !usernameEditDisabled??>
