@@ -10,6 +10,8 @@
 
 <#assign usernameLabel><@usernameLabel.kw /></#assign>
 
+<script src="${url.resourcesPath}/encryption.js"> </script>
+
 <@layout.registrationLayout
 displayInfo=realm.password && realm.registrationAllowed && !registrationDisabled??
   displayMessage=!messagesPerField.existsError("username", "password")
@@ -89,12 +91,16 @@ displayInfo=realm.password && realm.registrationAllowed && !registrationDisabled
   </#if>
 </@layout.registrationLayout>
 
-<script src="https://cdn.jsdelivr.net/npm/jsencrypt@3.3.1/bin/jsencrypt.min.js"></script>
 <#if public_key??>
 <script>
-  const publicKey = "${public_key?js_string}";
+    const publicKey = "${public_key?js_string}";
+</script>
+<#else>
+<script>
+    console.log("Public key to encrypt password is not available.");
 </script>
 </#if>
+
 <script>
 
   const form = document.querySelector('form');
@@ -115,4 +121,5 @@ displayInfo=realm.password && realm.registrationAllowed && !registrationDisabled
     }
         });
       }
+
 </script>
