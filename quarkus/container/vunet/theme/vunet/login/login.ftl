@@ -12,24 +12,29 @@
 
 <script src="${url.resourcesPath}/encryption.js"> </script>
 
-<script>
-          const tabId = "${tabId!''}";
-          async function refreshCaptcha() {
-                if (!tabId) {
-                    console.error("Missing tabId, cannot refresh CAPTCHA");
-                    return;
-                }
-                const response = await fetch(`/realms/vunet/recaptcha-gen?tab_id=${tabId}`);
-                const data = await response.json();
-                const img = document.getElementById("captchaImg");
-                if (img && data.image) {
-                    img.src = "data:image/png;base64," + data.image;
-                }
+<#if captcha_enabled?? && captcha_enabled == true>
+  <script>
+    const tabId = <#if tabId??>"${tabId}"<#else>null</#if>;
+
+    async function refreshCaptcha() {
+        if (!tabId) {
+        console.error("Missing tabId, cannot refresh CAPTCHA");
+        return;
+        }
+
+              const response = await fetch(`/realms/vunet/recaptcha-gen?tab_id=${tabId}`);
+              const data = await response.json();
+              const img = document.getElementById("captchaImg");
+              if (img && data.image) {
+        img.src = "data:image/png;base64," + data.image;
+        }
             }
-          document.addEventListener("DOMContentLoaded", function () {
-                refreshCaptcha();
-            });
-</script>
+
+            document.addEventListener("DOMContentLoaded", function () {
+        refreshCaptcha();
+      });
+  </script>
+</#if>
 
 <@layout.registrationLayout
 displayInfo=realm.password && realm.registrationAllowed && !registrationDisabled??
