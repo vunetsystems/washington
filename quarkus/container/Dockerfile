@@ -108,3 +108,4 @@ LABEL org.opencontainers.image.title=${KEYCLOAK_SERVER_DISPLAY_NAME} \
       org.opencontainers.image.source=${KEYCLOAK_SOURCE} \
       org.opencontainers.image.description=${KEYCLOAK_DESCRIPTION} \
       org.opencontainers.image.documentation=${KEYCLOAK_DOCS}
+
