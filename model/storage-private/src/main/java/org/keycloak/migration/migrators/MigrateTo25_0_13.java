@@ -1,5 +1,6 @@
 package org.keycloak.migration.migrators;
 
+import org.jboss.logging.Logger;
 import org.keycloak.migration.MigrationProvider;
 import org.keycloak.migration.ModelVersion;
 import org.keycloak.models.*;
@@ -10,6 +11,7 @@ import java.util.List;
 
 public class MigrateTo25_0_13 implements Migration{
     public static final ModelVersion VERSION = new ModelVersion("25.0.13");
+    private static final Logger LOG = Logger.getLogger(MigrateTo25_0_13.class);
 
     @Override
     public ModelVersion getVersion() {
@@ -30,16 +32,6 @@ public class MigrateTo25_0_13 implements Migration{
     }
 
     protected void migrateRealm(KeycloakSession session, RealmModel realm) {
-        MigrationProvider migrationProvider = session.getProvider(MigrationProvider.class);
-
-        ClientScopeModel basicScope = KeycloakModelUtils.getClientScopeByName(realm, "basic");
-        if (basicScope == null) {
-            basicScope = migrationProvider.addOIDCBasicClientScope(realm);
-            session.clients().addClientScopeToAllClients(realm, basicScope, true);
-        } else {
-            System.out.println("Client scope '%s' already exists in the realm. Please migrate this realm manually if you need basic claims in your tokens.");
-        }
-
         // 🔁 Update 'forms' flow
         AuthenticationFlowModel formsFlow = realm.getFlowByAlias("forms");
         if (formsFlow != null) {
@@ -52,7 +44,7 @@ public class MigrateTo25_0_13 implements Migration{
                 }
             }
         } else {
-            System.out.println("Flow 'forms' not found in realm '%s'. Skipping authenticator update.");
+            LOG.warnf("forms doesn't exists for the flow", realm.getName());
         }
     }
 }
