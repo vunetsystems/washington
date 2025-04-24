@@ -9,7 +9,7 @@ import org.keycloak.representations.idm.RealmRepresentation;
 import java.util.List;
 
 public class MigrateTo25_0_13 implements Migration{
-    public static final ModelVersion VERSION = new ModelVersion("999.0.0-SNAPSHOT");
+    public static final ModelVersion VERSION = new ModelVersion("25.0.13");
 
     @Override
     public ModelVersion getVersion() {
