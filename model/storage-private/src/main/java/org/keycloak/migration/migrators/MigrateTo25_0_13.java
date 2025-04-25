@@ -32,6 +32,11 @@ public class MigrateTo25_0_13 implements Migration{
     }
 
     protected void migrateRealm(KeycloakSession session, RealmModel realm) {
+        if (realm.getName().equals("master")) {
+            LOG.infof("Skipping realm: %s", realm.getName());
+            return;
+        }
+
         // 🔁 Update 'forms' flow
         AuthenticationFlowModel formsFlow = realm.getFlowByAlias("forms");
         if (formsFlow != null) {
