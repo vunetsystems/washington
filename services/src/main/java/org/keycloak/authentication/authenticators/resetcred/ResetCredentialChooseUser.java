@@ -116,7 +116,7 @@ public class ResetCredentialChooseUser implements Authenticator, AuthenticatorFa
         if (user != null && user.getFederationLink() != null) {
             event.error(Errors.RESET_CREDENTIAL_DISABLED);
             Response challenge = context.form()
-                    .addError(new FormMessage(Validation.FIELD_USERNAME, Messages.RESET_CREDENTIAL_NOT_ALLOWED))
+                    .addError(new FormMessage(Validation.FIELD_USERNAME, Messages.RESET_CREDENTIAL_NOT_ALLOWED_FOR_FEDERATED_USER))
                     .createPasswordReset();
             context.failureChallenge(AuthenticationFlowError.ACCESS_DENIED, challenge);
             return;
