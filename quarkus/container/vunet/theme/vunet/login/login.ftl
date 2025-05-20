@@ -65,6 +65,7 @@ displayInfo=realm.password && realm.registrationAllowed && !registrationDisabled
           disabled=usernameEditDisabled??
           invalid=messagesPerField.existsError("username", "password")
           placeholder=usernameLabel
+          aria-label=usernameLabel
           message=kcSanitize(messagesPerField.getFirstError("username", "password"))
           name="username"
           type="text"
@@ -73,6 +74,7 @@ displayInfo=realm.password && realm.registrationAllowed && !registrationDisabled
         <@input.kw
           invalid=messagesPerField.existsError("username", "password")
           placeholder=msg("password")
+          aria-label=msg("password")
           name="password"
           type="password"
         />
