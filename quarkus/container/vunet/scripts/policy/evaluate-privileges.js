@@ -43,14 +43,6 @@ for (var grantingPrivilege in implicitPrivilegeMappings) {
 
 var URN_PREFIX = 'vrn:vusmartmaps:resources:';
 
-// Helper functions
-function buildPrivilege(resource, scope) {
-  var resourceName = resource;
-  var builtPrivilege = resourceName + ':' + scope;
-
-  return builtPrivilege;
-}
-
 function toUrn(rs) {
   return URN_PREFIX + rs;
 }
