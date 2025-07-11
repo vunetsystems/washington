@@ -78,8 +78,9 @@ function _extendExplicitPrivileges(explicitPrivileges) {
   while (iterator.hasNext()) {
     var privilegeUrn = iterator.next();
     var privilege = fromUrn(privilegeUrn); // Strip URN prefix for lookup
-    var resource = privilege.split(':')[0];
-    var scope = privilege.split(':')[1];
+    var splitPrivilege = privilege.split(':');
+    var resource = splitPrivilege[0];
+    var scope = splitPrivilege[1];
 
     // automatically assign read scope if write scope is present
     if (scope === "write") {
