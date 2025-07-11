@@ -1,4 +1,3 @@
-var newline = java.lang.System.lineSeparator();
 var logger = org.jboss.logging.Logger.getLogger("vunet.policy.evaluate-privileges");
 var Collectors = java.util.stream.Collectors;
 var HashMap = java.util.HashMap;
