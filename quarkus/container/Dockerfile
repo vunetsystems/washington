@@ -1,7 +1,7 @@
 FROM registry.access.redhat.com/ubi10/ubi AS ubi-full-build
 
 ARG KEYCLOAK_VERSION=999.0.0-SNAPSHOT
-ARG KEYCLOAK_DIST=keycloak-999.0.0-SNAPSHOT.tar.gz
+ARG KEYCLOAK_DIST=https://github.com/vunetsystems/washington/releases/download/$KEYCLOAK_VERSION/keycloak-$KEYCLOAK_VERSION.tar.gz
 
 # Install required OS tools and minimal fonts for Java rendering
 RUN dnf install -y \
