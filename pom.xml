@@ -51,8 +51,8 @@
         <jboss.snapshots.repo.id>jboss-snapshots-repository</jboss.snapshots.repo.id>
         <jboss.snapshots.repo.url>https://s01.oss.sonatype.org/content/repositories/snapshots/</jboss.snapshots.repo.url>
 
-        <quarkus.version>3.20.4</quarkus.version>
-        <quarkus.build.version>3.20.4</quarkus.build.version>
+        <quarkus.version>3.15.6</quarkus.version>
+        <quarkus.build.version>3.15.6</quarkus.build.version>
 
         <project.build-time>${timestamp}</project.build-time>
 
@@ -1343,7 +1343,7 @@
             <dependency>
                 <groupId>com.squareup.okio</groupId>
                 <artifactId>okio</artifactId>
-                <version>3.4.0</version>
+                <version>1.17.6</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>
@@ -1359,6 +1359,16 @@
                 <groupId>io.quarkus.http</groupId>
                 <artifactId>quarkus-http-core</artifactId>
                 <version>5.3.4</version>
+            </dependency>
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.7</version>
+            </dependency>
+            <dependency>
+                <groupId>com.microsoft.sqlserver</groupId>
+                <artifactId>mssql-jdbc</artifactId>
+                <version>12.10.2.jre11</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
