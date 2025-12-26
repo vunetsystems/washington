@@ -82,6 +82,7 @@ public class DefaultMigrationManager implements MigrationManager {
             new MigrateTo24_0_3(),
             new MigrateTo25_0_0(),
             new MigrateTo25_0_13(),
+            new MigrateTo25_1_2(),
             new MigrateTo26_0_0(),
     };
 
