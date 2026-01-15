@@ -304,7 +304,9 @@ public class MigrateTo25_1_2 implements Migration {
                         serviceAccountUsername, realm.getName());
 
                 if (!omniagentClientModel.getId().equals(serviceAccount.getServiceAccountClientLink())) {
-                    LOG.infof("Updating service_account_client_link to correct UUID for '%s'", serviceAccountUsername);
+                    String oldClientLink = serviceAccount.getServiceAccountClientLink();
+                    LOG.infof("Updating service_account_client_link for '%s' in realm '%s' from '%s' to '%s'",
+                            serviceAccountUsername, realm.getName(), oldClientLink, omniagentClientModel.getId());
                     serviceAccount.setServiceAccountClientLink(omniagentClientModel.getId());
                 }
                 return;
