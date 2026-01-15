@@ -287,13 +287,13 @@ public class MigrateTo25_1_2 implements Migration {
 
     private void addServiceAccountUser(KeycloakSession session, RealmModel realm) {
         String serviceAccountUsername = "service-account-omniagent-client";
-        String clientName = "omniagent-client";
+        String clientId = "omniagent-client";
 
         try {
-            ClientModel omniagentClientModel = realm.getClientByClientId(clientName);
+            ClientModel omniagentClientModel = realm.getClientByClientId(clientId);
 
             if (omniagentClientModel == null) {
-                LOG.errorf("Cannot create service account: Client '%s' not found in realm '%s'", clientName, realm.getName());
+                LOG.errorf("Cannot create service account: Client '%s' not found in realm '%s'", clientId, realm.getName());
                 return;
             }
 
