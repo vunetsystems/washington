@@ -287,22 +287,35 @@ public class MigrateTo25_1_2 implements Migration {
 
     private void addServiceAccountUser(KeycloakSession session, RealmModel realm) {
         String serviceAccountUsername = "service-account-omniagent-client";
+        String clientName = "omniagent-client";
 
         try {
+            ClientModel omniagentClientModel = realm.getClientByClientId(clientName);
+
+            if (omniagentClientModel == null) {
+                LOG.errorf("Cannot create service account: Client '%s' not found in realm '%s'", clientName, realm.getName());
+                return;
+            }
+
             UserModel serviceAccount = session.users().getUserByUsername(realm, serviceAccountUsername);
 
             if (serviceAccount != null) {
                 LOG.infof("Service account user '%s' already exists in realm '%s'. Skipping.",
                         serviceAccountUsername, realm.getName());
+
+                if (!omniagentClientModel.getId().equals(serviceAccount.getServiceAccountClientLink())) {
+                    LOG.infof("Updating service_account_client_link to correct UUID for '%s'", serviceAccountUsername);
+                    serviceAccount.setServiceAccountClientLink(omniagentClientModel.getId());
+                }
                 return;
             }
 
             LOG.infof("Adding service account user '%s' to realm '%s'", serviceAccountUsername, realm.getName());
-
             serviceAccount = session.users().addUser(realm, serviceAccountUsername);
+
             serviceAccount.setEnabled(true);
             serviceAccount.setEmailVerified(false);
-            serviceAccount.setServiceAccountClientLink("omniagent-client");
+            serviceAccount.setServiceAccountClientLink(omniagentClientModel.getId());
             serviceAccount.setCreatedTimestamp(System.currentTimeMillis());
 
             // Add realm roles
