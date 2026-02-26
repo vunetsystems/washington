@@ -45,6 +45,8 @@ LABEL org.opencontainers.image.source https://github.com/vunetsystems/washington
 
 ENV KC_RUN_IN_CONTAINER true
 
+ARG KEYCLOAK_VERSION=999.0.0-SNAPSHOT
+
 # Copy built artifacts
 COPY --from=ubi-full-build --chown=1000:0 /opt/keycloak /opt/keycloak
 
@@ -52,9 +54,10 @@ COPY --from=ubi-full-build --chown=1000:0 /opt/keycloak /opt/keycloak
 COPY --from=ubi-full-build --chown=1000:0 /vunet/provisioning/realm.json /opt/keycloak/data/import/realm.json
 COPY --from=ubi-full-build --chown=1000:0 /vunet/dist/vsmaps-extensions.jar /opt/keycloak/providers/vsmaps-extensions.jar
 COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/recaptcha-login.jar /opt/keycloak/providers/recaptcha-login.jar
-COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/single-handshake-thirdparty-multifactor-authentication-1.0.0.jar /opt/keycloak/providers/single-handshake-thirdparty-multifactor-authentication-1.0.0.jar
-COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/sms-based-thirdparty-multifactor-authentication-1.0.0.jar /opt/keycloak/providers/sms-based-thirdparty-multifactor-authentication-1.0.0.jar
-COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/custom-username-password-form-1.0.0.jar /opt/keycloak/providers/custom-username-password-form-1.0.0.jar
+COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/single-handshake-thirdparty-multifactor-authentication-${KEYCLOAK_VERSION}.jar /opt/keycloak/providers/single-handshake-thirdparty-multifactor-authentication-${KEYCLOAK_VERSION}.jar
+COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/sms-based-thirdparty-multifactor-authentication-${KEYCLOAK_VERSION}.jar /opt/keycloak/providers/sms-based-thirdparty-multifactor-authentication-${KEYCLOAK_VERSION}.jar
+COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/custom-username-password-form-${KEYCLOAK_VERSION}.jar /opt/keycloak/providers/custom-username-password-form-${KEYCLOAK_VERSION}.jar
+COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/offline-captcha-service-${KEYCLOAK_VERSION}.jar /opt/keycloak/providers/offline-captcha-service-${KEYCLOAK_VERSION}.jar
 COPY --from=ubi-full-build --chown=1000:0 /vunet/theme/ /opt/keycloak/themes/
 
 RUN echo "keycloak:x:0:root" >> /etc/group && \

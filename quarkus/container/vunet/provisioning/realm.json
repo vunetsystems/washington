@@ -530,16 +530,16 @@
       }
     },
     {
-      "username": "guest",
+      "username": "${GUEST_USER_USERNAME:guest}",
       "createdTimestamp": 1684205042725,
       "credentials": [
         {
-          "value": "Welcome@123",
+          "value": "${GUEST_USER_IDENTIFIER:Welcome@123}",
           "temporary": false,
           "type": "password"
         }
       ],
-      "email": "guest@vunetsystems.com",
+      "email": "${GUEST_USER_EMAIL:guest@vunetsystems.com}",
       "emailVerified": false,
       "enabled": true,
       "firstName": "Admin",
@@ -1616,22 +1616,10 @@
       "protocol": "openid-connect",
       "attributes": {
         "client.secret.creation.time": "1684205042",
-        "client.introspection.response.allow.jwt.claim.enabled": "false",
-        "post.logout.redirect.uris": "+",
-        "oauth2.device.authorization.grant.enabled": "false",
-        "use.jwks.url": "false",
-        "backchannel.logout.revoke.offline.tokens": "false",
-        "use.refresh.tokens": "true",
-        "realm_client": "false",
         "oidc.ciba.grant.enabled": "false",
-        "client.use.lightweight.access.token.enabled": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
         "backchannel.logout.session.required": "true",
-        "client_credentials.use_refresh_token": "false",
-        "tls.client.certificate.bound.access.tokens": "false",
-        "require.pushed.authorization.requests": "false",
-        "acr.loa.map": "{}",
-        "display.on.consent.screen": "false",
-        "token.response.type.bearer.lower-case": "false"
+        "backchannel.logout.revoke.offline.tokens": "false"
       },
       "authenticationFlowBindingOverrides": {},
       "fullScopeAllowed": true,
@@ -1686,7 +1674,6 @@
         "vusmartmaps",
         "profile",
         "roles",
-        "basic",
         "email"
       ],
       "optionalClientScopes": [
@@ -1695,10 +1682,13 @@
         "offline_access",
         "microprofile-jwt"
       ],
-      "access": {
-        "view": true,
-        "configure": true,
-        "manage": true
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": true,
+        "policyEnforcementMode": "ENFORCING",
+        "resources": [],
+        "policies": [],
+        "scopes": [],
+        "decisionStrategy": "UNANIMOUS"
       }
     },
     {
@@ -1971,48 +1961,446 @@
       ]
     },
     {
-      "name": "vusmartmaps",
-      "description": "Application specific protocol mappers for VuSmartMaps",
+      "clientId": "vusmartmaps",
+      "name": "VuSmartMaps",
+      "description": "Client for backend applications",
+      "rootUrl": "",
+      "adminUrl": "",
+      "baseUrl": "",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "7muXgC2XvhAAN870Oxl618hUUYEKbvrl",
+      "redirectUris": ["/*"],
+      "webOrigins": ["/*"],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": true,
       "protocol": "openid-connect",
       "attributes": {
-        "include.in.token.scope": "false",
-        "display.on.consent.screen": "false",
-        "gui.order": "",
-        "consent.screen.text": ""
+        "oidc.ciba.grant.enabled": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "client.secret.creation.time": "1684205042",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false"
       },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
       "protocolMappers": [
         {
-          "name": "explicit-privilege",
+          "name": "Client IP Address",
           "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
           "consentRequired": false,
           "config": {
-            "aggregate.attrs": "true",
-            "userinfo.token.claim": "false",
-            "multivalued": "true",
-            "user.attribute": "privilege",
+            "user.session.note": "clientAddress",
             "id.token.claim": "true",
             "access.token.claim": "true",
-            "claim.name": "privilege"
+            "claim.name": "clientAddress",
+            "jsonType.label": "String"
           }
         },
         {
-          "id": "8ffde2e5-faef-4b16-9a47-7a6ab4c0f0c4",
-          "name": "Data Access Role",
+          "name": "Client ID",
           "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
           "consentRequired": false,
           "config": {
-            "introspection.token.claim": "true",
-            "userinfo.token.claim": "true",
-            "user.attribute": "data_access_role",
+            "user.session.note": "client_id",
             "id.token.claim": "true",
             "access.token.claim": "true",
-            "claim.name": "data_access_role",
+            "claim.name": "client_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "Client Host",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.session.note": "clientHost",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "clientHost",
             "jsonType.label": "String"
           }
         }
-      ]
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "vusmartmaps",
+        "roles",
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": true,
+        "policyEnforcementMode": "ENFORCING",
+        "resources": [
+          {
+            "name": "vrn:vusmartmaps:resources:dataModel",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              },
+              {
+                "name": "manageDataStore"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:incidents",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "provideFeedback"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:workspace",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:users",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:enrichment",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:events",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:alerts",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:dashboards",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "admin"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:importData",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "manage"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:dataRetention",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:dataSource",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:dataStorage",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:definitions",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:insights",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              },
+              {
+                "name": "modifySystemResources"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:license",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:mobileDashboards",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "manage"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:preferences",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:reports",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:resources",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "manage"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:utm",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:vumodule",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "modifySources"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:vustreams",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          },
+          {
+            "name": "vrn:vusmartmaps:resources:dataExtraction",
+            "type": "vrn::resources:default",
+            "scopes": [
+              {
+                "name": "read"
+              },
+              {
+                "name": "write"
+              }
+            ]
+          }
+        ],
+        "policies": [
+          {
+            "name": "denver-orchestration",
+            "description": "Client based policy to allow the client `denver-orchestration` access to certain resources defined in the `vusmartmaps` client",
+            "type": "client",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "clients": "[\"denver-orchestration\"]"
+            }
+          },
+          {
+            "name": "evaluate-user-privilege",
+            "description": "Evaluate a user or client's `privilege` attribute to grant or deny it access to a resource",
+            "type": "script-evaluate-privileges.js",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {}
+          },
+          {
+            "name": "denver-orchestration-permission",
+            "description": "Permission to allow the client `denver-orchestration` to access the `Data Model` and `Data Store` resources of the client `vusmartmaps`",
+            "type": "resource",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "resources": "[\"vrn:vusmartmaps:resources:dataModel\"]",
+              "applyPolicies": "[\"denver-orchestration\"]"
+            }
+          },
+          {
+            "name": "evaluate-user-privilege-permission",
+            "description": "",
+            "type": "resource",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "defaultResourceType": "vrn::resources:default",
+              "applyPolicies": "[\"evaluate-user-privilege\"]"
+            }
+          }
+        ],
+        "scopes": [
+          {
+            "name": "provideFeedback"
+          },
+          {
+            "name": "manage"
+          },
+          {
+            "name": "modifySources"
+          },
+          {
+            "name": "write"
+          },
+          {
+            "name": "read"
+          },
+          {
+            "name": "admin"
+          },
+          {
+            "name": "modifySystemResources"
+          }
+        ],
+        "decisionStrategy": "AFFIRMATIVE"
+      }
     },
     {
       "name": "offline_access",
