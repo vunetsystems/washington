@@ -1,56 +1,422 @@
-name: Build Keycloak, Create Release and Publish Docker Image
+# Washington Build Workflow - Trunk Model (develop / feature / release)
+# Implements: Unified branching strategy with Hanoi integration
+# Branch mapping: develop (Smoke) | feature/* (Dev) | release/* (Functional QA)
+
+name: Build Washington Images
 
 on:
   push:
-    tags:
-      - "*"
+    branches:
+      - develop
+      - 'feature/**'
+      - 'release/**'
+  pull_request:
+    types:
+      - closed
+    branches:
+      - develop
+      - 'release/**'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build (default: current)'
+        required: false
+      version:
+        description: 'Explicit release version to build (e.g. 25.0.3). Overrides auto-derived version and updates pom.xml.'
+        required: false
+
+env:
+  REGISTRY_HOSTNAME: ghcr.io
+  IMAGE_NAME: ghcr.io/vunetsystems/keycloak
+  RELEASE_BRANCH_PREFIX: "release/"
+  MAIN_BRANCH: "develop"
+  HANOI_REPO: hanoi
 
 jobs:
-  release_and_publish:
-    if: startsWith(github.ref, 'refs/tags/')
+  branch-context:
+    name: Branch Context
     runs-on: ubuntu-latest
+    outputs:
+      branch-type: ${{ steps.ctx.outputs.branch-type }}
+      image-tag-prefix: ${{ steps.ctx.outputs.image-tag-prefix }}
+      hanoi-target: ${{ steps.ctx.outputs.hanoi-target }}
+      should-build: ${{ steps.ctx.outputs.should-build }}
+      run-versioning: ${{ steps.ctx.outputs.run-versioning }}
+      run-release: ${{ steps.ctx.outputs.run-release }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Extract semver
-        id: extract_semver
+      - name: Compute branch context
+        id: ctx
         run: |
-          TAG_NAME=${GITHUB_REF##*/}
-          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
-          if [[ "$TAG_NAME" =~ ^([0-9]+.[0-9]+.[0-9]+) ]]; then
-            echo "SEMVER=${BASH_REMATCH[1]}" >> $GITHUB_ENV
-          else
-            echo "SEMVER=$TAG_NAME" >> $GITHUB_ENV
+          REF="${{ github.ref_name }}"
+          EVENT="${{ github.event_name }}"
+          PR_MERGED="${{ github.event.pull_request.merged }}"
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+
+          # Default: no build
+          echo "branch-type=none" >> $GITHUB_OUTPUT
+          echo "image-tag-prefix=" >> $GITHUB_OUTPUT
+          echo "hanoi-target=" >> $GITHUB_OUTPUT
+          echo "should-build=false" >> $GITHUB_OUTPUT
+          echo "run-versioning=false" >> $GITHUB_OUTPUT
+          echo "run-release=false" >> $GITHUB_OUTPUT
+
+          # Push to feature/* → build with feat tag, update Hanoi feature branch
+          if [[ "$REF" == feature/* ]]; then
+            echo "branch-type=feature" >> $GITHUB_OUTPUT
+            BRANCH_SLUG=$(echo "$REF" | sed 's|feature/||' | sed 's|[^a-zA-Z0-9]|-|g' | sed 's|-*$||')
+            echo "image-tag-prefix=feat-${BRANCH_SLUG}-b${{ github.run_number }}" >> $GITHUB_OUTPUT
+            echo "hanoi-target=$REF" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "run-versioning=false" >> $GITHUB_OUTPUT
+            echo "run-release=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-      - name: Set version
-        run: ./set-version.sh ${{ env.SEMVER }}
+          # PR merged to develop → build with main tag, update Hanoi develop
+          if [[ "$EVENT" == "pull_request" && "$PR_MERGED" == "true" && "$BASE_REF" == "develop" ]]; then
+            echo "branch-type=develop" >> $GITHUB_OUTPUT
+            echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
+            echo "hanoi-target=develop" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "run-versioning=false" >> $GITHUB_OUTPUT
+            echo "run-release=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Push to develop (direct)
+          if [[ "$REF" == "develop" && "$EVENT" == "push" ]]; then
+            echo "branch-type=develop" >> $GITHUB_OUTPUT
+            echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
+            echo "hanoi-target=develop" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "run-versioning=false" >> $GITHUB_OUTPUT
+            echo "run-release=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Push to release/*
+          if [[ "$REF" == release/* ]]; then
+            echo "branch-type=release" >> $GITHUB_OUTPUT
+            echo "image-tag-prefix=" >> $GITHUB_OUTPUT
+            echo "hanoi-target=$REF" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "run-versioning=true" >> $GITHUB_OUTPUT
+            echo "run-release=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # PR merged to release/*
+          if [[ "$EVENT" == "pull_request" && "$PR_MERGED" == "true" && "$BASE_REF" =~ ^release/ ]]; then
+            echo "branch-type=release" >> $GITHUB_OUTPUT
+            echo "image-tag-prefix=" >> $GITHUB_OUTPUT
+            echo "hanoi-target=$BASE_REF" >> $GITHUB_OUTPUT
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "run-versioning=true" >> $GITHUB_OUTPUT
+            echo "run-release=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # workflow_dispatch: determine from ref
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            INPUT_REF="${{ github.event.inputs.branch }}"
+            ACTUAL_REF="${INPUT_REF:-$REF}"
+            if [[ "$ACTUAL_REF" == feature/* ]]; then
+              BRANCH_SLUG=$(echo "$ACTUAL_REF" | sed 's|feature/||' | sed 's|[^a-zA-Z0-9]|-|g')
+              echo "branch-type=feature" >> $GITHUB_OUTPUT
+              echo "image-tag-prefix=feat-${BRANCH_SLUG}-b${{ github.run_number }}" >> $GITHUB_OUTPUT
+              echo "hanoi-target=$ACTUAL_REF" >> $GITHUB_OUTPUT
+            elif [[ "$ACTUAL_REF" == "develop" ]]; then
+              echo "branch-type=develop" >> $GITHUB_OUTPUT
+              echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
+              echo "hanoi-target=develop" >> $GITHUB_OUTPUT
+            elif [[ "$ACTUAL_REF" == release/* ]]; then
+              echo "branch-type=release" >> $GITHUB_OUTPUT
+              echo "image-tag-prefix=" >> $GITHUB_OUTPUT
+              echo "hanoi-target=$ACTUAL_REF" >> $GITHUB_OUTPUT
+            fi
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            if [[ "$ACTUAL_REF" == release/* ]]; then
+              echo "run-versioning=true" >> $GITHUB_OUTPUT
+            else
+              echo "run-versioning=false" >> $GITHUB_OUTPUT
+            fi
+            echo "run-release=true" >> $GITHUB_OUTPUT
+          fi
+
+  versioning:
+    name: Versioning
+    needs: branch-context
+    if: always() && needs.branch-context.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      next-version: ${{ steps.next-version.outputs.next-version }}
+      cur-version: ${{ steps.cur-version.outputs.version }}
+      sem-version: ${{ steps.cur-version.outputs.sem-version }}
+      patch-version: ${{ steps.patch-version.outputs.version }}
+      release-type: ${{ steps.release-type.outputs.type }}
+      jira-ticket: ${{ steps.extract-jira.outputs.ticket }}
+    env:
+      MINOR_RELEASE: ${{ contains(github.event.head_commit.message, '[release]') || contains(github.event.pull_request.title, '[release]') }}
+
+    steps:
+      - name: Checkout Washington
+        uses: actions/checkout@v4
+
+      - name: Extract Jira Ticket from PR Title or Commit
+        id: extract-jira
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title || github.event.head_commit.message }}"
+          TICKET=$(echo "$PR_TITLE" | grep -oP '[A-Z]+-\d+' || true)
+          echo "ticket=${TICKET:-}" >> $GITHUB_OUTPUT
+
+      - name: Read current version
+        id: cur-version
+        run: |
+          REF="${{ github.ref_name }}"
+          EVENT="${{ github.event_name }}"
+          BASE_REF="${{ github.event.pull_request.base.ref }}"
+          ACTUAL_REF="$REF"
+          [ "$EVENT" == "pull_request" ] && ACTUAL_REF="$BASE_REF"
+
+          if [[ "$ACTUAL_REF" == release/* ]]; then
+            # For release branches, extract major.minor directly from branch name (e.g. release/25.1 → 25.1)
+            MAJOR_MINOR=$(echo "$ACTUAL_REF" | sed 's|release/||')
+          else
+            # For develop/feature, derive major.minor from Maven POM version (strip -SNAPSHOT)
+            MAJOR_MINOR=$(python3 -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('pom.xml')
+          root = tree.getroot()
+          ns = {'m': 'http://maven.apache.org/POM/4.0.0'}
+          ver = root.find('m:version', ns).text.replace('-SNAPSHOT', '')
+          parts = ver.split('.')
+          print('.'.join(parts[:2]))
+          ")
+          fi
+          echo "version=$MAJOR_MINOR" >> $GITHUB_OUTPUT
+          echo "sem-version=${MAJOR_MINOR}.0" >> $GITHUB_OUTPUT
+
+      - name: Calculate next patch version
+        id: patch-version
+        run: |
+          EXPLICIT="${{ github.event.inputs.version }}"
+          if [ -n "$EXPLICIT" ]; then
+            # User-provided version takes precedence (e.g. 25.1.5)
+            echo "version=$EXPLICIT" >> $GITHUB_OUTPUT
+          else
+            MAJOR_MINOR="${{ steps.cur-version.outputs.version }}"
+            # Find the latest tag matching major.minor.* and increment patch by 1
+            git fetch --tags --quiet
+            LATEST=$(git tag -l "v${MAJOR_MINOR}.*" | sort -V | tail -1)
+            if [ -n "$LATEST" ]; then
+              PATCH=$(echo "$LATEST" | awk -F '.' '{ print $3 }')
+              NEXT_PATCH=$((PATCH + 1))
+            else
+              # No prior tag for this major.minor — start at .0
+              NEXT_PATCH=0
+            fi
+            echo "version=${MAJOR_MINOR}.${NEXT_PATCH}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine release type
+        id: release-type
+        run: |
+          if [[ "${{ env.MINOR_RELEASE }}" == "true" ]]; then
+            echo "type=feature" >> $GITHUB_OUTPUT
+          else
+            echo "type=bug" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Increment Semantic version
+        id: next-version
+        uses: christian-draeger/increment-semantic-version@4ac542a8ebf91f4edc224cbe3a19cc086826ae77
+        with:
+          current-version: ${{ steps.cur-version.outputs.sem-version }}
+          version-fragment: ${{ steps.release-type.outputs.type }}
+
+  build:
+    name: Build and Push Image
+    needs: [branch-context, versioning]
+    if: always() && needs.branch-context.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      combined-tag: ${{ steps.tags.outputs.combined_tag }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout Washington
+        uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tags
+        run: |
+          IMAGE_TAG_PREFIX='${{ needs.branch-context.outputs.image-tag-prefix }}'
+          BRANCH_TYPE='${{ needs.branch-context.outputs.branch-type }}'
+          PATCH_VER='${{ needs.versioning.outputs.patch-version }}'
+
+          # Tag format:
+          # - Feature:  feat-<slug>-b<run>   (e.g. feat-CCBD-3908-login-b142)
+          # - Develop:  main-b<run>          (e.g. main-b210)
+          # - Release:  <major>.<minor>.<run> (e.g. 25.0.142)
+          if [ "$BRANCH_TYPE" == "release" ] && [ -n "$PATCH_VER" ]; then
+            COMBINED_TAG="$PATCH_VER"
+          else
+            COMBINED_TAG="$IMAGE_TAG_PREFIX"
+          fi
+
+          echo "combined_tag=$COMBINED_TAG" >> $GITHUB_OUTPUT
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+          echo "${{ env.IMAGE_NAME }}:$COMBINED_TAG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Set Keycloak version
+        if: needs.branch-context.outputs.run-versioning == 'true' || github.event.inputs.version != ''
+        run: ./set-version.sh ${{ needs.versioning.outputs.patch-version }}
 
       - name: Build Keycloak
         uses: ./.github/actions/build-keycloak
 
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: quarkus/dist/target/keycloak-*.tar.gz
-          tag_name: ${{ env.TAG_NAME }}
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and Push Docker Image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ./quarkus/container/
           file: ./quarkus/container/Dockerfile
           push: true
-          tags: ghcr.io/vunetsystems/keycloak:${{ env.TAG_NAME }}
-          build-args: |
-            KEYCLOAK_VERSION=${{ env.TAG_NAME }}
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: KEYCLOAK_VERSION=${{ steps.tags.outputs.combined_tag }}
+
+      - name: Install Cosign
+        if: success()
+        uses: sigstore/cosign-installer@v4.0.0
+
+      - name: Sign image with Cosign
+        if: success() && steps.build.outputs.digest != ''
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > cosign.key
+          cosign sign --key cosign.key --yes "${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+
+      - name: Upload release artifact
+        if: needs.branch-context.outputs.run-release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: keycloak-dist
+          path: quarkus/dist/target/keycloak-*.tar.gz
+
+  helm-update:
+    name: Update Hanoi Helm Charts
+    needs: [branch-context, build]
+    if: always() && needs.branch-context.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      HANOI_TARGET: ${{ needs.branch-context.outputs.hanoi-target }}
+    steps:
+      - name: Generate GitHub App Token
+        id: generate-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.VUNET_NEW_CICD_APP_ID }}
+          private-key: ${{ secrets.VUNET_NEW_CICD_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ env.HANOI_REPO }}
+
+      - name: Checkout Washington
+        uses: actions/checkout@v4
+        with:
+          path: washington
+          fetch-depth: 0
+
+      - name: Checkout Hanoi
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/${{ env.HANOI_REPO }}
+          token: ${{ steps.generate-token.outputs.token }}
+          path: hanoi
+          fetch-depth: 0
+
+      - name: Setup Hanoi branch
+        run: |
+          cd hanoi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TARGET="${{ env.HANOI_TARGET }}"
+          if git ls-remote --heads origin "$TARGET" | grep -q "$TARGET"; then
+            git checkout "$TARGET"
+          else
+            git checkout -b "$TARGET"
+          fi
+
+      - name: Update Helm chart image tag
+        run: |
+          cd hanoi
+          TAG='${{ needs.build.outputs.combined-tag }}'
+          MAP_FILE="../washington/.ci/helm-map.json"
+          CHART_PATHS="helm-charts/keycloak"
+          IMAGE_NAME="${{ github.repository_owner }}/infra-keycloak"
+          if [ -f "$MAP_FILE" ]; then
+            MAPPED_PATHS=$(jq -r '.keycloak.chart_paths[]? // empty' "$MAP_FILE")
+            MAPPED_SUFFIX=$(jq -r '.keycloak.image_suffix // empty' "$MAP_FILE")
+            [ -n "$MAPPED_PATHS" ] && CHART_PATHS="$MAPPED_PATHS"
+            [ -n "$MAPPED_SUFFIX" ] && IMAGE_NAME="${{ github.repository_owner }}/infra-${MAPPED_SUFFIX}"
+          fi
+          for chart in $CHART_PATHS; do
+            [ -f "$chart/values.yaml" ] && \
+              sed -i "s|imageTag:.*|imageTag: $TAG|" "$chart/values.yaml" && \
+              sed -i "s|imageName:.*|imageName: $IMAGE_NAME|" "$chart/values.yaml"
+          done
+          git diff --quiet || {
+            git add .
+            git commit -m "chore: Update Washington image tag to $TAG (branch ${{ env.HANOI_TARGET }})"
+            git push origin "$(git branch --show-current)"
+          }
+
+  release:
+    name: Create GitHub Release
+    needs: [branch-context, build, versioning, helm-update]
+    if: |
+      always() &&
+      needs.branch-context.outputs.run-release == 'true' &&
+      needs.branch-context.outputs.branch-type != 'feature'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Washington
+        uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.COMMIT_KEY }}
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: keycloak-dist
+          path: dist
+          if-no-files-found: ignore
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PATCH="${{ needs.versioning.outputs.patch-version }}"
+          git config user.email "github-actions@noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git tag "v${PATCH}" 2>/dev/null || true
+          git push origin "v${PATCH}" 2>/dev/null || true
+          PRERELEASE_FLAG=""
+          [ "${{ needs.branch-context.outputs.branch-type }}" == "develop" ] && PRERELEASE_FLAG="--prerelease"
+          ARTIFACTS=$(ls dist/keycloak-*.tar.gz 2>/dev/null | xargs -I{} echo "{}" || true)
+          gh release create "v${PATCH}" \
+            --title "Release v${PATCH}" \
+            --generate-notes \
+            $PRERELEASE_FLAG \
+            $ARTIFACTS
