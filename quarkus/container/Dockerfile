@@ -3,7 +3,6 @@ FROM registry.access.redhat.com/ubi10/ubi AS ubi-full-build
 ARG KEYCLOAK_VERSION=999.0.0-SNAPSHOT
 ARG KEYCLOAK_DIST=https://github.com/vunetsystems/washington/releases/download/$KEYCLOAK_VERSION/keycloak-$KEYCLOAK_VERSION.tar.gz
 
-# Install required OS tools and minimal fonts for Java rendering
 RUN dnf install -y \
     tar gzip zip fontconfig \
     dejavu-sans-fonts \
@@ -15,7 +14,6 @@ ADD $KEYCLOAK_DIST /tmp/keycloak/
 
 USER root
 
-# Unpack Keycloak
 RUN (cd /tmp/keycloak && \
       tar -xvf /tmp/keycloak/keycloak-*.tar.gz && \
       rm /tmp/keycloak/keycloak-*.tar.gz) || true
@@ -23,17 +21,40 @@ RUN (cd /tmp/keycloak && \
 RUN mv /tmp/keycloak/keycloak-* /opt/keycloak && mkdir -p /opt/keycloak/data
 RUN chmod -R g+rwX /opt/keycloak
 
-# Vunet-specific build steps
 WORKDIR /vunet
 COPY vunet .
 RUN bash ./build.sh
 
-# ================== Final image ===================
+ARG MARAUDER_VERSION
+ARG MARAUDER_TARBALL
+ARG MARAUDER_REPO=https://github.com/vunetsystems/marauder/releases/download
+
+RUN set -euo pipefail && \
+    \
+    # Fail clearly if build-args were not passed
+    if [ -z "$MARAUDER_VERSION" ] || [ "$MARAUDER_VERSION" == "null" ]; then \
+      echo "ERROR: MARAUDER_VERSION build-arg is missing or null"; \
+      exit 1; \
+    fi && \
+    if [ -z "$MARAUDER_TARBALL" ] || [ "$MARAUDER_TARBALL" == "null" ]; then \
+      echo "ERROR: MARAUDER_TARBALL build-arg is missing or null"; \
+      exit 1; \
+    fi && \
+    \
+    mkdir -p /vunet/plugins && \
+    echo "Downloading: ${MARAUDER_REPO}/${MARAUDER_VERSION}/${MARAUDER_TARBALL}" && \
+    curl -fsSL "${MARAUDER_REPO}/${MARAUDER_VERSION}/${MARAUDER_TARBALL}" \
+         -o /tmp/marauder-plugins.tar.gz && \
+    tar -xzf /tmp/marauder-plugins.tar.gz -C /vunet/plugins && \
+    rm /tmp/marauder-plugins.tar.gz && \
+    echo "=== Extracted Marauder plugins ===" && \
+    ls -lh /vunet/plugins/
+
+
 FROM registry.access.redhat.com/ubi10/ubi
 
 ENV LANG en_US.UTF-8
 
-# Install runtime dependencies (minimal but enough for font rendering)
 RUN dnf install -y \
     fontconfig \
     dejavu-sans-fonts \
@@ -45,16 +66,14 @@ LABEL org.opencontainers.image.source https://github.com/vunetsystems/washington
 
 ENV KC_RUN_IN_CONTAINER true
 
-# Copy built artifacts
 COPY --from=ubi-full-build --chown=1000:0 /opt/keycloak /opt/keycloak
 
-# Vunet-specific files
 COPY --from=ubi-full-build --chown=1000:0 /vunet/provisioning/realm.json /opt/keycloak/data/import/realm.json
 COPY --from=ubi-full-build --chown=1000:0 /vunet/dist/vsmaps-extensions.jar /opt/keycloak/providers/vsmaps-extensions.jar
-COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/recaptcha-login.jar /opt/keycloak/providers/recaptcha-login.jar
-COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/single-handshake-thirdparty-multifactor-authentication-1.0.0.jar /opt/keycloak/providers/single-handshake-thirdparty-multifactor-authentication-1.0.0.jar
-COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/sms-based-thirdparty-multifactor-authentication-1.0.0.jar /opt/keycloak/providers/sms-based-thirdparty-multifactor-authentication-1.0.0.jar
-COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/custom-username-password-form-1.0.0.jar /opt/keycloak/providers/custom-username-password-form-1.0.0.jar
+
+COPY --from=ubi-full-build --chown=1000:0 /vunet/plugins/ /opt/keycloak/providers/
+
+# Theme
 COPY --from=ubi-full-build --chown=1000:0 /vunet/theme/ /opt/keycloak/themes/
 
 RUN echo "keycloak:x:0:root" >> /etc/group && \
@@ -72,8 +91,8 @@ RUN /opt/keycloak/bin/kc.sh build
 
 ENTRYPOINT [ "/opt/keycloak/bin/kc.sh" ]
 
-# Common labels
 ARG KEYCLOAK_VERSION
+ARG MARAUDER_VERSION
 ARG KEYCLOAK_URL="https://www.keycloak.org/"
 ARG KEYCLOAK_TAGS="keycloak security identity"
 ARG KEYCLOAK_MAINTAINER=${KEYCLOAK_URL}
@@ -84,6 +103,7 @@ LABEL maintainer=${KEYCLOAK_MAINTAINER} \
       version=${KEYCLOAK_VERSION} \
       url=${KEYCLOAK_URL} \
       io.openshift.tags=${KEYCLOAK_TAGS} \
+      vunetsystems.marauder.version=${MARAUDER_VERSION} \
       release="" \
       vcs-ref="" \
       com.redhat.build-host="" \
@@ -106,6 +126,5 @@ ARG KEYCLOAK_DOCS=${KEYCLOAK_URL}documentation
 LABEL org.opencontainers.image.title=${KEYCLOAK_SERVER_DISPLAY_NAME} \
       org.opencontainers.image.url=${KEYCLOAK_URL} \
       org.opencontainers.image.source=${KEYCLOAK_SOURCE} \
-      org.opencontainers.image.description=${KEYCLOAK_DESCRIPTION} \
+      org.opencontainers.image.description=${KEYCLOAK_SERVER_DESCRIPTION} \
       org.opencontainers.image.documentation=${KEYCLOAK_DOCS}
-
