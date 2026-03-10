@@ -21,7 +21,6 @@ on:
         description: 'Explicit release version (e.g. 25.0.3). Overrides auto-derived version.'
         required: false
 
-  # Marauder merged
   repository_dispatch:
     types:
       - marauder-release
@@ -35,7 +34,6 @@ env:
 
 jobs:
 
-  # ──  Figure out what kind of build this is ───────────────────────────
   branch-context:
     name: Branch Context
     runs-on: ubuntu-latest
@@ -56,7 +54,6 @@ jobs:
           PR_MERGED="${{ github.event.pull_request.merged }}"
           BASE_REF="${{ github.event.pull_request.base.ref }}"
 
-          # Default: no build
           echo "branch-type=none"     >> $GITHUB_OUTPUT
           echo "image-tag-prefix="    >> $GITHUB_OUTPUT
           echo "hanoi-target="        >> $GITHUB_OUTPUT
@@ -64,7 +61,6 @@ jobs:
           echo "run-versioning=false" >> $GITHUB_OUTPUT
           echo "run-release=false"    >> $GITHUB_OUTPUT
 
-          # repository_dispatch from Marauder → treat as develop build
           if [[ "$EVENT" == "repository_dispatch" ]]; then
             echo "branch-type=develop"                              >> $GITHUB_OUTPUT
             echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
@@ -75,7 +71,6 @@ jobs:
             exit 0
           fi
 
-          # Push to feature/* → dev build, no release
           if [[ "$REF" == feature/* ]]; then
             BRANCH_SLUG=$(echo "$REF" | sed 's|feature/||' | sed 's|[^a-zA-Z0-9]|-|g' | sed 's|-*$||')
             echo "branch-type=feature"                                             >> $GITHUB_OUTPUT
@@ -87,7 +82,6 @@ jobs:
             exit 0
           fi
 
-          # PR merged to develop → develop build, full release
           if [[ "$EVENT" == "pull_request" && "$PR_MERGED" == "true" && "$BASE_REF" == "develop" ]]; then
             echo "branch-type=develop"                              >> $GITHUB_OUTPUT
             echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
@@ -98,7 +92,6 @@ jobs:
             exit 0
           fi
 
-          # Push to develop directly
           if [[ "$REF" == "develop" && "$EVENT" == "push" ]]; then
             echo "branch-type=develop"                              >> $GITHUB_OUTPUT
             echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
@@ -109,7 +102,6 @@ jobs:
             exit 0
           fi
 
-          # Push to release/*
           if [[ "$REF" == release/* ]]; then
             echo "branch-type=release"  >> $GITHUB_OUTPUT
             echo "image-tag-prefix="    >> $GITHUB_OUTPUT
@@ -120,7 +112,6 @@ jobs:
             exit 0
           fi
 
-          # PR merged to release/*
           if [[ "$EVENT" == "pull_request" && "$PR_MERGED" == "true" && "$BASE_REF" =~ ^release/ ]]; then
             echo "branch-type=release"    >> $GITHUB_OUTPUT
             echo "image-tag-prefix="      >> $GITHUB_OUTPUT
@@ -131,7 +122,6 @@ jobs:
             exit 0
           fi
 
-          # workflow_dispatch → determine from ref
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             INPUT_REF="${{ github.event.inputs.branch }}"
             ACTUAL_REF="${INPUT_REF:-$REF}"
@@ -158,7 +148,6 @@ jobs:
             echo "should-build=true" >> $GITHUB_OUTPUT
           fi
 
-  # ──  Versioning ───────────────────────────────────────────────────────
   versioning:
     name: Versioning
     needs: branch-context
@@ -178,12 +167,24 @@ jobs:
       - name: Checkout Washington
         uses: actions/checkout@v4
 
-      - name: Extract Jira Ticket from PR Title or Commit
+      - name: Extract Jira Ticket
         id: extract-jira
         run: |
-          PR_TITLE="${{ github.event.pull_request.title || github.event.head_commit.message }}"
-          TICKET=$(echo "$PR_TITLE" | grep -oP '[A-Z]+-\d+' || true)
+          TICKET=""
+
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_name }}" == feature/* ]]; then
+            SUFFIX="${{ github.ref_name }}"
+            SUFFIX="${SUFFIX#feature/}"
+            TICKET=$(echo "$SUFFIX" | grep -oP '^[A-Z]+-[0-9]+' || true)
+          fi
+
+          if [ -z "$TICKET" ]; then
+            PR_TITLE="${{ github.event.pull_request.title || github.event.head_commit.message }}"
+            TICKET=$(echo "$PR_TITLE" | grep -oP '[A-Z]+-\d+' || true)
+          fi
+
           echo "ticket=${TICKET:-}" >> $GITHUB_OUTPUT
+          echo "Jira ticket: ${TICKET:-none}"
 
       - name: Read current version
         id: cur-version
@@ -193,8 +194,6 @@ jobs:
           BASE_REF="${{ github.event.pull_request.base.ref }}"
           ACTUAL_REF="$REF"
           [ "$EVENT" == "pull_request" ] && ACTUAL_REF="$BASE_REF"
-
-          # repository_dispatch has no branch ref — treat as develop
           [ "$EVENT" == "repository_dispatch" ] && ACTUAL_REF="develop"
 
           if [[ "$ACTUAL_REF" == release/* ]]; then
@@ -210,8 +209,8 @@ jobs:
           print('.'.join(parts[:2]))
           ")
           fi
-          echo "version=$MAJOR_MINOR"         >> $GITHUB_OUTPUT
-          echo "sem-version=${MAJOR_MINOR}.0"  >> $GITHUB_OUTPUT
+          echo "version=$MAJOR_MINOR"        >> $GITHUB_OUTPUT
+          echo "sem-version=${MAJOR_MINOR}.0" >> $GITHUB_OUTPUT
 
       - name: Calculate next patch version
         id: patch-version
@@ -248,7 +247,6 @@ jobs:
           current-version: ${{ steps.cur-version.outputs.sem-version }}
           version-fragment: ${{ steps.release-type.outputs.type }}
 
-  # ──  Build and push Docker image ─────────────────────────────────────
   build:
     name: Build and Push Image
     needs: [branch-context, versioning]
@@ -262,7 +260,6 @@ jobs:
       - name: Checkout Washington
         uses: actions/checkout@v4
 
-      # ── Resolve Marauder version ─────────────────────────────────────────────
       - name: Resolve Marauder version
         run: |
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
@@ -279,7 +276,6 @@ jobs:
             MARAUDER_TARBALL="marauder-plugins-${MARAUDER_VERSION}.tar.gz"
           fi
 
-          # Fix issue 8: fail clearly if version could not be resolved
           if [ -z "$MARAUDER_VERSION" ] || [ "$MARAUDER_VERSION" == "null" ]; then
             echo "ERROR: Could not resolve Marauder version. Check that Marauder has at least one published release."
             exit 1
@@ -343,7 +339,6 @@ jobs:
         if: success()
         uses: sigstore/cosign-installer@v4.0.0
 
-
       - name: Sign image with Cosign
         if: success() && steps.build.outputs.digest != ''
         env:
@@ -360,11 +355,9 @@ jobs:
           name: keycloak-dist
           path: quarkus/dist/target/keycloak-*.tar.gz
 
-  # ── Update Hanoi Helm Charts ────────────────────────────────────────
   helm-update:
     name: Update Hanoi Helm Charts
     needs: [branch-context, build]
-
     if: |
       always() &&
       needs.branch-context.outputs.should-build == 'true' &&
@@ -432,15 +425,13 @@ jobs:
 
           git diff --quiet || {
             git add .
-            git commit -m "chore: update keycloak image tag to $TAG (branch ${{ env.HANOI_TARGET }})"
+            git commit -m "chore: update keycloak image tag to $TAG"
             git push origin "$(git branch --show-current)"
           }
 
-  # ── Create GitHub Release ───────────────────────────────────────────
   release:
     name: Create GitHub Release
     needs: [branch-context, build, versioning, helm-update]
-
     if: |
       always() &&
       needs.branch-context.outputs.run-release == 'true' &&
@@ -479,3 +470,90 @@ jobs:
             --generate-notes \
             $PRERELEASE_FLAG \
             $ARTIFACTS
+
+  jira-success:
+    name: Update Jira Ticket (Build Success)
+    needs:
+      - branch-context
+      - versioning
+      - build
+      - helm-update
+      - release
+    runs-on: ubuntu-latest
+    if: |
+      success() &&
+      needs.versioning.outputs.jira-ticket != ''
+    env:
+      JIRA_URL:       ${{ secrets.JIRA_URL }}
+      JIRA_USERNAME:  ${{ secrets.JIRA_USERNAME }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      BRANCH_NAME:    ${{ github.ref_name }}
+      REPOSITORY:     ${{ github.repository }}
+      RELEASE_URL:    ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Post Build Success Comment to Jira
+        run: |
+          IMAGE_TAG='${{ needs.build.outputs.combined-tag }}'
+          OWNER='${{ github.repository_owner }}'
+
+          COMMENT="Build and Deploy Success\n\n"
+          COMMENT+="Repository: ${REPOSITORY}\n"
+          COMMENT+="Branch: ${BRANCH_NAME}\n"
+          COMMENT+="Image tag: ${IMAGE_TAG}\n"
+          COMMENT+="Image: ghcr.io/${OWNER}/keycloak:${IMAGE_TAG}\n"
+          COMMENT+="Helm Charts: Updated in ${{ github.repository_owner }}/${{ env.HANOI_REPO }}\n"
+          COMMENT+="Build Run: ${RELEASE_URL}"
+
+          curl -X POST \
+            -u "$JIRA_USERNAME:$JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"body\": \"$COMMENT\"}" \
+            "$JIRA_URL/rest/api/2/issue/${{ needs.versioning.outputs.jira-ticket }}/comment"
+
+  jira-failure:
+    name: Update Jira Ticket (Build Failed)
+    needs:
+      - branch-context
+      - versioning
+      - build
+      - helm-update
+      - release
+    runs-on: ubuntu-latest
+    if: |
+      failure() &&
+      needs.versioning.outputs.jira-ticket != ''
+    env:
+      JIRA_URL:       ${{ secrets.JIRA_URL }}
+      JIRA_USERNAME:  ${{ secrets.JIRA_USERNAME }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      BRANCH_NAME:    ${{ github.ref_name }}
+      REPOSITORY:     ${{ github.repository }}
+      RUN_URL:        ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Post Build Failure Comment to Jira
+        run: |
+          IMAGE_TAG='${{ needs.build.outputs.combined-tag }}'
+
+          BUILD_STATUS="${{ needs.build.result }}"
+          HELM_STATUS="${{ needs.helm-update.result }}"
+          RELEASE_STATUS="${{ needs.release.result }}"
+
+          FAILED_JOBS=""
+          [ "$BUILD_STATUS"   == "failure" ] && FAILED_JOBS+="build "
+          [ "$HELM_STATUS"    == "failure" ] && FAILED_JOBS+="helm-update "
+          [ "$RELEASE_STATUS" == "failure" ] && FAILED_JOBS+="release "
+
+          COMMENT="Build Failed\n\n"
+          COMMENT+="Repository: ${REPOSITORY}\n"
+          COMMENT+="Branch: ${BRANCH_NAME}\n"
+          COMMENT+="Image tag: ${IMAGE_TAG}\n"
+          COMMENT+="Failed jobs: ${FAILED_JOBS:-unknown}\n"
+          COMMENT+="Build Run: ${RUN_URL}"
+
+          curl -X POST \
+            -u "$JIRA_USERNAME:$JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"body\": \"$COMMENT\"}" \
+            "$JIRA_URL/rest/api/2/issue/${{ needs.versioning.outputs.jira-ticket }}/comment"
