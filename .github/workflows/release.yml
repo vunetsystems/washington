@@ -3,9 +3,7 @@ name: Build Washington Images
 on:
   push:
     branches:
-      - develop
       - 'feature/**'
-      - 'release/**'
   pull_request:
     types:
       - closed
@@ -18,9 +16,12 @@ on:
         description: 'Branch to build (default: current)'
         required: false
       version:
-        description: 'Explicit release version (e.g. 25.0.3). Overrides auto-derived version.'
+        description: 'Explicit release version (e.g. 25.0.3-test). Must not be a production format (e.g. 25.0.3).'
         required: false
-
+      marauder_tag:
+        description: 'Specific Marauder release tag to use (e.g. v1.2.3-test). Must not be a production format (e.g. v1.2.3).'
+        required: false
+        type: string
   repository_dispatch:
     types:
       - marauder-release
@@ -38,14 +39,19 @@ jobs:
     name: Branch Context
     runs-on: ubuntu-latest
     outputs:
-      branch-type:      ${{ steps.ctx.outputs.branch-type }}
-      image-tag-prefix: ${{ steps.ctx.outputs.image-tag-prefix }}
-      hanoi-target:     ${{ steps.ctx.outputs.hanoi-target }}
-      should-build:     ${{ steps.ctx.outputs.should-build }}
-      run-versioning:   ${{ steps.ctx.outputs.run-versioning }}
-      run-release:      ${{ steps.ctx.outputs.run-release }}
+      branch-type:       ${{ steps.ctx.outputs.branch-type }}
+      image-tag-prefix:  ${{ steps.ctx.outputs.image-tag-prefix }}
+      hanoi-target:      ${{ steps.ctx.outputs.hanoi-target }}
+      should-build:      ${{ steps.ctx.outputs.should-build }}
+      run-versioning:    ${{ steps.ctx.outputs.run-versioning }}
+      run-release:       ${{ steps.ctx.outputs.run-release }}
+      concurrency-group: ${{ steps.ctx.outputs.concurrency-group }}
+      is-test-run:       ${{ steps.ctx.outputs.is-test-run }}
 
     steps:
+      - name: Checkout Washington
+        uses: actions/checkout@v4
+
       - name: Compute branch context
         id: ctx
         run: |
@@ -54,20 +60,27 @@ jobs:
           PR_MERGED="${{ github.event.pull_request.merged }}"
           BASE_REF="${{ github.event.pull_request.base.ref }}"
 
-          echo "branch-type=none"     >> $GITHUB_OUTPUT
-          echo "image-tag-prefix="    >> $GITHUB_OUTPUT
-          echo "hanoi-target="        >> $GITHUB_OUTPUT
-          echo "should-build=false"   >> $GITHUB_OUTPUT
-          echo "run-versioning=false" >> $GITHUB_OUTPUT
-          echo "run-release=false"    >> $GITHUB_OUTPUT
+          echo "branch-type=none"       >> $GITHUB_OUTPUT
+          echo "image-tag-prefix="      >> $GITHUB_OUTPUT
+          echo "hanoi-target="          >> $GITHUB_OUTPUT
+          echo "should-build=false"     >> $GITHUB_OUTPUT
+          echo "run-versioning=false"   >> $GITHUB_OUTPUT
+          echo "run-release=false"      >> $GITHUB_OUTPUT
+          echo "concurrency-group=none" >> $GITHUB_OUTPUT
+          echo "is-test-run=false"      >> $GITHUB_OUTPUT
 
           if [[ "$EVENT" == "repository_dispatch" ]]; then
+            TRIGGERED_BY="${{ github.event.client_payload.triggered_by }}"
+            if [[ "$TRIGGERED_BY" == "manual" ]]; then
+              echo "is-test-run=true" >> $GITHUB_OUTPUT
+            fi
             echo "branch-type=develop"                              >> $GITHUB_OUTPUT
             echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
             echo "hanoi-target=develop"                            >> $GITHUB_OUTPUT
             echo "should-build=true"                               >> $GITHUB_OUTPUT
             echo "run-versioning=false"                            >> $GITHUB_OUTPUT
             echo "run-release=true"                                >> $GITHUB_OUTPUT
+            echo "concurrency-group=washington-develop"            >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -79,6 +92,7 @@ jobs:
             echo "should-build=true"                                               >> $GITHUB_OUTPUT
             echo "run-versioning=false"                                            >> $GITHUB_OUTPUT
             echo "run-release=false"                                               >> $GITHUB_OUTPUT
+            echo "concurrency-group=washington-feature-${BRANCH_SLUG}"            >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -89,42 +103,59 @@ jobs:
             echo "should-build=true"                               >> $GITHUB_OUTPUT
             echo "run-versioning=false"                            >> $GITHUB_OUTPUT
             echo "run-release=true"                                >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if [[ "$REF" == "develop" && "$EVENT" == "push" ]]; then
-            echo "branch-type=develop"                              >> $GITHUB_OUTPUT
-            echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
-            echo "hanoi-target=develop"                            >> $GITHUB_OUTPUT
-            echo "should-build=true"                               >> $GITHUB_OUTPUT
-            echo "run-versioning=false"                            >> $GITHUB_OUTPUT
-            echo "run-release=true"                                >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if [[ "$REF" == release/* ]]; then
-            echo "branch-type=release"  >> $GITHUB_OUTPUT
-            echo "image-tag-prefix="    >> $GITHUB_OUTPUT
-            echo "hanoi-target=$REF"    >> $GITHUB_OUTPUT
-            echo "should-build=true"    >> $GITHUB_OUTPUT
-            echo "run-versioning=true"  >> $GITHUB_OUTPUT
-            echo "run-release=true"     >> $GITHUB_OUTPUT
+            echo "concurrency-group=washington-develop"            >> $GITHUB_OUTPUT
             exit 0
           fi
 
           if [[ "$EVENT" == "pull_request" && "$PR_MERGED" == "true" && "$BASE_REF" =~ ^release/ ]]; then
-            echo "branch-type=release"    >> $GITHUB_OUTPUT
-            echo "image-tag-prefix="      >> $GITHUB_OUTPUT
-            echo "hanoi-target=$BASE_REF" >> $GITHUB_OUTPUT
-            echo "should-build=true"      >> $GITHUB_OUTPUT
-            echo "run-versioning=true"    >> $GITHUB_OUTPUT
-            echo "run-release=true"       >> $GITHUB_OUTPUT
+            RELEASE_SLUG=$(echo "$BASE_REF" | sed 's|release/||' | sed 's|[^a-zA-Z0-9]|-|g')
+            echo "branch-type=release"                                   >> $GITHUB_OUTPUT
+            echo "image-tag-prefix="                                     >> $GITHUB_OUTPUT
+            echo "hanoi-target=$BASE_REF"                               >> $GITHUB_OUTPUT
+            echo "should-build=true"                                     >> $GITHUB_OUTPUT
+            echo "run-versioning=true"                                   >> $GITHUB_OUTPUT
+            echo "run-release=true"                                      >> $GITHUB_OUTPUT
+            echo "concurrency-group=washington-release-${RELEASE_SLUG}" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           if [[ "$EVENT" == "workflow_dispatch" ]]; then
             INPUT_REF="${{ github.event.inputs.branch }}"
             ACTUAL_REF="${INPUT_REF:-$REF}"
+            MARAUDER_TAG="${{ github.event.inputs.marauder_tag }}"
+            INPUT_VERSION="${{ github.event.inputs.version }}"
+
+            # ── Production tag guards ────────────────────────────────────────
+
+            # Reject production-format version input
+            if [[ -n "$INPUT_VERSION" ]]; then
+              if echo "$INPUT_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                git fetch --tags --quiet
+                if git ls-remote --tags origin | grep -q "refs/tags/v${INPUT_VERSION}$"; then
+                  echo "ERROR: '$INPUT_VERSION' is a production-format version and tag v${INPUT_VERSION} already exists. Aborting to prevent overriding a production artifact."
+                  exit 1
+                else
+                  echo "WARNING: '$INPUT_VERSION' is a production-format version but tag does not exist yet. Proceeding as test run."
+                fi
+              fi
+            fi
+
+            # Reject production-format marauder tag if it already exists
+            if [[ -n "$MARAUDER_TAG" ]]; then
+              if echo "$MARAUDER_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+                git fetch --tags --quiet
+                if git ls-remote --tags origin | grep -q "refs/tags/${MARAUDER_TAG}$"; then
+                  echo "ERROR: '$MARAUDER_TAG' is a production-format tag and already exists. Aborting to prevent overriding a production artifact."
+                  exit 1
+                else
+                  echo "WARNING: '$MARAUDER_TAG' is a production-format tag but does not exist yet. Proceeding as test run."
+                fi
+              fi
+            fi
+
+            # Any manual dispatch is always a test run — no versioning, no release, no Helm
+            echo "is-test-run=true" >> $GITHUB_OUTPUT
+
             if [[ "$ACTUAL_REF" == feature/* ]]; then
               BRANCH_SLUG=$(echo "$ACTUAL_REF" | sed 's|feature/||' | sed 's|[^a-zA-Z0-9]|-|g')
               echo "branch-type=feature"                                             >> $GITHUB_OUTPUT
@@ -132,26 +163,46 @@ jobs:
               echo "hanoi-target=$ACTUAL_REF"                                        >> $GITHUB_OUTPUT
               echo "run-versioning=false"                                            >> $GITHUB_OUTPUT
               echo "run-release=false"                                               >> $GITHUB_OUTPUT
+              echo "concurrency-group=washington-feature-${BRANCH_SLUG}"            >> $GITHUB_OUTPUT
             elif [[ "$ACTUAL_REF" == "develop" ]]; then
               echo "branch-type=develop"                              >> $GITHUB_OUTPUT
               echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
               echo "hanoi-target=develop"                            >> $GITHUB_OUTPUT
               echo "run-versioning=false"                            >> $GITHUB_OUTPUT
-              echo "run-release=true"                                >> $GITHUB_OUTPUT
+              echo "run-release=false"                               >> $GITHUB_OUTPUT
+              echo "concurrency-group=washington-develop"            >> $GITHUB_OUTPUT
             elif [[ "$ACTUAL_REF" == release/* ]]; then
-              echo "branch-type=release"      >> $GITHUB_OUTPUT
-              echo "image-tag-prefix="        >> $GITHUB_OUTPUT
-              echo "hanoi-target=$ACTUAL_REF" >> $GITHUB_OUTPUT
-              echo "run-versioning=true"      >> $GITHUB_OUTPUT
-              echo "run-release=true"         >> $GITHUB_OUTPUT
+              RELEASE_SLUG=$(echo "$ACTUAL_REF" | sed 's|release/||' | sed 's|[^a-zA-Z0-9]|-|g')
+              echo "branch-type=release"                                   >> $GITHUB_OUTPUT
+              echo "image-tag-prefix="                                     >> $GITHUB_OUTPUT
+              echo "hanoi-target=$ACTUAL_REF"                             >> $GITHUB_OUTPUT
+              echo "run-versioning=false"                                  >> $GITHUB_OUTPUT
+              echo "run-release=false"                                     >> $GITHUB_OUTPUT
+              echo "concurrency-group=washington-release-${RELEASE_SLUG}" >> $GITHUB_OUTPUT
             fi
             echo "should-build=true" >> $GITHUB_OUTPUT
           fi
 
-  versioning:
-    name: Versioning
+  gate:
+    name: Serialisation Gate
     needs: branch-context
     if: always() && needs.branch-context.outputs.should-build == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ${{ needs.branch-context.outputs.concurrency-group }}
+      cancel-in-progress: false
+    steps:
+      - name: Acquired concurrency slot
+        run: echo "Concurrency group ${{ needs.branch-context.outputs.concurrency-group }} acquired"
+
+  versioning:
+    name: Versioning
+    needs: [branch-context, gate]
+    if: |
+      always() &&
+      needs.branch-context.outputs.should-build == 'true' &&
+      needs.branch-context.outputs.is-test-run == 'false' &&
+      needs.gate.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       next-version:  ${{ steps.next-version.outputs.next-version }}
@@ -249,8 +300,8 @@ jobs:
 
   build:
     name: Build and Push Image
-    needs: [branch-context, versioning]
-    if: always() && needs.branch-context.outputs.should-build == 'true'
+    needs: [branch-context, gate, versioning]
+    if: always() && needs.branch-context.outputs.should-build == 'true' && needs.gate.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       combined-tag: ${{ steps.tags.outputs.combined_tag }}
@@ -260,20 +311,46 @@ jobs:
       - name: Checkout Washington
         uses: actions/checkout@v4
 
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.VUNET_NEW_CICD_APP_ID }}
+          private-key: ${{ secrets.VUNET_NEW_CICD_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: marauder
+
       - name: Resolve Marauder version
         run: |
+          BRANCH_TYPE='${{ needs.branch-context.outputs.branch-type }}'
+
+          if [[ "$BRANCH_TYPE" == "feature" ]]; then
+            echo "MARAUDER_VERSION=none" >> $GITHUB_ENV
+            echo "MARAUDER_TARBALL="     >> $GITHUB_ENV
+            echo "Skipping Marauder resolution for feature branch build"
+            exit 0
+          fi
+
           if [[ "${{ github.event_name }}" == "repository_dispatch" ]]; then
             MARAUDER_VERSION="${{ github.event.client_payload.release_tag }}"
             MARAUDER_TARBALL="${{ github.event.client_payload.tarball }}"
+            echo "repository_dispatch: using Marauder tag $MARAUDER_VERSION"
+
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.marauder_tag }}" ]]; then
+            MARAUDER_VERSION="${{ github.event.inputs.marauder_tag }}"
+            MARAUDER_TARBALL="marauder-plugins-${MARAUDER_VERSION}.tar.gz"
+            echo "Manual trigger: using explicit Marauder tag $MARAUDER_VERSION"
+
           else
             MARAUDER_VERSION="$(
               curl -fsSL \
-                -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Authorization: Bearer ${{ steps.app-token.outputs.token }}" \
                 -H "Accept: application/vnd.github+json" \
                 https://api.github.com/repos/vunetsystems/marauder/releases/latest \
               | jq -r '.tag_name'
             )"
             MARAUDER_TARBALL="marauder-plugins-${MARAUDER_VERSION}.tar.gz"
+            echo "Resolved latest Marauder: $MARAUDER_VERSION"
           fi
 
           if [ -z "$MARAUDER_VERSION" ] || [ "$MARAUDER_VERSION" == "null" ]; then
@@ -300,17 +377,23 @@ jobs:
           fi
 
           echo "combined_tag=$COMBINED_TAG" >> $GITHUB_OUTPUT
+
           echo "tags<<EOF" >> $GITHUB_OUTPUT
-          echo "${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+          if [ "$BRANCH_TYPE" != "feature" ]; then
+            echo "${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+          fi
           echo "${{ env.IMAGE_NAME }}:$COMBINED_TAG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Set Keycloak version
-        if: needs.branch-context.outputs.run-versioning == 'true' || github.event.inputs.version != ''
+        if: needs.branch-context.outputs.run-versioning == 'true'
         run: ./set-version.sh ${{ needs.versioning.outputs.patch-version }}
 
       - name: Build Keycloak
         uses: ./.github/actions/build-keycloak
+
+      - name: Copy Keycloak dist into Docker context
+        run: cp quarkus/dist/target/keycloak-*.tar.gz quarkus/container/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -357,10 +440,12 @@ jobs:
 
   helm-update:
     name: Update Hanoi Helm Charts
-    needs: [branch-context, build]
+    needs: [branch-context, gate, build]
     if: |
       always() &&
       needs.branch-context.outputs.should-build == 'true' &&
+      needs.branch-context.outputs.is-test-run == 'false' &&
+      needs.gate.result == 'success' &&
       needs.build.result == 'success'
     runs-on: ubuntu-latest
     env:
@@ -431,11 +516,13 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [branch-context, build, versioning, helm-update]
+    needs: [branch-context, gate, build, versioning, helm-update]
     if: |
       always() &&
       needs.branch-context.outputs.run-release == 'true' &&
+      needs.branch-context.outputs.is-test-run == 'false' &&
       needs.branch-context.outputs.branch-type != 'feature' &&
+      needs.gate.result == 'success' &&
       needs.build.result == 'success' &&
       needs.helm-update.result == 'success'
     runs-on: ubuntu-latest
@@ -460,11 +547,23 @@ jobs:
           PATCH="${{ needs.versioning.outputs.patch-version }}"
           git config user.email "github-actions@noreply.github.com"
           git config user.name "github-actions[bot]"
-          git tag "v${PATCH}"
-          git push origin "v${PATCH}"
+
+          if git tag "v${PATCH}" 2>/dev/null; then
+            git push origin "v${PATCH}"
+          else
+            echo "Tag v${PATCH} already exists, skipping tag creation"
+            exit 0
+          fi
+
           PRERELEASE_FLAG=""
           [ "${{ needs.branch-context.outputs.branch-type }}" == "develop" ] && PRERELEASE_FLAG="--prerelease"
           ARTIFACTS=$(ls dist/keycloak-*.tar.gz 2>/dev/null | xargs -I{} echo "{}" || true)
+
+          if gh release view "v${PATCH}" > /dev/null 2>&1; then
+            echo "Release v${PATCH} already exists, skipping release creation"
+            exit 0
+          fi
+
           gh release create "v${PATCH}" \
             --title "Release v${PATCH}" \
             --generate-notes \
@@ -482,6 +581,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       success() &&
+      needs.branch-context.outputs.is-test-run == 'false' &&
       needs.versioning.outputs.jira-ticket != ''
     env:
       JIRA_URL:       ${{ secrets.JIRA_URL }}
@@ -522,6 +622,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       failure() &&
+      needs.branch-context.outputs.is-test-run == 'false' &&
       needs.versioning.outputs.jira-ticket != ''
     env:
       JIRA_URL:       ${{ secrets.JIRA_URL }}
