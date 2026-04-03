@@ -495,7 +495,7 @@ jobs:
 
           echo "combined_tag=$COMBINED_TAG" >> $GITHUB_OUTPUT
           echo "tags<<EOF" >> $GITHUB_OUTPUT
-          if [ "$BRANCH_TYPE" != "feature" ]; then
+          if [ "$BRANCH_TYPE" == "develop" ] && [ "${{ needs.branch-context.outputs.is-test-run }}" == "false" ]; then
             echo "${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
           fi
           echo "${{ env.IMAGE_NAME }}:$COMBINED_TAG" >> $GITHUB_OUTPUT
@@ -754,18 +754,18 @@ jobs:
             git config user.email "github-actions@noreply.github.com"
             git config user.name "github-actions[bot]"
 
-            # Guard against duplicate tags
-            if git tag "v${VERSION}" 2>/dev/null; then
-              git push origin "v${VERSION}"
-            else
-              echo "Tag v${VERSION} already exists, skipping."
-              exit 0
-            fi
-
-            # Guard against duplicate releases
+            # Guard against duplicate releases before creating or pushing tags.
             if gh release view "v${VERSION}" > /dev/null 2>&1; then
               echo "Release v${VERSION} already exists, skipping."
               exit 0
+            fi
+
+            # Only create and push the tag if it does not already exist remotely.
+            if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q "refs/tags/v${VERSION}$"; then
+              echo "Remote tag v${VERSION} already exists, reusing it."
+            else
+              git tag "v${VERSION}"
+              git push origin "v${VERSION}"
             fi
 
             gh release create "v${VERSION}" \
