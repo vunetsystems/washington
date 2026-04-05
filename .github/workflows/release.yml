@@ -96,10 +96,10 @@ jobs:
               exit 0
             fi
             echo "branch-type=release"        >> $GITHUB_OUTPUT
-            echo "should-build=false"         >> $GITHUB_OUTPUT
+            echo "should-build=true"          >> $GITHUB_OUTPUT
             echo "run-release-retag=true"     >> $GITHUB_OUTPUT
-            echo "run-versioning=false"       >> $GITHUB_OUTPUT
-            echo "run-release=false"          >> $GITHUB_OUTPUT
+            echo "run-versioning=true"        >> $GITHUB_OUTPUT
+            echo "run-release=true"           >> $GITHUB_OUTPUT
             echo "ref-name=$REF"              >> $GITHUB_OUTPUT
             RELEASE_SLUG=$(echo "$REF" | sed 's|release/||' | sed 's|[^a-zA-Z0-9]|-|g')
             echo "concurrency-group=washington-release-${RELEASE_SLUG}" >> $GITHUB_OUTPUT
@@ -317,12 +317,13 @@ jobs:
   # ---------------------------------------------------------------------------
   versioning:
     name: Versioning
-    needs: [branch-context, gate]
+    needs: [branch-context, gate, release-retag]
     if: |
       always() &&
       needs.branch-context.outputs.should-build == 'true' &&
       needs.branch-context.outputs.is-test-run == 'false' &&
-      needs.gate.result == 'success'
+      needs.gate.result == 'success' &&
+      !contains(fromJSON('["failure", "cancelled"]'), needs.release-retag.result)
     runs-on: ubuntu-latest
     outputs:
       # Track A — Keycloak version
@@ -340,7 +341,8 @@ jobs:
       - name: Checkout Washington
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.branch-context.outputs.checkout-ref }}
+          ref: ${{ needs.branch-context.outputs.ref-name }}
+          fetch-depth: 0
 
       - name: Extract Jira Ticket
         id: extract-jira
