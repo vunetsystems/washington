@@ -274,13 +274,24 @@ jobs:
         env:
           VERSION: ${{ steps.rel.outputs.version }}
 
-      - name: Commit and push .version to release branch
+      - name: Update pom.xml version for release branch
+        env:
+          VERSION: ${{ steps.rel.outputs.version }}
+        run: |
+          if [ -x "./set-version.sh" ]; then
+            ./set-version.sh "${VERSION}"
+            echo "Updated pom.xml to ${VERSION}"
+          else
+            echo "set-version.sh not found; skipping pom.xml update"
+          fi
+
+      - name: Commit and push version changes to release branch
         env:
           VERSION: ${{ steps.rel.outputs.version }}
         run: |
           git config user.name "vunet-new-ci-cd-bot[bot]"
           git config user.email "vunet-new-ci-cd-bot@users.noreply.github.com"
-          git add resources/.version
+          git add -A
           git diff --cached --quiet || {
             git commit -m "chore: bump washington version to v${VERSION} [skip ci]"
             git push origin HEAD:${{ needs.branch-context.outputs.ref-name }}
