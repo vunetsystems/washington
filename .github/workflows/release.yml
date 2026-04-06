@@ -1,5 +1,21 @@
 name: Build Washington Images
 
+# Release line behavior (both use `push` to `release/**` — branch creation also sends
+# a push, so we do not add `create:` which would duplicate runs with that first push):
+#
+# 1) New release branch (first push: github.event.before is all zeros)
+#    - release-retag aligns resources/.version platform line to NG {release}.0 from the branch name
+#    - versioning keeps that platform semver for this run (no patch bump yet) so the image/Hanoi
+#      match the freshly established line; Keycloak patch still follows git tags as usual
+#
+# 2) Later pushes to the same release branch
+#    - retag is a no-op when already on the line
+#    - versioning bumps the platform patch in .version, then build + Hanoi update as usual
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Do not cancel in-flight release builds when a follow-up push arrives (e.g. bot crt bump).
+  cancel-in-progress: false
+
 on:
   pull_request:
     types:
@@ -10,8 +26,6 @@ on:
   push:
     branches:
       - 'release/**'
-
-  create:
 
   workflow_dispatch:
     inputs:
@@ -85,26 +99,12 @@ jobs:
           echo "ref-name=$REF"           >> $GITHUB_OUTPUT
           echo "checkout-ref=$DEFAULT_CHECKOUT_REF" >> $GITHUB_OUTPUT
 
-          if [[ "$EVENT" == "push" && "$COMMIT_MSG" == chore:\ bump\ washington\ version\ to\ v* ]]; then
-            echo "Detected CI bump commit; skipping."
-            exit 0
-          fi
-
-          if [[ "$EVENT" == "create" ]]; then
-            if [[ "$REF" != release/* ]]; then
-              echo "create event for non-release ref ($REF); skipping."
+          # Skip bot/version-only commits (must not re-trigger full pipeline or duplicate Hanoi updates)
+          if [[ "$EVENT" == "push" ]]; then
+            if [[ "$COMMIT_MSG" == *"[skip ci]"* ]] || [[ "$COMMIT_MSG" =~ ^chore:\ bump\ washington\ version\ to\ v ]]; then
+              echo "Detected CI bump commit; skipping workflow."
               exit 0
             fi
-            echo "branch-type=release"        >> $GITHUB_OUTPUT
-            echo "should-build=true"          >> $GITHUB_OUTPUT
-            echo "run-release-retag=true"     >> $GITHUB_OUTPUT
-            echo "run-versioning=true"        >> $GITHUB_OUTPUT
-            echo "run-release=true"           >> $GITHUB_OUTPUT
-            echo "ref-name=$REF"              >> $GITHUB_OUTPUT
-            RELEASE_SLUG=$(echo "$REF" | sed 's|release/||' | sed 's|[^a-zA-Z0-9]|-|g')
-            echo "concurrency-group=washington-release-${RELEASE_SLUG}" >> $GITHUB_OUTPUT
-            echo "checkout-ref=$REF"         >> $GITHUB_OUTPUT
-            exit 0
           fi
 
           if [[ "$EVENT" == "repository_dispatch" ]]; then
@@ -154,6 +154,8 @@ jobs:
             echo "is-test-run=false"                                     >> $GITHUB_OUTPUT
             echo "run-versioning=true"                                   >> $GITHUB_OUTPUT
             echo "run-release=true"                                      >> $GITHUB_OUTPUT
+            # Align resources/.version platform line with branch (crt) before build; idempotent in job
+            echo "run-release-retag=true"                                >> $GITHUB_OUTPUT
             echo "concurrency-group=washington-release-${RELEASE_SLUG}" >> $GITHUB_OUTPUT
             echo "ref-name=$REF"                                        >> $GITHUB_OUTPUT
             echo "checkout-ref=$DEFAULT_CHECKOUT_REF"                   >> $GITHUB_OUTPUT
@@ -225,10 +227,10 @@ jobs:
   # 2. RELEASE RETAG
   # ---------------------------------------------------------------------------
   release-retag:
-    name: Release Retag (on release branch create)
+    name: Release Retag (crt .version from release branch name)
     needs: [branch-context]
     if: |
-      github.event_name == 'create' &&
+      github.event_name == 'push' &&
       needs.branch-context.outputs.run-release-retag == 'true' &&
       startsWith(needs.branch-context.outputs.ref-name, 'release/')
     runs-on: ubuntu-latest
@@ -249,32 +251,53 @@ jobs:
           ref: ${{ needs.branch-context.outputs.checkout-ref }}
           fetch-depth: 0
 
-      - name: Derive platform version from branch name
+      - name: Align crt .version with release branch (idempotent)
         id: rel
-        run: |
-          # release/3.2 → REL=3.2 → VERSION=3.2.0
-          REL="${{ needs.branch-context.outputs.ref-name }}"
-          REL="${REL#release/}"
-          VERSION="${REL}.0"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Derived initial platform version: ${VERSION}"
-
-      - name: Write initial platform version to .version
         shell: python
         run: |
-          import json, os
-          version = os.environ["VERSION"]
-          with open("resources/.version") as f:
-            data = json.load(f)
+          import json, os, re, sys
+
+          ref = os.environ["REF_NAME"].strip()
+          if not ref.startswith("release/"):
+              print("Not a release ref; skipping.")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("needed=false\n")
+              sys.exit(0)
+
+          rel = ref.removeprefix("release/").strip()
+          # Match existing convention: release/106.0 → 106.0.0 ; release/3.2 → 3.2.0
+          base_semver = f"{rel}.0"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"version={base_semver}\n")
+
+          path = "resources/.version"
+          try:
+              with open(path) as f:
+                  data = json.load(f)
+          except (FileNotFoundError, json.JSONDecodeError):
+              data = {}
+          raw = (data.get("platform_info") or {}).get("version") or ""
+          raw = raw.strip()
+
+          # Already on this release line (e.g. NG 106.0.3 after commit-bumps)? Do not reset.
+          if raw and re.match(rf"^NG\s+{re.escape(rel)}\.\d+\s*$", raw):
+              print(f"crt .version already on release line {rel}: {raw} — skip")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("needed=false\n")
+              sys.exit(0)
+
           data.setdefault("platform_info", {})
-          data["platform_info"]["version"] = f"NG {version}"
-          with open("resources/.version", "w") as f:
-            json.dump(data, f, indent=2)
-          print(f"Written .version: NG {version}")
+          data["platform_info"]["version"] = f"NG {base_semver}"
+          with open(path, "w") as f:
+              json.dump(data, f, indent=2)
+          print(f"Wrote crt .version: NG {base_semver} (was: {raw!r})")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("needed=true\n")
         env:
-          VERSION: ${{ steps.rel.outputs.version }}
+          REF_NAME: ${{ needs.branch-context.outputs.ref-name }}
 
       - name: Update pom.xml version for release branch
+        if: steps.rel.outputs.needed == 'true'
         env:
           VERSION: ${{ steps.rel.outputs.version }}
         run: |
@@ -286,6 +309,7 @@ jobs:
           fi
 
       - name: Commit and push version changes to release branch
+        if: steps.rel.outputs.needed == 'true'
         env:
           VERSION: ${{ steps.rel.outputs.version }}
         run: |
@@ -336,6 +360,8 @@ jobs:
       platform-version: ${{ steps.platform-version.outputs.version }}
     env:
       MINOR_RELEASE: ${{ contains(github.event.head_commit.message, '[release]') || contains(github.event.pull_request.title, '[release]') }}
+      # First push to a new release/** ref (before SHA is all zeros) — platform patch bump is deferred; see header.
+      FIRST_RELEASE_PUSH: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/') && github.event.before == '0000000000000000000000000000000000000000' }}
 
     steps:
       - name: Checkout Washington
@@ -414,21 +440,27 @@ jobs:
           if not match:
             raise Exception(f"Invalid platform version format in .version: {raw}")
           current = match.group(0)  # e.g. "3.1.0"
-          major, minor, patch = map(int, current.split("."))
+          first_release_push = os.environ.get("FIRST_RELEASE_PUSH", "false") == "true"
 
-          minor_release = os.environ.get("MINOR_RELEASE", "false") == "true"
-          if minor_release:
-            minor += 1
-            patch = 0
+          if first_release_push:
+            next_ver = current
+            print(f"Platform version (first push to release branch): {next_ver} (no bump)")
           else:
-            patch += 1
+            major, minor, patch = map(int, current.split("."))
+            minor_release = os.environ.get("MINOR_RELEASE", "false") == "true"
+            if minor_release:
+              minor += 1
+              patch = 0
+            else:
+              patch += 1
+            next_ver = f"{major}.{minor}.{patch}"
+            print(f"Platform version: {current} → {next_ver}")
 
-          next_ver = f"{major}.{minor}.{patch}"
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
             f.write(f"version={next_ver}\n")
-          print(f"Platform version: {current} → {next_ver}")
         env:
           MINOR_RELEASE: ${{ env.MINOR_RELEASE }}
+          FIRST_RELEASE_PUSH: ${{ env.FIRST_RELEASE_PUSH }}
 
   # ---------------------------------------------------------------------------
   # 5. BUILD
@@ -527,14 +559,20 @@ jobs:
           IMAGE_TAG_PREFIX='${{ needs.branch-context.outputs.image-tag-prefix }}'
           BRANCH_TYPE='${{ needs.branch-context.outputs.branch-type }}'
           KEYCLOAK_VER='${{ needs.versioning.outputs.keycloak-version }}'
+          PLATFORM_VER='${{ needs.versioning.outputs.platform-version }}'
+          RUN_NUM='${{ github.run_number }}'
 
-          # Release real run  → Keycloak version e.g. 25.0.4
-          # Release test run  → image-tag-prefix e.g. release-3-2-b210 (never empty)
+          # Release: registry tag = NG-<platform>-b<run> (e.g. NG-111.0.0-b12345); Dockerfile KEYCLOAK_VERSION arg stays the Keycloak semver.
           # Develop / feature → image-tag-prefix e.g. main-b210
-          if [ "$BRANCH_TYPE" == "release" ] && [ -n "$KEYCLOAK_VER" ]; then
+          if [ "$BRANCH_TYPE" == "release" ] && [ -n "$KEYCLOAK_VER" ] && [ -n "$PLATFORM_VER" ]; then
+            COMBINED_TAG="NG-${PLATFORM_VER}-b${RUN_NUM}"
+            echo "keycloak_version_for_docker=$KEYCLOAK_VER" >> $GITHUB_OUTPUT
+          elif [ "$BRANCH_TYPE" == "release" ] && [ -n "$KEYCLOAK_VER" ]; then
             COMBINED_TAG="$KEYCLOAK_VER"
+            echo "keycloak_version_for_docker=$KEYCLOAK_VER" >> $GITHUB_OUTPUT
           else
             COMBINED_TAG="$IMAGE_TAG_PREFIX"
+            echo "keycloak_version_for_docker=$COMBINED_TAG" >> $GITHUB_OUTPUT
           fi
 
           echo "combined_tag=$COMBINED_TAG" >> $GITHUB_OUTPUT
@@ -579,7 +617,7 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
-            KEYCLOAK_VERSION=${{ steps.tags.outputs.combined_tag }}
+            KEYCLOAK_VERSION=${{ steps.tags.outputs.keycloak_version_for_docker }}
             MARAUDER_VERSION=${{ env.MARAUDER_VERSION }}
             MARAUDER_TARBALL=${{ env.MARAUDER_TARBALL }}
 
@@ -616,8 +654,6 @@ jobs:
       needs.gate.result == 'success' &&
       needs.build.result == 'success'
     runs-on: ubuntu-latest
-    env:
-      HANOI_TARGET: ${{ needs.branch-context.outputs.hanoi-target }}
 
     steps:
       - name: Generate GitHub App Token
@@ -645,11 +681,18 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Hanoi branch
+        env:
+          HANOI_TARGET: ${{ needs.branch-context.outputs.hanoi-target }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           cd hanoi
           git config user.name "vunet-new-ci-cd-bot[bot]"
           git config user.email "vunet-new-ci-cd-bot@users.noreply.github.com"
-          TARGET="${{ env.HANOI_TARGET }}"
+          TARGET="${HANOI_TARGET:-$REF_NAME}"
+          if [[ -z "$TARGET" ]]; then
+            echo "ERROR: Hanoi target branch is empty (HANOI_TARGET / REF_NAME)."
+            exit 1
+          fi
           git fetch origin
           if git ls-remote --heads origin "$TARGET" | grep -q "$TARGET"; then
             git checkout "$TARGET"
