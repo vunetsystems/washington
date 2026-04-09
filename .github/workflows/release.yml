@@ -716,7 +716,7 @@ jobs:
       needs.branch-context.outputs.branch-type == 'release' &&
       needs.versioning.outputs.keycloak-version != '' &&
       needs.build.result == 'success' &&
-      (needs.helm-update.result == 'success' || needs.helm-update.result == 'skipped')
+      (needs.helm-update.result == 'success' || needs.helm-update.result == 'skipped') &&
       (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
