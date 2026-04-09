@@ -776,12 +776,14 @@ jobs:
         run: |
           git config user.name "vunet-new-ci-cd-bot[bot]"
           git config user.email "vunet-new-ci-cd-bot@users.noreply.github.com"
-          git pull --rebase origin ${{ needs.branch-context.outputs.ref-name }}
           git add -A
-          git diff --cached --quiet || {
-            git commit -m "chore: bump washington version to v${{ needs.versioning.outputs.platform-version }} [skip ci]"
-            git push origin HEAD:${{ needs.branch-context.outputs.ref-name }}
-          }
+          if git diff --cached --quiet; then
+            echo "No changes detected, skipping commit/push."
+            exit 0
+          fi
+          git commit -m "chore: bump washington version to v${{ needs.versioning.outputs.platform-version }} [skip ci]"
+          git pull --rebase origin ${{ needs.branch-context.outputs.ref-name }}
+          git push origin HEAD:${{ needs.branch-context.outputs.ref-name }}
 
   # ---------------------------------------------------------------------------
   # 8. RELEASE
