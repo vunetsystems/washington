@@ -627,8 +627,7 @@ jobs:
       needs.branch-context.outputs.should-build == 'true' &&
       needs.branch-context.outputs.is-test-run == 'false' &&
       needs.gate.result == 'success' &&
-      needs.build.result == 'success' &&
-      github.event_name != 'push'
+      needs.build.result == 'success'
     runs-on: ubuntu-latest
     env:
       HANOI_TARGET: ${{ needs.branch-context.outputs.hanoi-target }}
@@ -716,7 +715,7 @@ jobs:
       needs.branch-context.outputs.branch-type == 'release' &&
       needs.versioning.outputs.keycloak-version != '' &&
       needs.build.result == 'success' &&
-      (needs.helm-update.result == 'success' || needs.helm-update.result == 'skipped') &&
+      needs.helm-update.result == 'success' &&
       (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
@@ -799,7 +798,7 @@ jobs:
       needs.branch-context.outputs.is-test-run == 'false' &&
       needs.gate.result == 'success' &&
       needs.build.result == 'success' &&
-      (needs.helm-update.result == 'success' || needs.helm-update.result == 'skipped')
+      needs.helm-update.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
