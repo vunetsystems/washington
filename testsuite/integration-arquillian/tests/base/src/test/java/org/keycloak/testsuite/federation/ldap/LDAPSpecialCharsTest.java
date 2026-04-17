@@ -17,12 +17,10 @@
 
 package org.keycloak.testsuite.federation.ldap;
 
-import org.junit.Assert;
-import org.junit.ClassRule;
-import org.junit.FixMethodOrder;
-import org.junit.Test;
-import org.junit.runners.MethodSorters;
-import org.keycloak.OAuth2Constants;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.LDAPConstants;
@@ -40,9 +38,11 @@ import org.keycloak.testsuite.util.LDAPRule;
 import org.keycloak.testsuite.util.LDAPTestConfiguration;
 import org.keycloak.testsuite.util.LDAPTestUtils;
 
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
+import org.junit.Assert;
+import org.junit.ClassRule;
+import org.junit.FixMethodOrder;
+import org.junit.Test;
+import org.junit.runners.MethodSorters;
 
 import static org.keycloak.testsuite.util.LDAPTestUtils.getGroupDescriptionLDAPAttrName;
 
@@ -131,7 +131,7 @@ public class LDAPSpecialCharsTest extends AbstractLDAPTest {
         // Success login as username exactly match
         loginPage.login("jamees,key*cložak)ppp", "Password1");
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
     }
 
 
@@ -223,7 +223,7 @@ public class LDAPSpecialCharsTest extends AbstractLDAPTest {
             // Success login as username exactly match
             loginPage.login("jamees,key*cložak)ppp", "Password1");
             Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-            Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+            Assert.assertNotNull(oauth.parseLoginResponse().getCode());
         } finally {
             // Revert config changes to be back to previous UUID attribute
             ComponentRepresentation ldapRep = testRealm().components().component(ldapModelId).toRepresentation();

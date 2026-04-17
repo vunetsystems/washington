@@ -17,45 +17,8 @@
 
 package org.keycloak.models.utils;
 
-import static java.util.Optional.ofNullable;
-import static org.keycloak.models.utils.StripSecretsUtils.stripSecrets;
-
-import org.jboss.logging.Logger;
-import org.keycloak.Config;
-import org.keycloak.authentication.otp.OTPApplicationProvider;
-import org.keycloak.authorization.AuthorizationProvider;
-import org.keycloak.authorization.AuthorizationProviderFactory;
-import org.keycloak.authorization.model.PermissionTicket;
-import org.keycloak.authorization.model.Policy;
-import org.keycloak.authorization.model.Resource;
-import org.keycloak.authorization.model.ResourceServer;
-import org.keycloak.authorization.model.Scope;
-import org.keycloak.authorization.policy.provider.PolicyProviderFactory;
-import org.keycloak.authorization.store.PolicyStore;
-import org.keycloak.authorization.store.StoreFactory;
-import org.keycloak.common.Profile;
-import org.keycloak.common.util.MultivaluedHashMap;
-import org.keycloak.common.util.Time;
-import org.keycloak.component.ComponentModel;
-import org.keycloak.credential.CredentialMetadata;
-import org.keycloak.credential.CredentialModel;
-import org.keycloak.deployment.DeployedConfigurationsManager;
-import org.keycloak.events.Event;
-import org.keycloak.events.admin.AdminEvent;
-import org.keycloak.events.admin.AuthDetails;
-import org.keycloak.models.*;
-import org.keycloak.models.credential.OTPCredentialModel;
-import org.keycloak.models.light.LightweightUserAdapter;
-import org.keycloak.provider.ProviderConfigProperty;
-import org.keycloak.representations.account.CredentialMetadataRepresentation;
-import org.keycloak.representations.idm.*;
-import org.keycloak.representations.idm.authorization.*;
-import org.keycloak.storage.StorageId;
-import org.keycloak.util.JsonSerialization;
-import org.keycloak.utils.StringUtil;
-
-import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -67,8 +30,113 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.keycloak.Config;
+import org.keycloak.authentication.otp.OTPApplicationProvider;
+import org.keycloak.authorization.AuthorizationProvider;
+import org.keycloak.authorization.AuthorizationProviderFactory;
+import org.keycloak.authorization.fgap.AdminPermissionsSchema;
+import org.keycloak.authorization.model.PermissionTicket;
+import org.keycloak.authorization.model.Policy;
+import org.keycloak.authorization.model.Resource;
+import org.keycloak.authorization.model.ResourceServer;
+import org.keycloak.authorization.model.Scope;
+import org.keycloak.authorization.policy.provider.PolicyProviderFactory;
+import org.keycloak.authorization.store.PolicyStore;
+import org.keycloak.authorization.store.StoreFactory;
+import org.keycloak.broker.provider.util.IdentityProviderTypeUtil;
+import org.keycloak.common.Profile;
+import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.common.util.Time;
+import org.keycloak.component.ComponentModel;
+import org.keycloak.credential.CredentialMetadata;
+import org.keycloak.credential.CredentialModel;
+import org.keycloak.deployment.DeployedConfigurationsManager;
+import org.keycloak.events.Event;
+import org.keycloak.events.admin.AdminEvent;
+import org.keycloak.events.admin.AuthDetails;
+import org.keycloak.models.AuthenticatedClientSessionModel;
+import org.keycloak.models.AuthenticationExecutionModel;
+import org.keycloak.models.AuthenticationFlowModel;
+import org.keycloak.models.AuthenticatorConfigModel;
+import org.keycloak.models.CibaConfig;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientScopeModel;
+import org.keycloak.models.Constants;
+import org.keycloak.models.FederatedIdentityModel;
+import org.keycloak.models.GroupModel;
+import org.keycloak.models.IdentityProviderMapperModel;
+import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.IdentityProviderQuery;
+import org.keycloak.models.IdentityProviderType;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ModelException;
+import org.keycloak.models.ModelIllegalStateException;
+import org.keycloak.models.OTPPolicy;
+import org.keycloak.models.OrganizationDomainModel;
+import org.keycloak.models.OrganizationModel;
+import org.keycloak.models.ParConfig;
+import org.keycloak.models.ProtocolMapperModel;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.RequiredActionConfigModel;
+import org.keycloak.models.RequiredActionProviderModel;
+import org.keycloak.models.RequiredCredentialModel;
+import org.keycloak.models.RoleModel;
+import org.keycloak.models.UserConsentModel;
+import org.keycloak.models.UserCredentialModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
+import org.keycloak.models.WebAuthnPolicy;
+import org.keycloak.models.credential.OTPCredentialModel;
+import org.keycloak.models.light.LightweightUserAdapter;
+import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.representations.account.CredentialMetadataRepresentation;
+import org.keycloak.representations.account.LocalizedMessage;
+import org.keycloak.representations.idm.AdminEventRepresentation;
+import org.keycloak.representations.idm.AuthDetailsRepresentation;
+import org.keycloak.representations.idm.AuthenticationExecutionExportRepresentation;
+import org.keycloak.representations.idm.AuthenticationExecutionRepresentation;
+import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
+import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
+import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
+import org.keycloak.representations.idm.ComponentRepresentation;
+import org.keycloak.representations.idm.ConfigPropertyRepresentation;
+import org.keycloak.representations.idm.CredentialRepresentation;
+import org.keycloak.representations.idm.EventRepresentation;
+import org.keycloak.representations.idm.FederatedIdentityRepresentation;
+import org.keycloak.representations.idm.GroupRepresentation;
+import org.keycloak.representations.idm.IdentityProviderMapperRepresentation;
+import org.keycloak.representations.idm.IdentityProviderRepresentation;
+import org.keycloak.representations.idm.OrganizationDomainRepresentation;
+import org.keycloak.representations.idm.OrganizationRepresentation;
+import org.keycloak.representations.idm.ProtocolMapperRepresentation;
+import org.keycloak.representations.idm.RealmEventsConfigRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.idm.RequiredActionConfigRepresentation;
+import org.keycloak.representations.idm.RequiredActionProviderRepresentation;
+import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserConsentRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.representations.idm.UserSessionRepresentation;
+import org.keycloak.representations.idm.authorization.AbstractPolicyRepresentation;
+import org.keycloak.representations.idm.authorization.PermissionTicketRepresentation;
+import org.keycloak.representations.idm.authorization.PolicyRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceOwnerRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
+import org.keycloak.representations.idm.authorization.ScopeRepresentation;
+import org.keycloak.storage.StorageId;
+import org.keycloak.util.JsonSerialization;
+import org.keycloak.utils.StringUtil;
+
+import org.jboss.logging.Logger;
+
+import static java.util.Optional.ofNullable;
+
+import static org.keycloak.models.UserModel.IS_TEMP_ADMIN_ATTR_NAME;
 import static org.keycloak.models.light.LightweightUserAdapter.isLightweightUser;
-import static org.keycloak.models.Constants.IS_TEMP_ADMIN_ATTR_NAME;
+import static org.keycloak.models.utils.StripSecretsUtils.stripSecrets;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -84,12 +152,14 @@ public class ModelToRepresentation {
         REALM_EXCLUDED_ATTRIBUTES.add("bruteForceProtected");
         REALM_EXCLUDED_ATTRIBUTES.add("permanentLockout");
         REALM_EXCLUDED_ATTRIBUTES.add("maxTemporaryLockouts");
+        REALM_EXCLUDED_ATTRIBUTES.add("bruteForceStrategy");
         REALM_EXCLUDED_ATTRIBUTES.add("maxFailureWaitSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("waitIncrementSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("quickLoginCheckMilliSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("minimumQuickLoginWaitSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("maxDeltaTimeSeconds");
         REALM_EXCLUDED_ATTRIBUTES.add("failureFactor");
+        REALM_EXCLUDED_ATTRIBUTES.add("maxSecondaryAuthFailures");
         REALM_EXCLUDED_ATTRIBUTES.add("actionTokenGeneratedByAdminLifespan");
         REALM_EXCLUDED_ATTRIBUTES.add("actionTokenGeneratedByUserLifespan");
         REALM_EXCLUDED_ATTRIBUTES.add("offlineSessionMaxLifespanEnabled");
@@ -116,11 +186,18 @@ public class ModelToRepresentation {
         REALM_EXCLUDED_ATTRIBUTES.add("webAuthnPolicyCreateTimeoutPasswordless");
         REALM_EXCLUDED_ATTRIBUTES.add("webAuthnPolicyAvoidSameAuthenticatorRegisterPasswordless");
         REALM_EXCLUDED_ATTRIBUTES.add("webAuthnPolicyAcceptableAaguidsPasswordless");
+        REALM_EXCLUDED_ATTRIBUTES.add("webAuthnPolicyPasskeysEnabledPasswordless");
 
         REALM_EXCLUDED_ATTRIBUTES.add(Constants.CLIENT_POLICIES);
         REALM_EXCLUDED_ATTRIBUTES.add(Constants.CLIENT_PROFILES);
 
         REALM_EXCLUDED_ATTRIBUTES.add("firstBrokerLoginFlowId");
+
+        REALM_EXCLUDED_ATTRIBUTES.add("organizationsEnabled");
+        REALM_EXCLUDED_ATTRIBUTES.add("verifiableCredentialsEnabled");
+        REALM_EXCLUDED_ATTRIBUTES.add("adminPermissionsEnabled");
+        REALM_EXCLUDED_ATTRIBUTES.add("adminPermissionsClientId");
+        REALM_EXCLUDED_ATTRIBUTES.add("scimEnabled");
     }
 
     public static Set<String> CLIENT_EXCLUDED_ATTRIBUTES = new HashSet<>();
@@ -142,32 +219,32 @@ public class ModelToRepresentation {
         GroupRepresentation rep = new GroupRepresentation();
         rep.setId(group.getId());
         rep.setName(group.getName());
+        rep.setDescription(group.getDescription());
         rep.setPath(buildGroupPath(group));
         rep.setParentId(group.getParentId());
         if (!full) return rep;
-        // Role mappings
-        Set<RoleModel> roles = group.getRoleMappingsStream().collect(Collectors.toSet());
-        List<String> realmRoleNames = new ArrayList<>();
-        Map<String, List<String>> clientRoleNames = new HashMap<>();
-        for (RoleModel role : roles) {
-            if (role.getContainer() instanceof RealmModel) {
-                realmRoleNames.add(role.getName());
-            } else {
-                ClientModel client = (ClientModel)role.getContainer();
-                String clientId = client.getClientId();
-                List<String> currentClientRoles = clientRoleNames.computeIfAbsent(clientId, k -> new ArrayList<>());
-                currentClientRoles.add(role.getName());
+
+        if (GroupModel.Type.REALM.equals(group.getType())) {
+            // Role mappings
+            Set<RoleModel> roles = group.getRoleMappingsStream().collect(Collectors.toSet());
+            List<String> realmRoleNames = new ArrayList<>();
+            Map<String, List<String>> clientRoleNames = new HashMap<>();
+            for (RoleModel role : roles) {
+                if (role.getContainer() instanceof RealmModel) {
+                    realmRoleNames.add(role.getName());
+                } else {
+                    ClientModel client = (ClientModel) role.getContainer();
+                    String clientId = client.getClientId();
+                    List<String> currentClientRoles = clientRoleNames.computeIfAbsent(clientId, k -> new ArrayList<>());
+                    currentClientRoles.add(role.getName());
+                }
             }
+            rep.setRealmRoles(realmRoleNames);
+            rep.setClientRoles(clientRoleNames);
         }
-        rep.setRealmRoles(realmRoleNames);
-        rep.setClientRoles(clientRoleNames);
         Map<String, List<String>> attributes = group.getAttributes();
         rep.setAttributes(attributes);
         return rep;
-    }
-
-    public static Stream<GroupModel> searchGroupModelsByAttributes(KeycloakSession session, RealmModel realm, Map<String,String> attributes, Integer first, Integer max) {
-        return session.groups().searchGroupsByAttributes(realm, attributes, first, max);
     }
 
     @Deprecated
@@ -217,16 +294,28 @@ public class ModelToRepresentation {
         return group.getSubGroupsStream().findAny().isPresent();
     }
 
-
     public static UserRepresentation toRepresentation(KeycloakSession session, RealmModel realm, UserModel user) {
-        UserRepresentation rep = new UserRepresentation();
+        return toRepresentation(session, realm, user, new UserRepresentation(), true);
+    }
+
+    public static UserRepresentation toRepresentation(KeycloakSession session, RealmModel realm, UserModel user, UserRepresentation rep, boolean setUserAttributes) {
         rep.setId(user.getId());
-        rep.setUsername(user.getUsername());
+        if (setUserAttributes) {
+            rep.setUsername(user.getUsername());
+        }
         rep.setCreatedTimestamp(user.getCreatedTimestamp());
-        rep.setLastName(user.getLastName());
-        rep.setFirstName(user.getFirstName());
-        rep.setEmail(user.getEmail());
-        rep.setEnabled(user.isEnabled());
+        if (setUserAttributes) {
+            rep.setLastName(user.getLastName());
+        }
+        if (setUserAttributes) {
+            rep.setFirstName(user.getFirstName());
+        }
+        if (setUserAttributes) {
+            rep.setEmail(user.getEmail());
+        }
+        if (rep.isEnabled() == null) {
+            rep.setEnabled(user.isEnabled());
+        }
         rep.setEmailVerified(user.isEmailVerified());
         rep.setTotp(user.credentialManager().isConfiguredFor(OTPCredentialModel.TYPE));
         rep.setDisableableCredentialTypes(user.credentialManager()
@@ -235,37 +324,51 @@ public class ModelToRepresentation {
         rep.setNotBefore(isLightweightUser(user) ? ((LightweightUserAdapter) user).getCreatedTimestamp().intValue() : session.users().getNotBeforeOfUser(realm, user));
         rep.setRequiredActions(user.getRequiredActionsStream().collect(Collectors.toList()));
 
-        Map<String, List<String>> attributes = user.getAttributes();
-        Map<String, List<String>> copy = null;
+        if (setUserAttributes) {
+            Map<String, List<String>> attributes = user.getAttributes();
+            Map<String, List<String>> copy = null;
 
-        if (attributes != null) {
-            copy = new HashMap<>(attributes);
-            copy.remove(UserModel.LAST_NAME);
-            copy.remove(UserModel.FIRST_NAME);
-            copy.remove(UserModel.EMAIL);
-            copy.remove(UserModel.USERNAME);
-        }
-        if (attributes != null && !copy.isEmpty()) {
-            Map<String, List<String>> attrs = new HashMap<>(copy);
-            rep.setAttributes(attrs);
+            if (attributes != null) {
+                copy = new HashMap<>(attributes);
+                copy.remove(UserModel.LAST_NAME);
+                copy.remove(UserModel.FIRST_NAME);
+                copy.remove(UserModel.EMAIL);
+                copy.remove(UserModel.USERNAME);
+            }
+            if (attributes != null && !copy.isEmpty()) {
+                Map<String, List<String>> attrs = new HashMap<>(copy);
+                rep.setAttributes(attrs);
+            }
         }
 
         return rep;
     }
 
     public static UserRepresentation toBriefRepresentation(UserModel user) {
-        UserRepresentation rep = new UserRepresentation();
+        return toBriefRepresentation(user, new UserRepresentation(), true);
+    }
+
+    public static UserRepresentation toBriefRepresentation(UserModel user, UserRepresentation rep, boolean setUserAttributes) {
         rep.setId(user.getId());
-        rep.setUsername(user.getUsername());
+        if (setUserAttributes) {
+            rep.setUsername(user.getUsername());
+        }
         rep.setCreatedTimestamp(user.getCreatedTimestamp());
-        rep.setLastName(user.getLastName());
-        rep.setFirstName(user.getFirstName());
-        rep.setEmail(user.getEmail());
-        rep.setEnabled(user.isEnabled());
+        if (setUserAttributes) {
+            rep.setLastName(user.getLastName());
+        }
+        if (setUserAttributes) {
+            rep.setFirstName(user.getFirstName());
+        }
+        if (setUserAttributes) {
+            rep.setEmail(user.getEmail());
+        }
+        if (rep.isEnabled() == null) {
+            rep.setEnabled(user.isEnabled());
+        }
         rep.setEmailVerified(user.isEmailVerified());
         rep.setFederationLink(user.getFederationLink());
         addAttributeToBriefRep(user, rep, IS_TEMP_ADMIN_ATTR_NAME);
-
         return rep;
     }
 
@@ -281,6 +384,7 @@ public class ModelToRepresentation {
 
     public static EventRepresentation toRepresentation(Event event) {
         EventRepresentation rep = new EventRepresentation();
+        rep.setId(event.getId());
         rep.setTime(event.getTime());
         rep.setType(event.getType().toString());
         rep.setRealmId(event.getRealmId());
@@ -295,6 +399,7 @@ public class ModelToRepresentation {
 
     public static AdminEventRepresentation toRepresentation(AdminEvent adminEvent) {
         AdminEventRepresentation rep = new AdminEventRepresentation();
+        rep.setId(adminEvent.getId());
         rep.setTime(adminEvent.getTime());
         rep.setRealmId(adminEvent.getRealmId());
         if (adminEvent.getAuthDetails() != null) {
@@ -307,6 +412,7 @@ public class ModelToRepresentation {
         rep.setResourcePath(adminEvent.getResourcePath());
         rep.setRepresentation(adminEvent.getRepresentation());
         rep.setError(adminEvent.getError());
+        rep.setDetails(adminEvent.getDetails());
 
         return rep;
     }
@@ -372,12 +478,14 @@ public class ModelToRepresentation {
         rep.setBruteForceProtected(realm.isBruteForceProtected());
         rep.setPermanentLockout(realm.isPermanentLockout());
         rep.setMaxTemporaryLockouts(realm.getMaxTemporaryLockouts());
+        rep.setBruteForceStrategy(realm.getBruteForceStrategy());
         rep.setMaxFailureWaitSeconds(realm.getMaxFailureWaitSeconds());
         rep.setMinimumQuickLoginWaitSeconds(realm.getMinimumQuickLoginWaitSeconds());
         rep.setWaitIncrementSeconds(realm.getWaitIncrementSeconds());
         rep.setQuickLoginCheckMilliSeconds(realm.getQuickLoginCheckMilliSeconds());
         rep.setMaxDeltaTimeSeconds(realm.getMaxDeltaTimeSeconds());
         rep.setFailureFactor(realm.getFailureFactor());
+        rep.setMaxSecondaryAuthFailures(realm.getMaxSecondaryAuthFailures());
         if (Profile.isFeatureEnabled(Profile.Feature.AUTHORIZATION)) {
             rep.setUserManagedAccessAllowed(realm.isUserManagedAccessAllowed());
         } else {
@@ -402,6 +510,9 @@ public class ModelToRepresentation {
         rep.setResetPasswordAllowed(realm.isResetPasswordAllowed());
         rep.setEditUsernameAllowed(realm.isEditUsernameAllowed());
         rep.setOrganizationsEnabled(realm.isOrganizationsEnabled());
+        rep.setAdminPermissionsEnabled(realm.isAdminPermissionsEnabled());
+        rep.setVerifiableCredentialsEnabled(realm.isVerifiableCredentialsEnabled());
+        rep.setScimApiEnabled(realm.isScimApiEnabled());
         rep.setDefaultSignatureAlgorithm(realm.getDefaultSignatureAlgorithm());
         rep.setRevokeRefreshToken(realm.isRevokeRefreshToken());
         rep.setRefreshTokenMaxReuse(realm.getRefreshTokenMaxReuse());
@@ -477,6 +588,7 @@ public class ModelToRepresentation {
         rep.setWebAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister(webAuthnPolicy.isAvoidSameAuthenticatorRegister());
         rep.setWebAuthnPolicyPasswordlessAcceptableAaguids(webAuthnPolicy.getAcceptableAaguids());
         rep.setWebAuthnPolicyPasswordlessExtraOrigins(webAuthnPolicy.getExtraOrigins());
+        rep.setWebAuthnPolicyPasswordlessPasskeysEnabled(webAuthnPolicy.isPasskeysEnabled());
 
         CibaConfig cibaPolicy = realm.getCibaPolicy();
         Map<String, String> attrMap = ofNullable(rep.getAttributes()).orElse(new HashMap<>());
@@ -500,6 +612,14 @@ public class ModelToRepresentation {
 
         rep.setDefaultRole(toBriefRepresentation(realm.getDefaultRole()));
 
+        if (realm.getAdminPermissionsClient() != null) {
+            ClientModel adminPermissionsClient = realm.getAdminPermissionsClient();
+            ClientRepresentation clientRep = new ClientRepresentation();
+            clientRep.setId(adminPermissionsClient.getId());
+            clientRep.setClientId(adminPermissionsClient.getClientId());
+            rep.setAdminPermissionsClient(clientRep);
+        }
+
         List<String> defaultGroups = realm.getDefaultGroupsStream()
                 .map(ModelToRepresentation::buildGroupPath).collect(Collectors.toList());
         if (!defaultGroups.isEmpty()) {
@@ -514,8 +634,8 @@ public class ModelToRepresentation {
         }
 
         if (export) {
-            List<IdentityProviderRepresentation> identityProviders = session.identityProviders().getAllStream()
-                    .map(provider -> toRepresentation(realm, provider, export)).collect(Collectors.toList());
+            List<IdentityProviderRepresentation> identityProviders = session.identityProviders().getAllStream(IdentityProviderQuery.any())
+                    .map(provider -> toRepresentation(session, realm, provider, export)).collect(Collectors.toList());
             rep.setIdentityProviders(identityProviders);
             List<IdentityProviderMapperRepresentation> identityProviderMappers = session.identityProviders().getMappersStream()
                     .map(ModelToRepresentation::toRepresentation).collect(Collectors.toList());
@@ -523,7 +643,10 @@ public class ModelToRepresentation {
         }
 
         rep.setInternationalizationEnabled(realm.isInternationalizationEnabled());
-        rep.setSupportedLocales(realm.getSupportedLocalesStream().collect(Collectors.toSet()));
+        Set<String> supportedLocales = realm.getSupportedLocalesStream().collect(Collectors.toSet());
+        if (!supportedLocales.isEmpty()) {
+            rep.setSupportedLocales(supportedLocales);
+        }
         rep.setDefaultLocale(realm.getDefaultLocale());
         if (internal) {
             exportAuthenticationFlows(session, realm, rep);
@@ -650,28 +773,30 @@ public class ModelToRepresentation {
         rep.setCreatedDate(cred.getCreatedDate());
         rep.setSecretData(cred.getSecretData());
         rep.setCredentialData(cred.getCredentialData());
+        rep.setFederationLink(cred.getFederationLink());
         return rep;
+    }
+
+    private static LocalizedMessage toLocalizedMessage(CredentialMetadata.LocalizedMessage message) {
+        if (message == null) {
+            return null;
+        }
+        String[] parameters = message.getParameters() != null
+                ? Arrays.stream(message.getParameters()).map(Object::toString).toArray(String[]::new)
+                : null;
+        return new LocalizedMessage(message.getKey(), parameters);
     }
 
     public static CredentialMetadataRepresentation toRepresentation(CredentialMetadata credentialMetadata) {
         CredentialMetadataRepresentation rep = new CredentialMetadataRepresentation();
 
         rep.setCredential(ModelToRepresentation.toRepresentation(credentialMetadata.getCredentialModel()));
-        try {
-            rep.setInfoMessage(credentialMetadata.getInfoMessage() == null ? null : JsonSerialization.writeValueAsString(credentialMetadata.getInfoMessage()));
-        } catch (IOException e) {
-            LOG.warn("unable to serialize model information, skipping info message", e);
-        }
-        try {
-            rep.setWarningMessageDescription(credentialMetadata.getWarningMessageDescription() == null ? null : JsonSerialization.writeValueAsString(credentialMetadata.getWarningMessageDescription()));
-        } catch (IOException e) {
-            LOG.warn("unable to serialize model information, skipping warning message desc", e);
-        }
-        try {
-            rep.setWarningMessageTitle(credentialMetadata.getWarningMessageTitle() == null ? null : JsonSerialization.writeValueAsString(credentialMetadata.getWarningMessageTitle()));
-        } catch (IOException e) {
-            LOG.warn("unable to serialize model information, skipping warning message title", e);
-        }
+        rep.setInfoMessage(toLocalizedMessage(credentialMetadata.getInfoMessage()));
+        rep.setInfoProperties(credentialMetadata.getInfoProperties() == null ? null : credentialMetadata.getInfoProperties().stream()
+                .map(ModelToRepresentation::toLocalizedMessage)
+                .toList());
+        rep.setWarningMessageDescription(toLocalizedMessage(credentialMetadata.getWarningMessageDescription()));
+        rep.setWarningMessageTitle(toLocalizedMessage(credentialMetadata.getWarningMessageTitle()));
         return rep;
     }
 
@@ -821,11 +946,11 @@ public class ModelToRepresentation {
         return providerRep;
     }
 
-    public static IdentityProviderRepresentation toRepresentation(RealmModel realm, IdentityProviderModel identityProviderModel) {
-        return toRepresentation(realm, identityProviderModel, false);
+    public static IdentityProviderRepresentation toRepresentation(KeycloakSession session, RealmModel realm, IdentityProviderModel identityProviderModel) {
+        return toRepresentation(session, realm, identityProviderModel, false);
     }
 
-    public static IdentityProviderRepresentation toRepresentation(RealmModel realm, IdentityProviderModel identityProviderModel, boolean export) {
+    public static IdentityProviderRepresentation toRepresentation(KeycloakSession session, RealmModel realm, IdentityProviderModel identityProviderModel, boolean export) {
         IdentityProviderRepresentation providerRep = toBriefRepresentation(realm, identityProviderModel);
 
         providerRep.setLinkOnly(identityProviderModel.isLinkOnly());
@@ -836,11 +961,6 @@ public class ModelToRepresentation {
         Map<String, String> config = new HashMap<>(identityProviderModel.getConfig());
         providerRep.setConfig(config);
         providerRep.setAddReadTokenRoleOnCreate(identityProviderModel.isAddReadTokenRoleOnCreate());
-
-        String syncMode = config.get(IdentityProviderModel.SYNC_MODE);
-        if (syncMode == null) {
-            config.put(IdentityProviderModel.SYNC_MODE, "LEGACY");
-        }
 
         String firstBrokerLoginFlowId = identityProviderModel.getFirstBrokerLoginFlowId();
         if (firstBrokerLoginFlowId != null) {
@@ -864,6 +984,8 @@ public class ModelToRepresentation {
             providerRep.setOrganizationId(identityProviderModel.getOrganizationId());
         }
 
+        List<IdentityProviderType> identityProviderTypes = IdentityProviderTypeUtil.listTypesFromFactory(session, identityProviderModel.getProviderId());
+        providerRep.setTypes(identityProviderTypes.stream().map(Enum::toString).collect(Collectors.toList()));
         return providerRep;
     }
 
@@ -926,7 +1048,9 @@ public class ModelToRepresentation {
         AuthenticationExecutionExportRepresentation rep = new AuthenticationExecutionExportRepresentation();
         if (model.getAuthenticatorConfig() != null) {
             AuthenticatorConfigModel config = new DeployedConfigurationsManager(session).getAuthenticatorConfig(realm, model.getAuthenticatorConfig());
-            rep.setAuthenticatorConfig(config.getAlias());
+            if (config != null) {
+                rep.setAuthenticatorConfig(config.getAlias());
+            }
         }
         rep.setAuthenticator(model.getAuthenticator());
         rep.setAuthenticatorFlow(model.isAuthenticatorFlow());
@@ -1034,6 +1158,7 @@ public class ModelToRepresentation {
         server.setAllowRemoteResourceManagement(model.isAllowRemoteResourceManagement());
         server.setPolicyEnforcementMode(model.getPolicyEnforcementMode());
         server.setDecisionStrategy(model.getDecisionStrategy());
+        server.setAuthorizationSchema(AdminPermissionsSchema.SCHEMA.getAuthorizationSchema(client));
 
         return server;
     }
@@ -1290,5 +1415,35 @@ public class ModelToRepresentation {
         RequiredActionConfigRepresentation rep = new RequiredActionConfigRepresentation();
         rep.setConfig(model.getConfig());
         return rep;
+    }
+
+    public static OrganizationRepresentation toRepresentation(OrganizationModel model) {
+        return toRepresentation(model, true);
+    }
+
+    public static OrganizationRepresentation toRepresentation(OrganizationModel model, boolean briefRepresentation) {
+        if (model == null) {
+            return null;
+        }
+        OrganizationRepresentation rep = new OrganizationRepresentation();
+        rep.setId(model.getId());
+        rep.setName(model.getName());
+        rep.setAlias(model.getAlias());
+        if (!briefRepresentation) {
+            rep.setAttributes(model.getAttributes());
+        }
+        rep.setEnabled(model.isEnabled());
+        rep.setRedirectUrl(model.getRedirectUrl());
+        rep.setDescription(model.getDescription());
+        model.getDomains().filter(Objects::nonNull).map(ModelToRepresentation::toRepresentation)
+                .forEach(rep::addDomain);
+        return rep;
+    }
+
+    public static OrganizationDomainRepresentation toRepresentation(OrganizationDomainModel model) {
+        OrganizationDomainRepresentation representation = new OrganizationDomainRepresentation();
+        representation.setName(model.getName());
+        representation.setVerified(model.isVerified());
+        return representation;
     }
 }

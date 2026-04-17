@@ -17,25 +17,31 @@
 
 package org.keycloak.testsuite.oauth;
 
-import org.hamcrest.MatcherAssert;
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import java.io.IOException;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
-import org.keycloak.OAuth2Constants;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response.Status;
+
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.ClientsResource;
+import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.common.util.Retry;
 import org.keycloak.common.util.Time;
+import org.keycloak.constants.AdapterConstants;
+import org.keycloak.crypto.Algorithm;
 import org.keycloak.events.Details;
 import org.keycloak.jose.jws.JWSHeader;
 import org.keycloak.jose.jws.JWSInput;
 import org.keycloak.models.Constants;
 import org.keycloak.protocol.oidc.OIDCConfigAttributes;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
+import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.LogoutToken;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.AbstractKeycloakTest;
@@ -43,29 +49,35 @@ import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.pages.LoginPage;
-
-import java.util.List;
-import java.util.Map;
-
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.Response.Status;
-import jakarta.ws.rs.core.UriBuilder;
+import org.keycloak.testsuite.updaters.ClientAttributeUpdater;
+import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
+import org.keycloak.testsuite.util.ClientManager;
+import org.keycloak.testsuite.util.Matchers;
+import org.keycloak.testsuite.util.ProtocolMapperUtil;
+import org.keycloak.testsuite.util.RealmBuilder;
+import org.keycloak.testsuite.util.TokenSignatureUtil;
+import org.keycloak.testsuite.util.UserBuilder;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.LogoutResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
-import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
-import org.keycloak.testsuite.util.ClientManager;
-import org.keycloak.testsuite.util.Matchers;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.keycloak.testsuite.util.RealmBuilder;
-import org.keycloak.testsuite.util.TokenSignatureUtil;
-import org.keycloak.testsuite.util.WaitUtils;
+import org.hamcrest.MatcherAssert;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
 
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.*;
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
+
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Tests mostly for backchannel logout scenarios with refresh token (Legacy Logout endpoint not compliant with OIDC specification) and admin logout scenarios
@@ -103,100 +115,169 @@ public class LogoutTest extends AbstractKeycloakTest {
     public void postLogout() throws Exception {
         oauth.doLogin("test-user@localhost", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
+        String code = oauth.parseLoginResponse().getCode();
 
-        oauth.clientSessionState("client-session");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
         String refreshTokenString = tokenResponse.getRefreshToken();
 
-        try (CloseableHttpResponse response = oauth.doLogout(refreshTokenString, "password")) {
-            MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.NO_CONTENT));
+        LogoutResponse response = oauth.doLogout(refreshTokenString);
+        assertTrue(response.isSuccess());
 
-            assertNotNull(testingClient.testApp().getAdminLogoutAction());
-        }
+        assertNotNull(testingClient.testApp().getAdminLogoutAction());
     }
 
     @Test
     public void postLogoutExpiredRefreshToken() throws Exception {
         oauth.doLogin("test-user@localhost", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
+        String code = oauth.parseLoginResponse().getCode();
 
-        oauth.clientSessionState("client-session");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
         String refreshTokenString = tokenResponse.getRefreshToken();
 
         adminClient.realm("test").update(RealmBuilder.create().notBefore(Time.currentTime() + 1).build());
 
         // Logout should succeed with expired refresh token, see KEYCLOAK-3302
-        try (CloseableHttpResponse response = oauth.doLogout(refreshTokenString, "password")) {
-            MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.NO_CONTENT));
+        LogoutResponse response = oauth.doLogout(refreshTokenString);
+        assertTrue(response.isSuccess());
 
-            assertNotNull(testingClient.testApp().getAdminLogoutAction());
-        }
+        assertNotNull(testingClient.testApp().getAdminLogoutAction());
     }
 
     @Test
     public void postLogoutWithRefreshTokenAfterUserSessionLogoutAndLoginAgain() throws Exception {
         // Login
-        OAuthClient.AccessTokenResponse accessTokenResponse = loginAndForceNewLoginPage();
+        AccessTokenResponse accessTokenResponse = loginAndForceNewLoginPage();
         String refreshToken1 = accessTokenResponse.getRefreshToken();
 
-        oauth.doLogout(refreshToken1, "password");
+        oauth.doLogout(refreshToken1);
 
         setTimeOffset(2);
 
-        WaitUtils.waitForPageToLoad();
-        loginPage.login("password");
+        driver.navigate().refresh();
+        oauth.fillLoginForm("test-user@localhost", "password");
 
         Assert.assertFalse(loginPage.isCurrent());
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        OAuthClient.AccessTokenResponse tokenResponse2 = oauth.doAccessTokenRequest(code, "password");
-
-        // POST logout with token should fail
-        try (CloseableHttpResponse response = oauth.doLogout(refreshToken1, "password")) {
-            assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatusLine().getStatusCode());
-        }
-
-        String logoutUrl = oauth.getLogoutUrl()
-                .idTokenHint(accessTokenResponse.getIdToken())
-                .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
-                .build();
-
-        // GET logout with ID token should fail as well
-        try (CloseableHttpClient c = HttpClientBuilder.create().disableRedirectHandling().build();
-             CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
-            assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatusLine().getStatusCode());
-        }
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse tokenResponse2 = oauth.doAccessTokenRequest(code);
 
         // finally POST logout with VALID token should succeed
-        try (CloseableHttpResponse response = oauth.doLogout(tokenResponse2.getRefreshToken(), "password")) {
-            MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.NO_CONTENT));
+        LogoutResponse response = oauth.doLogout(tokenResponse2.getRefreshToken());
+        assertTrue(response.isSuccess());
 
-            assertNotNull(testingClient.testApp().getAdminLogoutAction());
-        }
+        assertNotNull(testingClient.testApp().getAdminLogoutAction());
     }
-
 
     @Test
     public void postLogoutFailWithCredentialsOfDifferentClient() throws Exception {
         oauth.doLogin("test-user@localhost", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
+        String code = oauth.parseLoginResponse().getCode();
 
-        oauth.clientSessionState("client-session");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
         String refreshTokenString = tokenResponse.getRefreshToken();
 
-        oauth.clientId("test-app-scope");
+        oauth.client("test-app-scope", "password");
 
         // Assert logout fails with 400 when trying to use different client credentials
-        try (CloseableHttpResponse response = oauth.doLogout(refreshTokenString, "password")) {
-            MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.BAD_REQUEST));
-        }
+        LogoutResponse response = oauth.doLogout(refreshTokenString);
+        assertEquals(response.getStatusCode(), 400);
 
-        oauth.clientId("test-app");
+        oauth.client("test-app", "password");
+    }
+
+    @Test
+    public void logoutBackchannelTwoClientsSpecificConfigurationIsUsed() throws Exception {
+        final String defaultSignatureAlgorithm = adminClient.realm(oauth.getRealm()).toRepresentation().getDefaultSignatureAlgorithm();
+        final String differentAlg = Algorithm.RS256.equals(defaultSignatureAlgorithm) ? Algorithm.RS512 : Algorithm.RS256;
+        try (ClientAttributeUpdater updater = ClientAttributeUpdater.forClient(adminClient, oauth.getRealm(), oauth.getClientId())
+                .setAttribute(OIDCConfigAttributes.ID_TOKEN_SIGNED_RESPONSE_ALG, differentAlg)
+                .setAttribute(OIDCConfigAttributes.BACKCHANNEL_LOGOUT_URL, OAuthClient.APP_ROOT + "/admin/backchannelLogout")
+                .update()) {
+
+            // login with test-app
+            oauth.doLogin("test-user@localhost", "password");
+            AccessTokenResponse tokenResponse = oauth.accessTokenRequest(oauth.parseLoginResponse().getCode())
+                    .param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
+            Assert.assertNull(tokenResponse.getError());
+
+            // login with test-app-scope
+            oauth.client("test-app-scope", "password");
+            oauth.openLoginForm();
+            AccessTokenResponse tokenResponse2 = oauth.accessTokenRequest(oauth.parseLoginResponse().getCode())
+                    .param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
+            Assert.assertNull(tokenResponse2.getError());
+            AccessToken accessToken = new JWSInput(tokenResponse2.getAccessToken()).readJsonContent(AccessToken.class);
+
+            // logout from test-app-scope
+            oauth.logoutForm().idTokenHint(tokenResponse2.getIdToken()).open();
+
+            // check test-app backchannel is received
+            String rawLogoutToken = testingClient.testApp().getBackChannelRawLogoutToken();
+
+            // check the logout token is OK and using correct signature algorithm
+            JWSInput jwsInput = new JWSInput(rawLogoutToken);
+            assertEquals(differentAlg, jwsInput.getHeader().getRawAlgorithm());
+            LogoutToken logoutToken = jwsInput.readJsonContent(LogoutToken.class);
+            validateLogoutToken(logoutToken);
+            JWSHeader logoutTokenHeader = jwsInput.getHeader();
+            assertEquals("logout+jwt", logoutTokenHeader.getType());
+            assertEquals(accessToken.getSubject(), logoutToken.getSubject());
+        }
+    }
+
+    @Test
+    public void testRemoveAuthSessionWhenUserSessionFromIdTokenIsInvalid() throws IOException {
+        RealmResource realm = adminClient.realm("test");
+
+        for (int i = 0; i < 2; i++) {
+            realm.users().create(UserBuilder.create()
+                    .username("user-0")
+                    .password("password")
+                    .email("user-0@keycloak")
+                    .firstName("first")
+                    .lastName("last")
+                    .enabled(true)
+                    .build()).close();
+            UserRepresentation user = ApiUtil.findUserByUsername(realm, "user-0");
+            Assert.assertNotNull(user);
+
+            loginPage.open();
+            loginPage.login("user-0", "password");
+
+            String code = oauth.parseLoginResponse().getCode();
+            AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
+            String idTokenString = tokenResponse.getIdToken();
+            realm.users().get(user.getId()).remove();
+            oauth.logoutForm()
+                    .withRedirect()
+                    .idTokenHint(idTokenString)
+                    .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
+                    .open();
+
+            realm.users().create(UserBuilder.create()
+                    .username("user-1")
+                    .password("password")
+                    .email("user-1@keycloak")
+                    .firstName("first")
+                    .lastName("last")
+                    .enabled(true)
+                    .build()).close();
+
+            loginPage.open();
+            loginPage.login("user-1", "password");
+            code = oauth.parseLoginResponse().getCode();
+            tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
+            idTokenString = tokenResponse.getIdToken();
+            oauth.logoutForm()
+                    .idTokenHint(idTokenString)
+                    .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
+                    .open();
+            user = ApiUtil.findUserByUsername(realm, "user-1");
+            Assert.assertNotNull(user);
+            realm.users().get(user.getId()).remove();
+        }
     }
 
     @Test
@@ -222,10 +303,9 @@ public class LogoutTest extends AbstractKeycloakTest {
     private void backchannelLogoutRequest(String expectedRefreshAlg, String expectedAccessAlg, String expectedIdTokenAlg) throws Exception {
         oauth.doLogin("test-user@localhost", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
+        String code = oauth.parseLoginResponse().getCode();
 
-        oauth.clientSessionState("client-session");
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
         String idTokenString = tokenResponse.getIdToken();
 
         JWSHeader header = new JWSInput(tokenResponse.getAccessToken()).getHeader();
@@ -243,13 +323,13 @@ public class LogoutTest extends AbstractKeycloakTest {
         assertEquals("JWT", header.getType());
         assertNull(header.getContentType());
 
-        String logoutUrl = oauth.getLogoutUrl()
-          .idTokenHint(idTokenString)
-          .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
-          .build();
-        
+        String logoutUrl = oauth.logoutForm()
+                .idTokenHint(idTokenString)
+                .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
+                .build();
+
         try (CloseableHttpClient c = HttpClientBuilder.create().disableRedirectHandling().build();
-          CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
+             CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
             MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.FOUND));
             MatcherAssert.assertThat(response.getFirstHeader(HttpHeaders.LOCATION).getValue(), is(oauth.APP_AUTH_ROOT));
         }
@@ -279,20 +359,18 @@ public class LogoutTest extends AbstractKeycloakTest {
         oauth.doLogin("test-user@localhost", "password");
         String sessionId = events.expectLogin().assertEvent().getSessionId();
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
+        String code = oauth.parseLoginResponse().getCode();
 
-        oauth.clientSessionState("client-session");
-
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
         events.poll();
         String idTokenString = tokenResponse.getIdToken();
-        String logoutUrl = oauth.getLogoutUrl()
+        String logoutUrl = oauth.logoutForm()
                 .idTokenHint(idTokenString)
                 .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
                 .build();
 
         try (CloseableHttpClient c = HttpClientBuilder.create().disableRedirectHandling().build();
-                CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
+             CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
             MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.FOUND));
             MatcherAssert.assertThat(response.getFirstHeader(HttpHeaders.LOCATION).getValue(), is(oauth.APP_AUTH_ROOT));
         }
@@ -319,19 +397,17 @@ public class LogoutTest extends AbstractKeycloakTest {
         try {
             oauth.doLogin("test-user@localhost", "password");
 
-            String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
+            String code = oauth.parseLoginResponse().getCode();
 
-            oauth.clientSessionState("client-session");
-
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+            AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
             String idTokenString = tokenResponse.getIdToken();
-            String logoutUrl = oauth.getLogoutUrl()
+            String logoutUrl = oauth.logoutForm()
                     .idTokenHint(idTokenString)
                     .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
                     .build();
 
             try (CloseableHttpClient c = HttpClientBuilder.create().disableRedirectHandling().build();
-                    CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
+                 CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
                 MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.FOUND));
                 MatcherAssert.assertThat(response.getFirstHeader(HttpHeaders.LOCATION).getValue(), is(oauth.APP_AUTH_ROOT));
             }
@@ -342,6 +418,51 @@ public class LogoutTest extends AbstractKeycloakTest {
             validateLogoutToken(logoutToken);
             JWSHeader logoutTokenHeader = jwsInput.getHeader();
             assertEquals("logout+jwt", logoutTokenHeader.getType());
+        } finally {
+            rep.getAttributes().put(OIDCConfigAttributes.BACKCHANNEL_LOGOUT_URL, "");
+            clientResource.update(rep);
+        }
+    }
+
+    @Test
+    public void backChannelWithPairwiseLogout() throws Exception {
+        ClientsResource clients = adminClient.realm(oauth.getRealm()).clients();
+        ClientRepresentation rep = clients.findByClientId(oauth.getClientId()).get(0);
+
+        rep.getAttributes().put(OIDCConfigAttributes.BACKCHANNEL_LOGOUT_URL, oauth.APP_ROOT + "/admin/backchannelLogout");
+        List<ProtocolMapperRepresentation> mappers = new LinkedList<>();
+        mappers.add(ProtocolMapperUtil.createPairwiseMapper("","123456"));
+        rep.setProtocolMappers(mappers);
+
+        ClientResource clientResource = clients.get(rep.getId());
+        clientResource.update(rep);
+
+        try {
+            oauth.doLogin("test-user@localhost", "password");
+
+            String code = oauth.parseLoginResponse().getCode();
+
+            AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
+            AccessToken accessToken = new JWSInput(tokenResponse.getAccessToken()).readJsonContent(AccessToken.class);
+            String idTokenString = tokenResponse.getIdToken();
+            String logoutUrl = oauth.logoutForm()
+                    .idTokenHint(idTokenString)
+                    .postLogoutRedirectUri(oauth.APP_AUTH_ROOT)
+                    .build();
+
+            try (CloseableHttpClient c = HttpClientBuilder.create().disableRedirectHandling().build();
+                 CloseableHttpResponse response = c.execute(new HttpGet(logoutUrl))) {
+                MatcherAssert.assertThat(response, Matchers.statusCodeIsHC(Status.FOUND));
+                MatcherAssert.assertThat(response.getFirstHeader(HttpHeaders.LOCATION).getValue(), is(oauth.APP_AUTH_ROOT));
+            }
+
+            String rawLogoutToken = testingClient.testApp().getBackChannelRawLogoutToken();
+            JWSInput jwsInput = new JWSInput(rawLogoutToken);
+            LogoutToken logoutToken = jwsInput.readJsonContent(LogoutToken.class);
+            validateLogoutToken(logoutToken);
+            JWSHeader logoutTokenHeader = jwsInput.getHeader();
+            assertEquals("logout+jwt", logoutTokenHeader.getType());
+            assertEquals(accessToken.getSubject(), logoutToken.getSubject());
         } finally {
             rep.getAttributes().put(OIDCConfigAttributes.BACKCHANNEL_LOGOUT_URL, "");
             clientResource.update(rep);
@@ -366,20 +487,18 @@ public class LogoutTest extends AbstractKeycloakTest {
         MatcherAssert.assertThat("map of back-channel logout event member object should be an empty object", (Map<?, ?>) backchannelLogoutEvent, org.hamcrest.Matchers.anEmptyMap());
     }
 
-    private OAuthClient.AccessTokenResponse loginAndForceNewLoginPage() {
+    private AccessTokenResponse loginAndForceNewLoginPage() {
         oauth.doLogin("test-user@localhost", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        oauth.clientSessionState("client-session");
+        String code = oauth.parseLoginResponse().getCode();
 
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse tokenResponse = oauth.accessTokenRequest(code).param(AdapterConstants.CLIENT_SESSION_STATE, "client-session").send();
 
         setTimeOffset(1);
 
-        String loginFormUri = UriBuilder.fromUri(oauth.getLoginFormUrl())
-                .queryParam(OIDCLoginProtocol.PROMPT_PARAM, OIDCLoginProtocol.PROMPT_VALUE_LOGIN)
-                .build().toString();
-        driver.navigate().to(loginFormUri);
+        oauth.loginForm()
+                .prompt(OIDCLoginProtocol.PROMPT_VALUE_LOGIN)
+                .open();
 
         loginPage.assertCurrent();
 

@@ -17,9 +17,6 @@
 
 package org.keycloak.common.util;
 
-import org.keycloak.common.constants.GenericConstants;
-import org.keycloak.common.crypto.CryptoIntegration;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -31,6 +28,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
+import org.keycloak.common.constants.GenericConstants;
+import org.keycloak.common.crypto.CryptoIntegration;
+
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
@@ -39,7 +39,7 @@ public class KeystoreUtil {
 
     public enum KeystoreFormat {
         JKS("jks"),
-        PKCS12("p12", "pfx"),
+        PKCS12("p12", "pfx", "pkcs12"),
         BCFKS("bcfks");
 
         // Typical file extension for this keystore format
@@ -86,9 +86,7 @@ public class KeystoreUtil {
     }
 
     public static KeyPair loadKeyPairFromKeystore(String keystoreFile, String storePassword, String keyPassword, String keyAlias, KeystoreFormat format) {
-        InputStream stream = FindFile.findFile(keystoreFile);
-
-        try {
+        try (InputStream stream = FindFile.findFile(keystoreFile)) {
             KeyStore keyStore = CryptoIntegration.getProvider().getKeyStore(format);
 
             keyStore.load(stream, storePassword.toCharArray());
@@ -106,6 +104,17 @@ public class KeystoreUtil {
         }
     }
 
+    public static Optional<KeystoreFormat> getKeystoreFormat(String path) {
+        int lastDotIndex = path.lastIndexOf('.');
+        if (lastDotIndex > -1) {
+            String ext = path.substring(lastDotIndex + 1).toLowerCase();
+            return Arrays.stream(KeystoreUtil.KeystoreFormat.values())
+                    .filter(ksFormat -> ksFormat.getFileExtensions().contains(ext))
+                    .findFirst();
+        }
+        return Optional.empty();
+    }
+
 
     /**
      * Try to return supported keystore type
@@ -117,16 +126,14 @@ public class KeystoreUtil {
      */
     public static String getKeystoreType(String preferredType, String path, String defaultType) {
         // Configured type has precedence
-        if (preferredType != null) return preferredType;
+        if (preferredType != null) {
+            return preferredType;
+        }
 
         // Fallback to path
-        int lastDotIndex = path.lastIndexOf('.');
-        if (lastDotIndex > -1) {
-            String ext = path.substring(lastDotIndex + 1).toLowerCase();
-            Optional<KeystoreFormat> detectedType = Arrays.stream(KeystoreUtil.KeystoreFormat.values())
-                    .filter(ksFormat -> ksFormat.getFileExtensions().contains(ext))
-                    .findFirst();
-            if (detectedType.isPresent()) return detectedType.get().toString();
+        Optional<KeystoreFormat> format = getKeystoreFormat(path);
+        if (format.isPresent()) {
+            return format.get().toString();
         }
 
         // Fallback to default

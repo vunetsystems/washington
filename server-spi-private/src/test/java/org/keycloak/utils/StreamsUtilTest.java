@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -99,6 +100,39 @@ public class StreamsUtilTest {
                 .limit(1).forEach(NOOP);
 
         Assert.assertEquals(1, numberOfFetchedElements.get());
+    }
+
+    @Test
+    public void testSortedInsideOfFlatMapShouldRespectTerminalOperation() {
+        AtomicInteger numberOfFetchedElements = new AtomicInteger();
+
+        Stream.of(new Object())
+                .flatMap(
+                        o -> Stream.of(1, 2, 3).peek(integer -> numberOfFetchedElements.incrementAndGet()))
+                .limit(1).forEach(NOOP);
+
+        Assert.assertEquals(1, numberOfFetchedElements.get());
+
+        numberOfFetchedElements.set(0);
+
+        Stream.of(new Object())
+                .flatMap(
+                        o -> Stream.of(1, 2, 3).sorted().peek(integer -> numberOfFetchedElements.incrementAndGet()))
+                .limit(1).forEach(NOOP);
+
+        // Expect actually 1, but always delivery 3 on JDK 21, but will work on JDK 24
+        // Assert.assertEquals(1, numberOfFetchedElements.get());
+
+        numberOfFetchedElements.set(0);
+
+        Stream.of(new Object())
+                .flatMap(
+                        o -> StreamsUtil.prepareSortedStreamToWorkInsideOfFlatMapWithTerminalOperations(Stream.of(1, 2, 3).sorted()).peek(integer -> numberOfFetchedElements.incrementAndGet()))
+                .limit(1).forEach(NOOP);
+
+        // With the workaround it is only 1 as expected
+        Assert.assertEquals(1, numberOfFetchedElements.get());
+
     }
 
 }

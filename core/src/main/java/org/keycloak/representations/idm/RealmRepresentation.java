@@ -17,14 +17,6 @@
 
 package org.keycloak.representations.idm;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
-import org.eclipse.microprofile.openapi.annotations.media.Schema;
-import org.jboss.logging.Logger;
-import org.keycloak.common.util.MultivaluedHashMap;
-import org.keycloak.util.JsonSerialization;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -32,6 +24,15 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.util.JsonSerialization;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.jboss.logging.Logger;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -92,12 +93,14 @@ public class RealmRepresentation {
     protected Boolean bruteForceProtected;
     protected Boolean permanentLockout;
     protected Integer maxTemporaryLockouts;
+    protected BruteForceStrategy bruteForceStrategy;
     protected Integer maxFailureWaitSeconds;
     protected Integer minimumQuickLoginWaitSeconds;
     protected Integer waitIncrementSeconds;
     protected Long quickLoginCheckMilliSeconds;
     protected Integer maxDeltaTimeSeconds;
     protected Integer failureFactor;
+    protected Integer maxSecondaryAuthFailures;
     //--- end brute force settings
 
     @Deprecated
@@ -113,6 +116,7 @@ public class RealmRepresentation {
     @Deprecated
     protected List<String> defaultRoles;
     protected RoleRepresentation defaultRole;
+    protected ClientRepresentation adminPermissionsClient;
     protected List<String> defaultGroups;
     @Deprecated
     protected Set<String> requiredCredentials;
@@ -154,6 +158,7 @@ public class RealmRepresentation {
     protected Boolean webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister;
     protected List<String> webAuthnPolicyPasswordlessAcceptableAaguids;
     protected List<String> webAuthnPolicyPasswordlessExtraOrigins;
+    protected Boolean webAuthnPolicyPasswordlessPasskeysEnabled;
 
     // Client Policies/Profiles
 
@@ -217,6 +222,10 @@ public class RealmRepresentation {
     protected Boolean organizationsEnabled;
     private List<OrganizationRepresentation> organizations;
 
+    protected Boolean verifiableCredentialsEnabled;
+
+    protected Boolean adminPermissionsEnabled;
+
     @Deprecated
     protected Boolean social;
     @Deprecated
@@ -231,6 +240,8 @@ public class RealmRepresentation {
     protected List<OAuthClientRepresentation> oauthClients;
     @Deprecated
     protected List<ClientTemplateRepresentation> clientTemplates;
+
+    private Boolean scimApiEnabled;
 
     public String getId() {
         return id;
@@ -510,6 +521,7 @@ public class RealmRepresentation {
         this.oauth2DeviceCodeLifespan = oauth2DeviceCodeLifespan;
     }
 
+    @Schema(name = "oauth2DeviceCodeLifespan")
     public Integer getOAuth2DeviceCodeLifespan() {
         return oauth2DeviceCodeLifespan;
     }
@@ -518,6 +530,7 @@ public class RealmRepresentation {
         this.oauth2DevicePollingInterval = oauth2DevicePollingInterval;
     }
 
+    @Schema(name = "oauth2DevicePollingInterval")
     public Integer getOAuth2DevicePollingInterval() {
         return oauth2DevicePollingInterval;
     }
@@ -546,6 +559,14 @@ public class RealmRepresentation {
 
     public void setDefaultRole(RoleRepresentation defaultRole) {
         this.defaultRole = defaultRole;
+    }
+
+    public ClientRepresentation getAdminPermissionsClient() {
+        return adminPermissionsClient;
+    }
+
+    public void setAdminPermissionsClient(ClientRepresentation adminPermissionsClient) {
+        this.adminPermissionsClient = adminPermissionsClient;
     }
 
     public List<String> getDefaultGroups() {
@@ -777,6 +798,14 @@ public class RealmRepresentation {
         this.maxTemporaryLockouts = maxTemporaryLockouts;
     }
 
+    public BruteForceStrategy getBruteForceStrategy() {
+        return this.bruteForceStrategy;
+    }
+
+    public void setBruteForceStrategy(BruteForceStrategy bruteForceStrategy) {
+        this.bruteForceStrategy = bruteForceStrategy;
+    }
+
     public Integer getMaxFailureWaitSeconds() {
         return maxFailureWaitSeconds;
     }
@@ -823,6 +852,14 @@ public class RealmRepresentation {
 
     public void setFailureFactor(Integer failureFactor) {
         this.failureFactor = failureFactor;
+    }
+
+    public Integer getMaxSecondaryAuthFailures() {
+        return maxSecondaryAuthFailures;
+    }
+
+    public void setMaxSecondaryAuthFailures(Integer maxSecondaryAuthFailures) {
+        this.maxSecondaryAuthFailures = maxSecondaryAuthFailures;
     }
 
     public Boolean isEventsEnabled() {
@@ -1241,6 +1278,14 @@ public class RealmRepresentation {
         this.webAuthnPolicyPasswordlessExtraOrigins = extraOrigins;
     }
 
+    public Boolean getWebAuthnPolicyPasswordlessPasskeysEnabled(){
+        return webAuthnPolicyPasswordlessPasskeysEnabled;
+    }
+
+    public void setWebAuthnPolicyPasswordlessPasskeysEnabled(Boolean webAuthnPolicyPasswordlessPasskeysEnabled) {
+        this.webAuthnPolicyPasswordlessPasskeysEnabled = webAuthnPolicyPasswordlessPasskeysEnabled;
+    }
+
     // Client Policies/Profiles
 
     @JsonIgnore
@@ -1431,6 +1476,22 @@ public class RealmRepresentation {
         this.organizationsEnabled = organizationsEnabled;
     }
 
+    public Boolean isAdminPermissionsEnabled() {
+        return adminPermissionsEnabled;
+    }
+
+    public void setAdminPermissionsEnabled(Boolean adminPermissionsEnabled) {
+        this.adminPermissionsEnabled = adminPermissionsEnabled;
+    }
+
+    public Boolean isVerifiableCredentialsEnabled() {
+        return verifiableCredentialsEnabled;
+    }
+
+    public void setVerifiableCredentialsEnabled(Boolean verifiableCredentialsEnabled) {
+        this.verifiableCredentialsEnabled = verifiableCredentialsEnabled;
+    }
+
     @JsonIgnore
     public Map<String, String> getAttributesOrEmpty() {
         return (Map<String, String>) (attributes == null ? Collections.emptyMap() : attributes);
@@ -1449,5 +1510,17 @@ public class RealmRepresentation {
             organizations = new ArrayList<>();
         }
         organizations.add(org);
+    }
+
+    public void setScimApiEnabled(Boolean scimApiEnabled) {
+        this.scimApiEnabled = scimApiEnabled;
+    }
+
+    public Boolean isScimApiEnabled() {
+        return scimApiEnabled;
+    }
+
+    public enum BruteForceStrategy {
+        LINEAR, MULTIPLE;
     }
 }

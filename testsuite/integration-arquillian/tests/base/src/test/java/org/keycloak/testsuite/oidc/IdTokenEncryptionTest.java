@@ -16,10 +16,12 @@
  */
 package org.keycloak.testsuite.oidc;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.PrivateKey;
+import java.util.List;
+import java.util.Map;
+
 import org.keycloak.OAuthErrorException;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.common.util.Base64Url;
@@ -38,10 +40,10 @@ import org.keycloak.protocol.oidc.OIDCAdvancedConfigWrapper;
 import org.keycloak.representations.IDToken;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.testsuite.AbstractAdminTest;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.admin.AbstractAdminTest;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.arquillian.annotation.UncaughtServerErrorExpected;
 import org.keycloak.testsuite.client.resources.TestApplicationResourceUrls;
@@ -51,17 +53,16 @@ import org.keycloak.testsuite.pages.ErrorPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.pages.OAuthGrantPage;
 import org.keycloak.testsuite.util.ClientManager;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.keycloak.testsuite.util.OAuthClient.AccessTokenResponse;
 import org.keycloak.testsuite.util.TokenSignatureUtil;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.AuthorizationEndpointResponse;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.util.TokenUtil;
 
-import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.security.PrivateKey;
-import java.util.List;
-import java.util.Map;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
 
 public class IdTokenEncryptionTest extends AbstractTestRealmKeycloakTest {
 
@@ -93,8 +94,7 @@ public class IdTokenEncryptionTest extends AbstractTestRealmKeycloakTest {
          * will faile and the clientID will always be "sample-public-client
          * @see AccessTokenTest#testAuthorizationNegotiateHeaderIgnored()
          */
-        oauth.clientId("test-app");
-        oauth.maxAge(null);
+        oauth.client("test-app", "password");
     }
 
     @Override
@@ -212,9 +212,9 @@ public class IdTokenEncryptionTest extends AbstractTestRealmKeycloakTest {
             clientResource.update(clientRep);
 
             // get id token
-            OAuthClient.AuthorizationEndpointResponse response = oauth.doLogin("test-user@localhost", "password");
+            AuthorizationEndpointResponse response = oauth.doLogin("test-user@localhost", "password");
             String code = response.getCode();
-            OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+            AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code);
 
             // parse JWE and JOSE Header
             String jweStr = tokenResponse.getIdToken();
@@ -235,13 +235,13 @@ public class IdTokenEncryptionTest extends AbstractTestRealmKeycloakTest {
             JWEAlgorithmProvider algorithmProvider = getJweAlgorithmProvider(algAlgorithm);
             JWEEncryptionProvider encryptionProvider = getJweEncryptionProvider(encAlgorithm);
             byte[] decodedString = TokenUtil.jweKeyEncryptionVerifyAndDecode(decryptionKEK, jweStr, algorithmProvider, encryptionProvider);
-            String idTokenString = new String(decodedString, "UTF-8");
+            String idTokenString = new String(decodedString, StandardCharsets.UTF_8);
 
             // verify JWS
             IDToken idToken = oauth.verifyIDToken(idTokenString);
             Assert.assertEquals("test-user@localhost", idToken.getPreferredUsername());
             Assert.assertEquals("test-app", idToken.getIssuedFor());
-        } catch (JWEException | UnsupportedEncodingException e) {
+        } catch (JWEException e) {
             Assert.fail();
         } finally {
             clientResource = ApiUtil.findClientByClientId(adminClient.realm("test"), "test-app");
@@ -309,14 +309,14 @@ public class IdTokenEncryptionTest extends AbstractTestRealmKeycloakTest {
             clientResource.update(clientRep);
 
             // get id token but failed
-            OAuthClient.AuthorizationEndpointResponse response = oauth.doLogin("test-user@localhost", "password");
-            AccessTokenResponse atr = oauth.doAccessTokenRequest(response.getCode(), "password");
+            AuthorizationEndpointResponse response = oauth.doLogin("test-user@localhost", "password");
+            AccessTokenResponse atr = oauth.doAccessTokenRequest(response.getCode());
             Assert.assertEquals(OAuthErrorException.INVALID_REQUEST, atr.getError());
             Assert.assertEquals("can not get encryption KEK", atr.getErrorDescription());
 
             // get id token but failed with client_credentials grant type
             oauth.scope("openid");
-            OAuthClient.AccessTokenResponse responseClientCredentials = oauth.doClientCredentialsGrantAccessTokenRequest(clientRep.getSecret());
+            AccessTokenResponse responseClientCredentials = oauth.client(clientRep.getClientId(), clientRep.getSecret()).doClientCredentialsGrantAccessTokenRequest();
             Assert.assertEquals(OAuthErrorException.INVALID_REQUEST, responseClientCredentials.getError());
             Assert.assertEquals("can not get encryption KEK", responseClientCredentials.getErrorDescription());
         } finally {
@@ -334,4 +334,3 @@ public class IdTokenEncryptionTest extends AbstractTestRealmKeycloakTest {
     }
 
 }
-

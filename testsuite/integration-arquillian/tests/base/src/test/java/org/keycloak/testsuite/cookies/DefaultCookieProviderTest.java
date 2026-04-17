@@ -1,24 +1,27 @@
 package org.keycloak.testsuite.cookies;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.client.ClientRequestFilter;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
-import org.jboss.resteasy.client.jaxrs.ResteasyClient;
-import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+
 import org.keycloak.cookie.CookieProvider;
 import org.keycloak.cookie.CookieType;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.AbstractKeycloakTest;
 import org.keycloak.testsuite.client.KeycloakTestingClient;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
+import org.jboss.resteasy.client.jaxrs.ResteasyClient;
+import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
 
 public class DefaultCookieProviderTest extends AbstractKeycloakTest {
 
@@ -43,6 +46,7 @@ public class DefaultCookieProviderTest extends AbstractKeycloakTest {
 
             CookieProvider cookies = session.getProvider(CookieProvider.class);
             cookies.set(CookieType.AUTH_SESSION_ID, "my-auth-session-id");
+            cookies.set(CookieType.AUTH_SESSION_ID_HASH, "my-kc-auth-session");
             cookies.set(CookieType.AUTH_RESTART, "my-auth-restart");
             cookies.set(CookieType.AUTH_DETACHED, "my-auth-detached", 222);
             cookies.set(CookieType.IDENTITY, "my-identity", 333);
@@ -51,8 +55,9 @@ public class DefaultCookieProviderTest extends AbstractKeycloakTest {
             cookies.set(CookieType.SESSION, "my-session", 444);
             cookies.set(CookieType.WELCOME_CSRF, "my-welcome-csrf");
         });
-        Assert.assertEquals(8, response.getCookies().size());
+        Assert.assertEquals(9, response.getCookies().size());
         assertCookie(response, "AUTH_SESSION_ID", "my-auth-session-id", "/auth/realms/master/", -1, true, true, "None", true);
+        assertCookie(response, "KC_AUTH_SESSION_HASH", "my-kc-auth-session", "/auth/realms/master/", 60, true, false, "None", true);
         assertCookie(response, "KC_RESTART", "my-auth-restart", "/auth/realms/master/", -1, true, true, "None", false);
         assertCookie(response, "KC_STATE_CHECKER", "my-auth-detached", "/auth/realms/master/", 222, true, true, "Strict", false);
         assertCookie(response, "KEYCLOAK_IDENTITY", "my-identity", "/auth/realms/master/", 333, true, true, "None", true);
@@ -64,11 +69,12 @@ public class DefaultCookieProviderTest extends AbstractKeycloakTest {
 
     @Test
     public void testCookieDefaultsWithInsecureContext() {
-        KeycloakTestingClient testingInsecure = KeycloakTestingClient.getInstance("http://127.0.0.1.nip.io:8180/auth");
+        KeycloakTestingClient testingInsecure = KeycloakTestingClient.getInstance("http://localtest.me:8180/auth");
 
         Response response = testingInsecure.server("master").runWithResponse(session -> {
             CookieProvider cookies = session.getProvider(CookieProvider.class);
             cookies.set(CookieType.AUTH_SESSION_ID, "my-auth-session-id");
+            cookies.set(CookieType.AUTH_SESSION_ID_HASH, "my-kc-auth-session");
             cookies.set(CookieType.AUTH_RESTART, "my-auth-restart");
             cookies.set(CookieType.AUTH_DETACHED, "my-auth-detached", 222);
             cookies.set(CookieType.IDENTITY, "my-identity", 333);
@@ -77,8 +83,9 @@ public class DefaultCookieProviderTest extends AbstractKeycloakTest {
             cookies.set(CookieType.SESSION, "my-session", 444);
             cookies.set(CookieType.WELCOME_CSRF, "my-welcome-csrf");
         });
-        Assert.assertEquals(8, response.getCookies().size());
+        Assert.assertEquals(9, response.getCookies().size());
         assertCookie(response, "AUTH_SESSION_ID", "my-auth-session-id", "/auth/realms/master/", -1, false, true, "Lax", true);
+        assertCookie(response, "KC_AUTH_SESSION_HASH", "my-kc-auth-session", "/auth/realms/master/", 60, false, false, "Lax", true);
         assertCookie(response, "KC_RESTART", "my-auth-restart", "/auth/realms/master/", -1, false, true, "Lax", false);
         assertCookie(response, "KC_STATE_CHECKER", "my-auth-detached", "/auth/realms/master/", 222, false, true, "Strict", false);
         assertCookie(response, "KEYCLOAK_IDENTITY", "my-identity", "/auth/realms/master/", 333, false, true, "Lax", true);
@@ -169,6 +176,40 @@ public class DefaultCookieProviderTest extends AbstractKeycloakTest {
         Map<String, NewCookie> cookies = response.getCookies();
         Assert.assertEquals(1, cookies.size());
         assertCookie(response, "mycookie", "myvalue", "/auth/realms/master/testing/run-on-server", 1232, false, false, null, false);
+    }
+
+    @Test
+    public void testSafariQuirks() {
+        Response response;
+
+        try (KeycloakTestingClient testingClient = createTestingClient("http://localhost:8180/auth")) {
+
+            filter.setHeader(HttpHeaders.USER_AGENT, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0.1 Safari/605.1.15");
+
+            response = testingClient.server("master").runWithResponse(session -> {
+                CookieProvider cookies = session.getProvider(CookieProvider.class);
+                cookies.set(CookieType.AUTH_SESSION_ID, "my-auth-session-id");
+                cookies.set(CookieType.AUTH_SESSION_ID_HASH, "my-kc-auth-session");
+                cookies.set(CookieType.AUTH_RESTART, "my-auth-restart");
+                cookies.set(CookieType.AUTH_DETACHED, "my-auth-detached", 222);
+                cookies.set(CookieType.IDENTITY, "my-identity", 333);
+                cookies.set(CookieType.LOCALE, "my-locale");
+                cookies.set(CookieType.LOGIN_HINT, "my-username");
+                cookies.set(CookieType.SESSION, "my-session", 444);
+                cookies.set(CookieType.WELCOME_CSRF, "my-welcome-csrf");
+            });
+        }
+
+        Assert.assertEquals(9, response.getCookies().size());
+        assertCookie(response, "AUTH_SESSION_ID", "my-auth-session-id", "/auth/realms/master/", -1, false, true, "Lax", true);
+        assertCookie(response, "KC_AUTH_SESSION_HASH", "my-kc-auth-session", "/auth/realms/master/", 60, false, false, "Lax", true);
+        assertCookie(response, "KC_RESTART", "my-auth-restart", "/auth/realms/master/", -1, false, true, "Lax", false);
+        assertCookie(response, "KC_STATE_CHECKER", "my-auth-detached", "/auth/realms/master/", 222, false, true, "Strict", false);
+        assertCookie(response, "KEYCLOAK_IDENTITY", "my-identity", "/auth/realms/master/", 333, false, true, "Lax", true);
+        assertCookie(response, "KEYCLOAK_LOCALE", "my-locale", "/auth/realms/master/", -1, false, true, "Lax", false);
+        assertCookie(response, "KEYCLOAK_REMEMBER_ME", "my-username", "/auth/realms/master/", 31536000, false, true, "Lax", false);
+        assertCookie(response, "KEYCLOAK_SESSION", "my-session", "/auth/realms/master/", 444, false, false, "Lax", true);
+        assertCookie(response, "WELCOME_STATE_CHECKER", "my-welcome-csrf", "/auth/realms/master/testing/run-on-server", 300, false, true, "Strict", false);
     }
 
     private void assertCookie(Response response, String name, String value, String path, int maxAge, boolean secure, boolean httpOnly, String sameSite, boolean verifyLegacyNotSent) {

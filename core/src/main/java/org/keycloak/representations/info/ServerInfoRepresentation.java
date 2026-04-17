@@ -17,13 +17,13 @@
 
 package org.keycloak.representations.info;
 
+import java.util.List;
+import java.util.Map;
+
 import org.keycloak.representations.idm.ComponentTypeRepresentation;
 import org.keycloak.representations.idm.PasswordPolicyTypeRepresentation;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.representations.idm.ProtocolMapperTypeRepresentation;
-
-import java.util.List;
-import java.util.Map;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -31,6 +31,7 @@ import java.util.Map;
 public class ServerInfoRepresentation {
 
     private SystemInfoRepresentation systemInfo;
+    private CpuInfoRepresentation cpuInfo;
     private MemoryInfoRepresentation memoryInfo;
     private ProfileInfoRepresentation profileInfo;
 
@@ -69,6 +70,14 @@ public class ServerInfoRepresentation {
 
     public void setMemoryInfo(MemoryInfoRepresentation memoryInfo) {
         this.memoryInfo = memoryInfo;
+    }
+
+    public CpuInfoRepresentation getCpuInfo() {
+        return cpuInfo;
+    }
+
+    public void setCpuInfo(CpuInfoRepresentation cpuInfo) {
+        this.cpuInfo = cpuInfo;
     }
 
     public ProfileInfoRepresentation getProfileInfo() {

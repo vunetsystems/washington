@@ -38,7 +38,7 @@ import org.keycloak.services.ServicesLogger;
 import org.keycloak.userprofile.UserProfileProvider;
 import org.keycloak.utils.StringUtil;
 
-import static org.keycloak.models.Constants.IS_TEMP_ADMIN_ATTR_NAME;
+import static org.keycloak.models.UserModel.IS_TEMP_ADMIN_ATTR_NAME;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -53,19 +53,16 @@ public class ApplianceBootstrap {
     }
 
     public boolean isNewInstall() {
-        if (session.realms().getRealmByName(Config.getAdminRealm()) != null) {
-            return false;
-        } else {
-            return true;
-        }
+        return session.realms().getRealmByName(Config.getAdminRealm()) == null;
     }
 
     public boolean isNoMasterUser() {
         RealmModel realm = session.realms().getRealmByName(Config.getAdminRealm());
-        return session.users().getUsersCount(realm) == 0;
+        session.getContext().setRealm(realm);
+        return session.users().getUsersCount(realm, true) == 0;
     }
 
-    public boolean createMasterRealm() {
+    public void createMasterRealm() {
         if (!isNewInstall()) {
             throw new IllegalStateException("Can't create default realm as realms already exists");
         }
@@ -109,25 +106,39 @@ public class ApplianceBootstrap {
             }
         }
         UserProfileProvider.setConfiguration(upConfig);
-
-        return true;
     }
 
     /**
      * Create a temporary admin user
-     * @param username
-     * @param password
+     * @param username the admin username
+     * @param password the admin password
+     * @param isTemporary whether the user is a temporary admin
      * @param initialUser if true only create the user if no other users exist
      * @return false if the user could not be created
      */
-    public boolean createTemporaryMasterRealmAdminUser(String username, String password, /*Integer expriationMinutes,*/ boolean initialUser) {
+    public boolean createMasterRealmAdminUser(String username, String password, boolean isTemporary, /*Integer expriationMinutes,*/ boolean initialUser) {
+        return createMasterRealmAdminUser(username, password, null, null, null, isTemporary, initialUser);
+    }
+
+    /**
+     * Create a temporary admin user with additional profile information
+     * @param username the admin username
+     * @param password the admin password
+     * @param firstName the admin user's first name (optional)
+     * @param lastName the admin user's last name (optional)
+     * @param email the admin user's email address (optional)
+     * @param isTemporary whether the user is a temporary admin
+     * @param initialUser if true only create the user if no other users exist
+     * @return false if the user could not be created
+     */
+    public boolean createMasterRealmAdminUser(String username, String password, String firstName, String lastName, String email, boolean isTemporary, /*Integer expriationMinutes,*/ boolean initialUser) {
         RealmModel realm = session.realms().getRealmByName(Config.getAdminRealm());
         session.getContext().setRealm(realm);
 
         username = StringUtil.isBlank(username) ? BootstrapAdminOptions.DEFAULT_TEMP_ADMIN_USERNAME : username;
         //expriationMinutes = expriationMinutes == null ? DEFAULT_TEMP_ADMIN_EXPIRATION : expriationMinutes;
 
-        if (initialUser && session.users().getUsersCount(realm) > 0) {
+        if (initialUser && session.users().getUsersCount(realm, true) > 0) {
             ServicesLogger.LOGGER.addAdminUserFailedUsersExist(Config.getAdminRealm());
             return false;
         }
@@ -135,8 +146,19 @@ public class ApplianceBootstrap {
         try {
             UserModel adminUser = session.users().addUser(realm, username);
             adminUser.setEnabled(true);
-            adminUser.setSingleAttribute(IS_TEMP_ADMIN_ATTR_NAME, Boolean.TRUE.toString());
-            // also set the expiration - could be relative to a creation timestamp, or computed
+            if (StringUtil.isNotBlank(firstName)) {
+                adminUser.setFirstName(firstName);
+            }
+            if (StringUtil.isNotBlank(lastName)) {
+                adminUser.setLastName(lastName);
+            }
+            if (StringUtil.isNotBlank(email)) {
+                adminUser.setEmail(email);
+            }
+            if (isTemporary) {
+                adminUser.setSingleAttribute(IS_TEMP_ADMIN_ATTR_NAME, Boolean.TRUE.toString());
+                // also set the expiration - could be relative to a creation timestamp, or computed
+            }
 
             UserCredentialModel usrCredModel = UserCredentialModel.password(password);
             adminUser.credentialManager().updateCredential(usrCredModel);
@@ -144,7 +166,10 @@ public class ApplianceBootstrap {
             RoleModel adminRole = realm.getRole(AdminRoles.ADMIN);
             adminUser.grantRole(adminRole);
 
-            ServicesLogger.LOGGER.createdTemporaryAdminUser(username);
+            if (isTemporary)
+                ServicesLogger.LOGGER.createdTemporaryAdminUser(username);
+            else
+                ServicesLogger.LOGGER.createdInitialAdminUser(username);
         } catch (ModelDuplicateException e) {
             ServicesLogger.LOGGER.addUserFailedUserExists(username, Config.getAdminRealm());
             return false;
@@ -154,7 +179,7 @@ public class ApplianceBootstrap {
 
     /**
      * Create a temporary admin service account
-     * @param clientId the client ID
+     * @param clientId     the client ID
      * @param clientSecret the client secret
      * @return false if the service account could not be created
      */
@@ -193,8 +218,12 @@ public class ApplianceBootstrap {
         return true;
     }
 
-    public void createMasterRealmUser(String username, String password) {
-        createTemporaryMasterRealmAdminUser(username, password, true);
+    public void createMasterRealmUser(String username, String password, boolean isTemporary) {
+        createMasterRealmAdminUser(username, password, null, null, null, isTemporary, true);
+    }
+
+    public void createMasterRealmUser(String username, String password, String firstName, String lastName, String email, boolean isTemporary) {
+        createMasterRealmAdminUser(username, password, firstName, lastName, email, isTemporary, true);
     }
 
 }

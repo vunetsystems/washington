@@ -16,11 +16,17 @@
  */
 package org.keycloak.protocol.oidc;
 
-import org.jboss.logging.Logger;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.keycloak.Config;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.common.Profile;
 import org.keycloak.common.constants.KerberosConstants;
+import org.keycloak.common.constants.ServiceAccountConstants;
 import org.keycloak.common.util.UriUtils;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.models.ClientModel;
@@ -32,6 +38,7 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.utils.DefaultClientScopes;
 import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.organization.protocol.mappers.oidc.OrganizationMembershipMapper;
 import org.keycloak.protocol.AbstractLoginProtocolFactory;
 import org.keycloak.protocol.LoginProtocol;
 import org.keycloak.protocol.oidc.mappers.AcrProtocolMapper;
@@ -39,25 +46,28 @@ import org.keycloak.protocol.oidc.mappers.AddressMapper;
 import org.keycloak.protocol.oidc.mappers.AllowedWebOriginsProtocolMapper;
 import org.keycloak.protocol.oidc.mappers.AudienceResolveProtocolMapper;
 import org.keycloak.protocol.oidc.mappers.FullNameMapper;
-import org.keycloak.organization.protocol.mappers.oidc.OrganizationMembershipMapper;
+import org.keycloak.protocol.oidc.mappers.SubMapper;
 import org.keycloak.protocol.oidc.mappers.UserAttributeMapper;
 import org.keycloak.protocol.oidc.mappers.UserClientRoleMappingMapper;
 import org.keycloak.protocol.oidc.mappers.UserPropertyMapper;
 import org.keycloak.protocol.oidc.mappers.UserRealmRoleMappingMapper;
 import org.keycloak.protocol.oidc.mappers.UserSessionNoteMapper;
-import org.keycloak.protocol.oidc.mappers.SubMapper;
+import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.provider.ProviderConfigurationBuilder;
 import org.keycloak.representations.IDToken;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.managers.AuthenticationManager;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import org.jboss.logging.Logger;
 
 import static org.keycloak.models.ImpersonationSessionNote.IMPERSONATOR_ID;
 import static org.keycloak.models.ImpersonationSessionNote.IMPERSONATOR_USERNAME;
+import static org.keycloak.protocol.oidc.OIDCProviderConfig.DEFAULT_ADDITIONAL_REQ_PARAMS_FAIL_FAST;
+import static org.keycloak.protocol.oidc.OIDCProviderConfig.DEFAULT_ADDITIONAL_REQ_PARAMS_MAX_NUMBER;
+import static org.keycloak.protocol.oidc.OIDCProviderConfig.DEFAULT_ADDITIONAL_REQ_PARAMS_MAX_OVERALL_SIZE;
+import static org.keycloak.protocol.oidc.OIDCProviderConfig.DEFAULT_ADDITIONAL_REQ_PARAMS_MAX_SIZE;
+import static org.keycloak.protocol.oidc.OIDCProviderConfig.DEFAULT_REQ_PARAMS_DEFAULT_MAX_SIZE;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -65,6 +75,11 @@ import static org.keycloak.models.ImpersonationSessionNote.IMPERSONATOR_USERNAME
  */
 public class OIDCLoginProtocolFactory extends AbstractLoginProtocolFactory {
     private static final Logger logger = Logger.getLogger(OIDCLoginProtocolFactory.class);
+
+    /**
+     * determines the order in which the login protocols are displayed in the dropdown boxes in the UI
+     */
+    public static final int UI_ORDER = 100;
 
     public static final String USERNAME = "username";
     public static final String EMAIL = "email";
@@ -109,14 +124,34 @@ public class OIDCLoginProtocolFactory extends AbstractLoginProtocolFactory {
     public static final String ROLES_SCOPE_CONSENT_TEXT = "${rolesScopeConsentText}";
     public static final String ORGANIZATION_SCOPE_CONSENT_TEXT = "${organizationScopeConsentText}";
 
+    public static final String CONFIG_OIDC_REQ_PARAMS_DEFAULT_MAX_SIZE = "req-params-default-max-size";
+    public static final String CONFIG_OIDC_REQ_PARAMS_MAX_SIZE_PREFIX = "req-params-max-size";
+    public static final String CONFIG_OIDC_ADD_REQ_PARAMS_MAX_NUMBER = "add-req-params-max-number";
+    public static final String CONFIG_OIDC_ADD_REQ_PARAMS_MAX_SIZE = "add-req-params-max-size";
+    public static final String CONFIG_OIDC_ADD_REQ_PARAMS_MAX_OVERALL_SIZE = "add-req-params-max-overall-size";
+    public static final String CONFIG_OIDC_ADD_REQ_PARAMS_FAIL_FAST = "add-req-params-fail-fast";
+
+    /**
+     * @deprecated To be removed in Keycloak 27
+     */
+    public static final String CONFIG_OIDC_ALLOW_MULTIPLE_AUDIENCES_FOR_JWT_CLIENT_AUTHENTICATION = "allow-multiple-audiences-for-jwt-client-authentication";
+
+    private OIDCProviderConfig providerConfig;
+
     @Override
     public void init(Config.Scope config) {
+        this.providerConfig = new OIDCProviderConfig(config);
+        if (this.providerConfig.isAllowMultipleAudiencesForJwtClientAuthentication()) {
+            logger.warnf("It is allowed to have multiple audiences for the JWT client authentication. This option is not recommended and will be removed in one of the future releases."
+                    + " It is recommended to update your OAuth/OIDC clients to rather use single audience in the JWT token used for the client authentication.");
+        }
+
         initBuiltIns();
     }
 
     @Override
     public LoginProtocol create(KeycloakSession session) {
-        return new OIDCLoginProtocol().setSession(session);
+        return new OIDCLoginProtocol(this.providerConfig).setSession(session);
     }
 
     @Override
@@ -298,6 +333,7 @@ public class OIDCLoginProtocolFactory extends AbstractLoginProtocolFactory {
         addMicroprofileJWTClientScope(newRealm);
         addAcrClientScope(newRealm);
         addBasicClientScope(newRealm);
+        addServiceAccountClientScope(newRealm);
 
         if (Profile.isFeatureEnabled(Profile.Feature.ORGANIZATION)) {
             ClientScopeModel organizationScope = newRealm.addClientScope(OAuth2Constants.ORGANIZATION);
@@ -426,6 +462,36 @@ public class OIDCLoginProtocolFactory extends AbstractLoginProtocolFactory {
         return basicScope;
     }
 
+    public ClientScopeModel addServiceAccountClientScope(RealmModel newRealm) {
+        ClientScopeModel serviceAccountScope = KeycloakModelUtils.getClientScopeByName(newRealm, ServiceAccountConstants.SERVICE_ACCOUNT_SCOPE);
+        if (serviceAccountScope == null) {
+            serviceAccountScope = newRealm.addClientScope(ServiceAccountConstants.SERVICE_ACCOUNT_SCOPE);
+            serviceAccountScope.setDescription("Specific scope for a client enabled for service accounts");
+            serviceAccountScope.setDisplayOnConsentScreen(false);
+            serviceAccountScope.setIncludeInTokenScope(false);
+            serviceAccountScope.setProtocol(getId());
+            serviceAccountScope.addProtocolMapper(UserSessionNoteMapper.createClaimMapper(ServiceAccountConstants.CLIENT_ID_PROTOCOL_MAPPER,
+                    ServiceAccountConstants.CLIENT_ID,
+                    ServiceAccountConstants.CLIENT_ID, "String",
+                    true, true, true));
+            serviceAccountScope.addProtocolMapper(UserSessionNoteMapper.createClaimMapper(ServiceAccountConstants.CLIENT_HOST_PROTOCOL_MAPPER,
+                    ServiceAccountConstants.CLIENT_HOST,
+                    ServiceAccountConstants.CLIENT_HOST, "String",
+                    true, true, true));
+            serviceAccountScope.addProtocolMapper(UserSessionNoteMapper.createClaimMapper(ServiceAccountConstants.CLIENT_ADDRESS_PROTOCOL_MAPPER,
+                    ServiceAccountConstants.CLIENT_ADDRESS,
+                    ServiceAccountConstants.CLIENT_ADDRESS, "String",
+                    true, true, true));
+
+            logger.debugf("Client scope '%s' created in the realm '%s'.", ServiceAccountConstants.SERVICE_ACCOUNT_SCOPE, newRealm.getName());
+        } else {
+            logger.debugf("Client scope '%s' already exists in realm '%s'. Skip creating it.", ServiceAccountConstants.SERVICE_ACCOUNT_SCOPE, newRealm.getName());
+        }
+
+        return serviceAccountScope;
+    }
+
+
     @Override
     protected void addDefaults(ClientModel client) {
     }
@@ -492,4 +558,55 @@ public class OIDCLoginProtocolFactory extends AbstractLoginProtocolFactory {
         }
     }
 
+    /**
+     * defines the option-order in the admin-ui
+     */
+    @Override
+    public int order() {
+        return UI_ORDER;
+    }
+
+    @Override
+    public List<ProviderConfigProperty> getConfigMetadata() {
+        return ProviderConfigurationBuilder.create()
+                .property()
+                    .name(CONFIG_OIDC_REQ_PARAMS_DEFAULT_MAX_SIZE)
+                    .type("int")
+                    .helpText("Maximum default length of the standard OIDC parameter sent to the OIDC authentication or token endpoints. This applies to most of the standard parameters like for example 'state', 'nonce' etc." +
+                            " The exception is 'login_hint' parameter, which has maximum length of 255 characters.")
+                    .defaultValue(DEFAULT_REQ_PARAMS_DEFAULT_MAX_SIZE)
+                    .add()
+                .property()
+                    .name(CONFIG_OIDC_REQ_PARAMS_MAX_SIZE_PREFIX + "--" + OIDCLoginProtocol.LOGIN_HINT_PARAM)
+                    .type("int")
+                    .helpText("Maximum length of the standard parameter sent to OIDC authentication or token endpoints overriden for the specified parameter. Useful if some standard OIDC parameter should have different limit than '" + CONFIG_OIDC_REQ_PARAMS_DEFAULT_MAX_SIZE +
+                            "'. It is needed to add the name of the parameter after this prefix into the configuration. In this example, the '" + OIDCLoginProtocol.LOGIN_HINT_PARAM + "' parameter is used, but this format is supported for any known standard OIDC/OAuth2 parameter.")
+                    .add()
+                .property()
+                    .name(CONFIG_OIDC_ADD_REQ_PARAMS_MAX_NUMBER)
+                    .type("int")
+                    .helpText("Maximum number of additional request parameters sent to the OIDC authentication or token endpoints. As 'additional request parameter' is meant some custom parameter not directly treated as standard OIDC/OAuth2 protocol parameter. Additional parameters might be useful for example to add custom claims to the OIDC token (in case that also particular protocol mappers are configured).")
+                    .defaultValue(DEFAULT_ADDITIONAL_REQ_PARAMS_MAX_NUMBER)
+                    .add()
+                .property()
+                    .name(CONFIG_OIDC_ADD_REQ_PARAMS_MAX_SIZE)
+                    .type("int")
+                    .helpText("Maximum size of single additional request parameter value See '" + CONFIG_OIDC_ADD_REQ_PARAMS_MAX_NUMBER + "' for more details about additional request parameters")
+                    .defaultValue(DEFAULT_ADDITIONAL_REQ_PARAMS_MAX_SIZE)
+                    .add()
+                .property()
+                    .name(CONFIG_OIDC_ADD_REQ_PARAMS_MAX_OVERALL_SIZE)
+                    .type("int")
+                    .helpText("Maximum size of all additional request parameters values together. See '" + CONFIG_OIDC_ADD_REQ_PARAMS_MAX_NUMBER + "' for more details about additional request parameters")
+                    .defaultValue(DEFAULT_ADDITIONAL_REQ_PARAMS_MAX_OVERALL_SIZE)
+                    .add()
+                .property()
+                    .name(CONFIG_OIDC_ADD_REQ_PARAMS_FAIL_FAST)
+                    .type("boolean")
+                    .helpText("Whether the fail-fast strategy should be enforced in case if the limit for some standard OIDC parameter or additional OIDC parameter is not met for the parameters sent to the OIDC authentication or token endpoints." +
+                            " If false, then all additional request parameters to not meet the configuration are silently ignored. If true, an exception will be raised and request to the OIDC authentication or token endpoints will not be allowed.")
+                    .defaultValue(DEFAULT_ADDITIONAL_REQ_PARAMS_FAIL_FAST)
+                    .add()
+                .build();
+    }
 }

@@ -17,19 +17,11 @@
 
 package org.keycloak.testsuite.client.policies;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
-import static org.keycloak.testsuite.util.ClientPoliciesUtil.createClientUpdateContextConditionConfig;
-import static org.keycloak.testsuite.util.ClientPoliciesUtil.createSecureClientAuthenticatorExecutorConfig;
-
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Test;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.authentication.authenticators.client.ClientIdAndSecretAuthenticator;
 import org.keycloak.authentication.authenticators.client.JWTClientAuthenticator;
@@ -51,7 +43,6 @@ import org.keycloak.services.clientpolicy.executor.SecureClientAuthenticatorExec
 import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.pages.ErrorPage;
 import org.keycloak.testsuite.pages.LogoutConfirmPage;
-import org.keycloak.testsuite.pages.OAuth2DeviceVerificationPage;
 import org.keycloak.testsuite.pages.OAuthGrantPage;
 import org.keycloak.testsuite.util.ClientBuilder;
 import org.keycloak.testsuite.util.ClientPoliciesUtil.ClientPoliciesBuilder;
@@ -60,6 +51,16 @@ import org.keycloak.testsuite.util.ClientPoliciesUtil.ClientProfileBuilder;
 import org.keycloak.testsuite.util.ClientPoliciesUtil.ClientProfilesBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
 
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Test;
+
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
+import static org.keycloak.testsuite.util.ClientPoliciesUtil.createClientUpdateContextConditionConfig;
+import static org.keycloak.testsuite.util.ClientPoliciesUtil.createSecureClientAuthenticatorExecutorConfig;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
 /**
  * This test class is for testing client policies' related actions done through an admin console, admin CLI, and admin REST API.
  * 
@@ -67,9 +68,6 @@ import org.keycloak.testsuite.util.UserBuilder;
  */
 @EnableFeature(value = Profile.Feature.CLIENT_SECRET_ROTATION)
 public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
-
-    @Page
-    protected OAuth2DeviceVerificationPage verificationPage;
 
     @Page
     protected OAuthGrantPage grantPage;
@@ -105,7 +103,7 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
         user.setUsername("create-clients");
         user.setCredentials(credentials);
         user.setClientRoles(Collections.singletonMap(Constants.REALM_MANAGEMENT_CLIENT_ID, Collections.singletonList(AdminRoles.CREATE_CLIENT)));
-        user.setGroups(Arrays.asList("topGroup")); // defined in testrealm.json
+        user.setGroups(List.of("topGroup")); // defined in testrealm.json
 
         users.add(user);
 
@@ -145,9 +143,7 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
     public void testAdminClientRegisterUnacceptableAuthType() throws Exception {
         setupPolicyClientIdAndSecretNotAcceptableAuthType(POLICY_NAME);
         try {
-            createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-                clientRep.setClientAuthenticatorType(ClientIdAndSecretAuthenticator.PROVIDER_ID);
-            });
+            createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(ClientIdAndSecretAuthenticator.PROVIDER_ID));
             fail();
         } catch (ClientPolicyException e) {
             assertEquals(OAuthErrorException.INVALID_CLIENT_METADATA, e.getMessage());
@@ -157,9 +153,7 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
     @Test
     public void testAdminClientRegisterAcceptableAuthType() throws Exception {
         setupPolicyClientIdAndSecretNotAcceptableAuthType(POLICY_NAME);
-        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-            clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID);
-        });
+        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID));
         assertEquals(JWTClientSecretAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
     }
 
@@ -167,8 +161,7 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
     public void testAdminClientRegisterDefaultAuthType() throws Exception {
         setupPolicyClientIdAndSecretNotAcceptableAuthType(POLICY_NAME);
         try {
-            createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-            });
+            createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {});
             fail();
         } catch (ClientPolicyException e) {
             assertEquals(OAuthErrorException.INVALID_CLIENT_METADATA, e.getMessage());
@@ -178,14 +171,10 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
     @Test
     public void testAdminClientUpdateUnacceptableAuthType() throws Exception {
         setupPolicyClientIdAndSecretNotAcceptableAuthType(POLICY_NAME);
-        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-            clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID);
-        });
+        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID));
         assertEquals(JWTClientSecretAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
         try {
-            updateClientByAdmin(cId, (ClientRepresentation clientRep) -> {
-                clientRep.setClientAuthenticatorType(ClientIdAndSecretAuthenticator.PROVIDER_ID);
-            });
+            updateClientByAdmin(cId, (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(ClientIdAndSecretAuthenticator.PROVIDER_ID));
             fail();
         } catch (ClientPolicyException cpe) {
             assertEquals(OAuthErrorException.INVALID_CLIENT_METADATA, cpe.getError());
@@ -197,15 +186,11 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
     public void testAdminClientUpdateAcceptableAuthType() throws Exception {
         setupPolicyClientIdAndSecretNotAcceptableAuthType(POLICY_NAME);
 
-        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-            clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID);
-        });
+        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID));
 
         assertEquals(JWTClientSecretAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
 
-        updateClientByAdmin(cId, (ClientRepresentation clientRep) -> {
-            clientRep.setClientAuthenticatorType(JWTClientAuthenticator.PROVIDER_ID);
-        });
+        updateClientByAdmin(cId, (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(JWTClientAuthenticator.PROVIDER_ID));
         assertEquals(JWTClientAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
     }
 
@@ -213,15 +198,11 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
     public void testAdminClientUpdateDefaultAuthType() throws Exception {
         setupPolicyClientIdAndSecretNotAcceptableAuthType(POLICY_NAME);
 
-        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-            clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID);
-        });
+        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID));
 
         assertEquals(JWTClientSecretAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
 
-        updateClientByAdmin(cId, (ClientRepresentation clientRep) -> {
-            clientRep.setServiceAccountsEnabled(Boolean.FALSE);
-        });
+        updateClientByAdmin(cId, (ClientRepresentation clientRep) -> clientRep.setServiceAccountsEnabled(Boolean.FALSE));
         assertEquals(JWTClientSecretAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
         assertEquals(Boolean.FALSE, getClientByAdmin(cId).isServiceAccountsEnabled());
     }
@@ -243,7 +224,7 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
         json = (new ClientPoliciesBuilder()).addPolicy(
                 (new ClientPolicyBuilder()).createPolicy(POLICY_NAME, "Persha Polityka", Boolean.TRUE)
                         .addCondition(ClientUpdaterContextConditionFactory.PROVIDER_ID,
-                                createClientUpdateContextConditionConfig(Arrays.asList(ClientUpdaterContextConditionFactory.BY_AUTHENTICATED_USER)))
+                                createClientUpdateContextConditionConfig(List.of(ClientUpdaterContextConditionFactory.BY_AUTHENTICATED_USER)))
                         .addProfile(PROFILE_NAME)
                         .toRepresentation()
         ).toString();
@@ -251,17 +232,14 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
 
         // Attempt to create client with set authenticator to ClientIdAndSecretAuthenticator. Should fail
         try {
-            createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-                clientRep.setClientAuthenticatorType(ClientIdAndSecretAuthenticator.PROVIDER_ID);
-            });
+            createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(ClientIdAndSecretAuthenticator.PROVIDER_ID));
             fail();
         } catch (ClientPolicyException e) {
             assertEquals(OAuthErrorException.INVALID_CLIENT_METADATA, e.getMessage());
         }
 
         // Attempt to create client without set authenticator. Default authenticator should be set
-        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {
-        });
+        String cId = createClientByAdmin(generateSuffixedName(CLIENT_NAME), (ClientRepresentation clientRep) -> {});
 
         assertEquals(X509ClientAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
 
@@ -277,9 +255,7 @@ public class ClientPoliciesAdminTest extends AbstractClientPoliciesTest {
         updateProfiles(json);
 
         // It is allowed to update authenticator to one of allowed client authenticators. Default client authenticator is not explicitly set in this case
-        updateClientByAdmin(cId, (ClientRepresentation clientRep) -> {
-            clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID);
-        });
+        updateClientByAdmin(cId, (ClientRepresentation clientRep) -> clientRep.setClientAuthenticatorType(JWTClientSecretAuthenticator.PROVIDER_ID));
         assertEquals(JWTClientSecretAuthenticator.PROVIDER_ID, getClientByAdmin(cId).getClientAuthenticatorType());
     }
 }

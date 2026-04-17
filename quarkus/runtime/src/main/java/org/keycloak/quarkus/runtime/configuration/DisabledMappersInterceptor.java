@@ -17,15 +17,17 @@
 
 package org.keycloak.quarkus.runtime.configuration;
 
+import java.util.Iterator;
+
+import jakarta.annotation.Priority;
+
+import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMappers;
+
 import io.smallrye.config.ConfigSourceInterceptor;
 import io.smallrye.config.ConfigSourceInterceptorContext;
 import io.smallrye.config.ConfigValue;
 import io.smallrye.config.Priorities;
-import jakarta.annotation.Priority;
 import org.apache.commons.collections4.iterators.FilterIterator;
-import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMappers;
-
-import java.util.Iterator;
 
 import static org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvider.NS_KEYCLOAK_PREFIX;
 
@@ -81,6 +83,10 @@ public class DisabledMappersInterceptor implements ConfigSourceInterceptor {
     }
 
     public static void runWithDisabled(Runnable execution) {
+        if (!isEnabled()) {
+            execution.run();
+            return;
+        }
         try {
             disable();
             execution.run();

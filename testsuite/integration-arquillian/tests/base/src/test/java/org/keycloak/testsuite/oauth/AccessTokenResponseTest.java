@@ -1,17 +1,10 @@
 package org.keycloak.testsuite.oauth;
 
-import static org.junit.Assert.assertEquals;
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
-
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.mappers.HardcodedClaim;
@@ -21,8 +14,16 @@ import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.AbstractKeycloakTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.util.ClientManager;
-import org.keycloak.testsuite.util.OAuthClient;
 import org.keycloak.testsuite.util.UserBuilder;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
+
+import static org.junit.Assert.assertEquals;
 
 public class AccessTokenResponseTest extends AbstractKeycloakTest {
 
@@ -75,8 +76,8 @@ public class AccessTokenResponseTest extends AbstractKeycloakTest {
     public void accessTokenRequest() {
         oauth.doLogin("test-user@localhost", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         assertEquals(200, response.getStatusCode());
 

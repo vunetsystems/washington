@@ -16,14 +16,24 @@
  */
 package org.keycloak.services.resources;
 
-import org.jboss.logging.Logger;
-import org.keycloak.common.Profile;
-import org.keycloak.common.Profile.Feature;
-import org.keycloak.forms.login.LoginFormsProvider;
-import org.keycloak.forms.login.MessageType;
-import org.keycloak.forms.login.freemarker.DetachedInfoStateChecker;
-import org.keycloak.forms.login.freemarker.DetachedInfoStateCookie;
-import org.keycloak.http.HttpRequest;
+import java.net.URI;
+import java.util.Map;
+
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HEAD;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriBuilderException;
+import jakarta.ws.rs.core.UriInfo;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.TokenVerifier;
 import org.keycloak.authentication.AuthenticationFlowException;
@@ -35,7 +45,6 @@ import org.keycloak.authentication.RequiredActionFactory;
 import org.keycloak.authentication.RequiredActionProvider;
 import org.keycloak.authentication.actiontoken.ActionTokenContext;
 import org.keycloak.authentication.actiontoken.ActionTokenHandler;
-import org.keycloak.models.DefaultActionTokenKey;
 import org.keycloak.authentication.actiontoken.ExplainedTokenVerificationException;
 import org.keycloak.authentication.actiontoken.resetcred.ResetCredentialsActionTokenHandler;
 import org.keycloak.authentication.authenticators.broker.AbstractIdpAuthenticator;
@@ -44,6 +53,8 @@ import org.keycloak.authentication.authenticators.broker.util.SerializedBrokered
 import org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.common.ClientConnection;
+import org.keycloak.common.Profile;
+import org.keycloak.common.Profile.Feature;
 import org.keycloak.common.VerificationException;
 import org.keycloak.common.util.Time;
 import org.keycloak.common.util.TriFunction;
@@ -54,16 +65,21 @@ import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
 import org.keycloak.exceptions.TokenNotActiveException;
-import org.keycloak.models.KeycloakContext;
-import org.keycloak.models.OrganizationModel;
-import org.keycloak.models.SingleUseObjectKeyModel;
+import org.keycloak.forms.login.LoginFormsProvider;
+import org.keycloak.forms.login.MessageType;
+import org.keycloak.forms.login.freemarker.DetachedInfoStateChecker;
+import org.keycloak.forms.login.freemarker.DetachedInfoStateCookie;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.models.AuthenticationFlowModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.ClientSessionContext;
 import org.keycloak.models.Constants;
+import org.keycloak.models.DefaultActionTokenKey;
+import org.keycloak.models.KeycloakContext;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.SingleUseObjectKeyModel;
 import org.keycloak.models.UserConsentModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
@@ -77,6 +93,7 @@ import org.keycloak.protocol.AuthorizationEndpointBase;
 import org.keycloak.protocol.LoginProtocol;
 import org.keycloak.protocol.LoginProtocol.Error;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
+import org.keycloak.protocol.oidc.grants.device.DeviceGrantType;
 import org.keycloak.protocol.oidc.utils.OIDCResponseMode;
 import org.keycloak.protocol.oidc.utils.OIDCResponseType;
 import org.keycloak.protocol.oidc.utils.RedirectUtils;
@@ -97,21 +114,7 @@ import org.keycloak.services.util.LocaleUtil;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
 
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.QueryParam;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.MultivaluedMap;
-import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriBuilder;
-import jakarta.ws.rs.core.UriBuilderException;
-import jakarta.ws.rs.core.UriInfo;
-import java.net.URI;
-import java.util.Map;
+import org.jboss.logging.Logger;
 
 import static org.keycloak.authentication.actiontoken.DefaultActionToken.ACTION_TOKEN_BASIC_CHECKS;
 import static org.keycloak.models.utils.DefaultRequiredActions.getDefaultRequiredActionCaseInsensitively;
@@ -446,19 +449,19 @@ public class LoginActionsService {
         AuthenticationSessionModel authSession = new AuthenticationSessionManager(session).getCurrentAuthenticationSession(realm, client, tabId);
         processLocaleParam(authSession);
 
+        event.event(EventType.RESET_PASSWORD);
         // we allow applications to link to reset credentials without going through OAuth or SAML handshakes
         if (authSession == null && code == null && clientData == null) {
             if (!realm.isResetPasswordAllowed()) {
-                event.event(EventType.RESET_PASSWORD);
                 event.error(Errors.NOT_ALLOWED);
                 return ErrorPage.error(session, null, Response.Status.BAD_REQUEST, Messages.RESET_CREDENTIAL_NOT_ALLOWED);
 
             }
             authSession = createAuthenticationSessionForClient(clientId, redirectUri);
+            processLocaleParam(authSession);
             return processResetCredentials(false, null, authSession, null);
         }
 
-        event.event(EventType.RESET_PASSWORD);
         return resetCredentials(authSessionId, code, execution, clientId, tabId, clientData);
     }
 
@@ -547,6 +550,19 @@ public class LoginActionsService {
                                        @QueryParam(Constants.CLIENT_DATA) String clientData,
                                        @QueryParam(Constants.TAB_ID) String tabId) {
         return handleActionToken(key, execution, clientId, tabId, clientData, null);
+    }
+
+    /**
+     * Skip processing {@link jakarta.ws.rs.HttpMethod#HEAD} requests for action tokens
+     * as they are usually used by mail servers to validate links. The actual request will eventually be
+     * processed by the {@link #executeActionToken} method.
+     *
+     * @return a {@link Response.Status#OK} response with no message body
+     */
+    @Path("action-token")
+    @HEAD
+    public Response executeActionTokenHead() {
+        return Response.ok().build();
     }
 
     protected <T extends JsonWebToken & SingleUseObjectKeyModel> Response handleActionToken(String tokenString, String execution, String clientId, String tabId, String clientData, 
@@ -642,6 +658,11 @@ public class LoginActionsService {
         tokenContext = new ActionTokenContext<>(session, realm, sessionContext.getUri(), clientConnection, request, event, handler, execution, clientData, this::processFlow, this::brokerLoginFlow);
 
         if (preHandleToken != null) {
+            KeycloakContext context = session.getContext();
+            authSession = context.getAuthenticationSession();
+            if (authSession != null) {
+                tokenContext.setAuthenticationSession(authSession, false);
+            }
             return preHandleToken.apply(handler, token, tokenContext);
         }
 
@@ -761,8 +782,9 @@ public class LoginActionsService {
                                  @QueryParam(Constants.EXECUTION) String execution,
                                  @QueryParam(Constants.CLIENT_ID) String clientId,
                                  @QueryParam(Constants.CLIENT_DATA) String clientData,
-                                 @QueryParam(Constants.TAB_ID) String tabId) {
-        return registerRequest(authSessionId, code, execution, clientId,  tabId,clientData);
+                                 @QueryParam(Constants.TAB_ID) String tabId,
+                                 @QueryParam(Constants.TOKEN) String tokenString) {
+        return registerRequest(authSessionId, code, execution, clientId,  tabId,clientData, tokenString);
     }
 
 
@@ -781,21 +803,12 @@ public class LoginActionsService {
                                     @QueryParam(Constants.CLIENT_DATA) String clientData,
                                     @QueryParam(Constants.TAB_ID) String tabId,
                                     @QueryParam(Constants.TOKEN) String tokenString) {
-        
-        if (Profile.isFeatureEnabled(Profile.Feature.ORGANIZATION) && tokenString != null) {
-            //this call should extract orgId from token and set the organization to the session context
-            preHandleActionToken(tokenString);
-        }
-        return registerRequest(authSessionId, code, execution, clientId, tabId, clientData);
+        return registerRequest(authSessionId, code, execution, clientId, tabId, clientData, tokenString);
     }
 
 
-    private Response registerRequest(String authSessionId, String code, String execution, String clientId, String tabId, String clientData) {
+    private Response registerRequest(String authSessionId, String code, String execution, String clientId, String tabId, String clientData, String tokenString) {
         event.event(EventType.REGISTER);
-        if (!Organizations.isRegistrationAllowed(session, realm)) {
-            event.error(Errors.REGISTRATION_DISABLED);
-            return ErrorPage.error(session, null, Response.Status.BAD_REQUEST, Messages.REGISTRATION_NOT_ALLOWED);
-        }
 
         SessionCodeChecks checks = checksForCode(authSessionId, code, execution, clientId, tabId, clientData, REGISTRATION_PATH);
         if (!checks.verifyActiveAndValidAction(AuthenticationSessionModel.Action.AUTHENTICATE.name(), ClientSessionCode.ActionType.LOGIN)) {
@@ -804,9 +817,24 @@ public class LoginActionsService {
 
         AuthenticationSessionModel authSession = checks.getAuthenticationSession();
 
+        session.getContext().setAuthenticationSession(authSession);
+
         processLocaleParam(authSession);
 
         AuthenticationManager.expireIdentityCookie(session);
+
+        if (Profile.isFeatureEnabled(Profile.Feature.ORGANIZATION) && tokenString != null) {
+            //this call should extract orgId from token and set the organization to the session context
+            Response response = preHandleActionToken(tokenString);
+            if (response != null) {
+                return response;
+            }
+        }
+
+        if (!Organizations.isRegistrationAllowed(session, realm)) {
+            event.error(Errors.REGISTRATION_DISABLED);
+            return ErrorPage.error(session, null, Response.Status.BAD_REQUEST, Messages.REGISTRATION_NOT_ALLOWED);
+        }
 
         return processRegistration(checks.isActionRequest(), execution, authSession, null);
     }
@@ -908,9 +936,8 @@ public class LoginActionsService {
         }
 
         event.detail(Details.IDENTITY_PROVIDER, identityProviderAlias)
-                .detail(Details.IDENTITY_PROVIDER_USERNAME, brokerContext.getUsername());
-
-        event.success();
+                .detail(Details.IDENTITY_PROVIDER_USERNAME, brokerContext.getUsername())
+                .detail(Details.IDENTITY_PROVIDER_BROKER_SESSION_ID, brokerContext.getBrokerSessionId());
 
         AuthenticationProcessor processor = new AuthenticationProcessor() {
 
@@ -926,7 +953,7 @@ public class LoginActionsService {
                                 .setHttpHeaders(headers)
                                 .setUriInfo(session.getContext().getUri())
                                 .setEventBuilder(event);
-                        return protocol.sendError(authSession, Error.PASSIVE_INTERACTION_REQUIRED);
+                        return protocol.sendError(authSession, Error.PASSIVE_INTERACTION_REQUIRED, null);
                     }
                 }
                 return challenge;
@@ -948,7 +975,10 @@ public class LoginActionsService {
 
         configureOrganization(brokerContext);
 
-        return processFlow(checks.isActionRequest(), execution, authSession, flowPath, brokerLoginFlow, null, processor);
+        Response response = processFlow(checks.isActionRequest(), execution, authSession, flowPath, brokerLoginFlow, null, processor);
+        event.success();
+
+        return response;
     }
 
     private void configureOrganization(BrokeredIdentityContext brokerContext) {
@@ -1015,9 +1045,14 @@ public class LoginActionsService {
                     .setHttpHeaders(headers)
                     .setUriInfo(session.getContext().getUri())
                     .setEventBuilder(event);
-            Response response = protocol.sendError(authSession, Error.CONSENT_DENIED);
+            Response response = protocol.sendError(authSession, Error.CONSENT_DENIED, null);
             event.error(Errors.REJECTED_BY_USER);
             return response;
+        }
+
+        if (DeviceGrantType.isDeviceCodeDeniedForDeviceVerificationFlow(session, realm, authSession)) {
+            event.error(Errors.REJECTED_BY_USER);
+            return DeviceGrantType.denyOAuth2DeviceAuthorization(authSession, Error.CONSENT_DENIED, session);
         }
 
         UserConsentModel grantedConsent = UserConsentManager.getConsentByClient(session, realm, user, client.getId());
@@ -1046,9 +1081,9 @@ public class LoginActionsService {
         }
 
         event.detail(Details.CONSENT, Details.CONSENT_VALUE_CONSENT_GRANTED);
-        event.success();
 
         ClientSessionContext clientSessionCtx = AuthenticationProcessor.attachSession(authSession, null, session, realm, clientConnection, event);
+        event.success();
         return AuthenticationManager.redirectAfterSuccessfulFlow(session, realm, clientSessionCtx.getClientSession().getUserSession(), clientSessionCtx, request, session.getContext().getUri(), clientConnection, event, authSession);
     }
 
@@ -1164,7 +1199,7 @@ public class LoginActionsService {
         if (isCancelAppInitiatedAction(factory.getId(), authSession, context)) {
             provider.initiatedActionCanceled(session, authSession);
             AuthenticationManager.setKcActionStatus(factory.getId(), RequiredActionContext.KcActionStatus.CANCELLED, authSession);
-            context.success();
+            context.cancel();
         } else {
             provider.processAction(context);
         }
@@ -1173,7 +1208,14 @@ public class LoginActionsService {
             authSession.setAuthNote(AuthenticationProcessor.LAST_PROCESSED_EXECUTION, action);
         }
 
-        if (context.getStatus() == RequiredActionContext.Status.SUCCESS) {
+        if (context.getStatus() == RequiredActionContext.Status.CANCELLED) {
+            event.clone().error(Errors.REJECTED_BY_USER);
+            initLoginEvent(authSession);
+            event.event(EventType.LOGIN);
+            authSession.removeAuthNote(AuthenticationProcessor.CURRENT_AUTHENTICATION_EXECUTION);
+            AuthenticationManager.setKcActionStatus(factory.getId(), RequiredActionContext.KcActionStatus.CANCELLED, authSession);
+            response = AuthenticationManager.nextActionAfterAuthentication(session, authSession, clientConnection, request, session.getContext().getUri(), event);
+        } else if (context.getStatus() == RequiredActionContext.Status.SUCCESS) {
             event.clone().success();
             initLoginEvent(authSession);
             event.event(EventType.LOGIN);
@@ -1204,7 +1246,7 @@ public class LoginActionsService {
         event.detail(Details.CUSTOM_REQUIRED_ACTION, action);
 
         event.error(Errors.REJECTED_BY_USER);
-        return protocol.sendError(authSession, error);
+        return protocol.sendError(authSession, error, context.getErrorMessage());
     }
 
     private boolean isCancelAppInitiatedAction(String providerId, AuthenticationSessionModel authSession, RequiredActionContextResult context) {

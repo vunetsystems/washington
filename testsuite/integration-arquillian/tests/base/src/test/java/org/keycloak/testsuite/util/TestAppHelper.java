@@ -16,14 +16,12 @@
  */
 package org.keycloak.testsuite.util;
 
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.pages.LoginTotpPage;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
-import jakarta.ws.rs.core.Response;
-import java.io.IOException;
 
 public class TestAppHelper {
     private OAuthClient oauth;
@@ -64,8 +62,8 @@ public class TestAppHelper {
     }
 
     public void completeLogin() {
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        OAuthClient.AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse tokenResponse = oauth.doAccessTokenRequest(code);
         refreshToken = tokenResponse.getRefreshToken();
     }
 
@@ -98,9 +96,9 @@ public class TestAppHelper {
     }
 
     public boolean logout() {
-        try (CloseableHttpResponse response = oauth.doLogout(refreshToken, "password")) {
-            return response.getStatusLine().getStatusCode() == Response.Status.NO_CONTENT.getStatusCode();
-        } catch (IOException e) {
+        try {
+            return oauth.doLogout(refreshToken).isSuccess();
+        } catch (RuntimeException e) {
             return false;
         }
     }

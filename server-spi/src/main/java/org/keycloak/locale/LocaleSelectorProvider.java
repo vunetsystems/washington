@@ -16,11 +16,12 @@
  */
 package org.keycloak.locale;
 
+import java.util.Locale;
+
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.provider.Provider;
-
-import java.util.Locale;
+import org.keycloak.theme.Theme;
 
 public interface LocaleSelectorProvider extends Provider {
 
@@ -35,5 +36,13 @@ public interface LocaleSelectorProvider extends Provider {
      * @return
      */
     Locale resolveLocale(RealmModel realm, UserModel user);
+
+    default Locale resolveLocale(RealmModel realm, UserModel user, Theme.Type themeType) {
+        return resolveLocale(realm, user);
+    }
+
+    default Locale resolveLocale(RealmModel realm, UserModel user, boolean ignoreAcceptLanguageHeader) {
+        return resolveLocale(realm, user);
+    }
 
 }

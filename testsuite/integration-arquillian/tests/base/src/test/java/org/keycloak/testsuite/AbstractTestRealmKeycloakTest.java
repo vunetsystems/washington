@@ -17,10 +17,10 @@
 
 package org.keycloak.testsuite;
 
-import org.junit.After;
+import java.lang.reflect.Field;
+import java.util.List;
+
 import org.keycloak.admin.client.resource.RealmResource;
-import org.keycloak.common.ClientConnection;
-import org.keycloak.common.util.Resteasy;
 import org.keycloak.common.util.reflections.Reflections;
 import org.keycloak.events.Details;
 import org.keycloak.models.KeycloakSession;
@@ -29,12 +29,11 @@ import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
-import java.lang.reflect.Field;
-import java.util.List;
+import org.junit.Before;
 
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
 
 /**
  * This class provides loading of the testRealm called "test".  It also
@@ -43,7 +42,9 @@ import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
  * @author Stan Silvert ssilvert@redhat.com (C) 2016 Red Hat Inc.
  */
 public abstract class AbstractTestRealmKeycloakTest extends AbstractKeycloakTest {
+
     public static final String TEST_REALM_NAME = "test";
+    public static final String clientId = "test-app";
 
     protected RealmResource testRealm() {
         return adminClient.realm(TEST_REALM_NAME);
@@ -61,7 +62,7 @@ public abstract class AbstractTestRealmKeycloakTest extends AbstractKeycloakTest
 
     protected ClientRepresentation findTestApp(RealmRepresentation testRealm) {
         for (ClientRepresentation client : testRealm.getClients()) {
-            if (client.getClientId().equals("test-app")) return client;
+            if (client.getClientId().equals(clientId)) return client;
         }
 
         return null;
@@ -78,8 +79,13 @@ public abstract class AbstractTestRealmKeycloakTest extends AbstractKeycloakTest
     }
 
 
-    // Logout user after test
-    @After
+    @Before
+    @Override
+    public void beforeAbstractKeycloakTest() throws Exception {
+        deleteCookies();
+        super.beforeAbstractKeycloakTest();
+    }
+
     public void deleteCookies() {
         deleteAllCookiesForRealm("test");
     }
@@ -96,11 +102,11 @@ public abstract class AbstractTestRealmKeycloakTest extends AbstractKeycloakTest
 
     protected IDToken sendTokenRequestAndGetIDToken(EventRepresentation loginEvent) {
 
-        OAuthClient.AccessTokenResponse response = sendTokenRequestAndGetResponse(loginEvent);
+        AccessTokenResponse response = sendTokenRequestAndGetResponse(loginEvent);
         return oauth.verifyIDToken(response.getIdToken());
     }
 
-    protected OAuthClient.AccessTokenResponse sendTokenRequestAndGetResponse(EventRepresentation loginEvent) {
+    protected AccessTokenResponse sendTokenRequestAndGetResponse(EventRepresentation loginEvent) {
 
         Field eventsField = Reflections.findDeclaredField(this.getClass(), "events");
         AssertEvents events = null;
@@ -114,8 +120,8 @@ public abstract class AbstractTestRealmKeycloakTest extends AbstractKeycloakTest
         if(eventsField != null) {
             events.clear();
         }
-        String code = new OAuthClient.AuthorizationEndpointResponse(oauth).getCode();
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         Assert.assertEquals(200, response.getStatusCode());
 

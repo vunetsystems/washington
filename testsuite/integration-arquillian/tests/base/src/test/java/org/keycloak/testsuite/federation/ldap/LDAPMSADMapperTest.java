@@ -19,14 +19,6 @@ package org.keycloak.testsuite.federation.ldap;
 
 import java.util.Collections;
 
-import org.hamcrest.Matchers;
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Assert;
-import org.junit.ClassRule;
-import org.junit.FixMethodOrder;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.junit.runners.MethodSorters;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.LDAPConstants;
@@ -47,6 +39,15 @@ import org.keycloak.testsuite.pages.LoginPasswordUpdatePage;
 import org.keycloak.testsuite.util.LDAPRule;
 import org.keycloak.testsuite.util.LDAPTestConfiguration;
 import org.keycloak.testsuite.util.LDAPTestUtils;
+
+import org.hamcrest.Matchers;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Assert;
+import org.junit.ClassRule;
+import org.junit.FixMethodOrder;
+import org.junit.Ignore;
+import org.junit.Test;
+import org.junit.runners.MethodSorters;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -323,9 +324,7 @@ public class LDAPMSADMapperTest extends AbstractLDAPTest {
             Assert.assertTrue(Long.parseLong(pwdLastSet) > 0);
 
             String userAccountControl = ldapJohn.getAttributeAsString(LDAPConstants.USER_ACCOUNT_CONTROL);
-            long longValue = userAccountControl == null ? 0 : Long.parseLong(userAccountControl);
-
-            Assert.assertFalse(new UserAccountControl(longValue).has(UserAccountControl.ACCOUNTDISABLE));
+            Assert.assertFalse(UserAccountControl.of(userAccountControl).has(UserAccountControl.ACCOUNTDISABLE));
         });
 
         // Logout and login again. Success
@@ -346,7 +345,7 @@ public class LDAPMSADMapperTest extends AbstractLDAPTest {
             LDAPObject ldapJohn = ctx.getLdapProvider().loadLDAPUserByUsername(appRealm, "johnkeycloak");
 
             String userAccountControlStr = ldapJohn.getAttributeAsString(LDAPConstants.USER_ACCOUNT_CONTROL);
-            UserAccountControl control = new UserAccountControl(Long.parseLong(userAccountControlStr));
+            UserAccountControl control = UserAccountControl.of(userAccountControlStr);
             control.add(UserAccountControl.ACCOUNTDISABLE);
 
             ldapJohn.setSingleAttribute(LDAPConstants.USER_ACCOUNT_CONTROL, String.valueOf(control.getValue()));
@@ -517,7 +516,7 @@ public class LDAPMSADMapperTest extends AbstractLDAPTest {
 
             LDAPObject ldapJohn = ctx.getLdapProvider().loadLDAPUserByUsername(appRealm, "johnkeycloak");
             String userAccountControlStr = ldapJohn.getAttributeAsString(LDAPConstants.USER_ACCOUNT_CONTROL);
-            UserAccountControl control = new UserAccountControl(Long.parseLong(userAccountControlStr));
+            UserAccountControl control = UserAccountControl.of(userAccountControlStr);
             control.remove(UserAccountControl.ACCOUNTDISABLE);
             ldapJohn.setSingleAttribute(LDAPConstants.USER_ACCOUNT_CONTROL, String.valueOf(control.getValue()));
             ctx.getLdapProvider().getLdapIdentityStore().update(ldapJohn);
@@ -565,7 +564,7 @@ public class LDAPMSADMapperTest extends AbstractLDAPTest {
         }
 
         // Need to remove double quotes TODO: Ideally fix fetchString method and all the tests, which uses it as it is dummy to need to remove quotes in each test individually...
-        UserAccountControl acControl = new UserAccountControl(Long.parseLong(userAccountControls.replace("\"","")));
+        UserAccountControl acControl = UserAccountControl.of(userAccountControls.replace("\"",""));
         return !acControl.has(UserAccountControl.ACCOUNTDISABLE);
     }
 }

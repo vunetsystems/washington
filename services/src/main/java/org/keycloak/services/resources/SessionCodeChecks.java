@@ -17,8 +17,6 @@
 
 package org.keycloak.services.resources;
 
-import static org.keycloak.services.managers.AuthenticationManager.authenticateIdentityCookie;
-
 import java.io.IOException;
 import java.net.URI;
 
@@ -26,8 +24,6 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriBuilder;
 import jakarta.ws.rs.core.UriInfo;
 
-import org.jboss.logging.Logger;
-import org.keycloak.http.HttpRequest;
 import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.common.util.ObjectUtil;
@@ -35,6 +31,7 @@ import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.forms.login.LoginFormsProvider;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
@@ -43,17 +40,23 @@ import org.keycloak.protocol.AuthorizationEndpointBase;
 import org.keycloak.protocol.ClientData;
 import org.keycloak.protocol.LoginProtocol;
 import org.keycloak.protocol.RestartLoginCookie;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
+import org.keycloak.protocol.oidc.utils.RedirectUtils;
 import org.keycloak.services.ErrorPage;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.managers.ClientSessionCode;
 import org.keycloak.services.messages.Messages;
-import org.keycloak.services.util.BrowserHistoryHelper;
 import org.keycloak.services.util.AuthenticationFlowURLHelper;
+import org.keycloak.services.util.BrowserHistoryHelper;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.CommonClientSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
+
+import org.jboss.logging.Logger;
+
+import static org.keycloak.services.managers.AuthenticationManager.authenticateIdentityCookie;
 
 
 public class SessionCodeChecks {
@@ -162,7 +165,7 @@ public class SessionCodeChecks {
         AuthenticationSessionManager authSessionManager = new AuthenticationSessionManager(session);
         AuthenticationSessionModel authSession = null;
         if (authSessionId != null)
-            authSession = authSessionManager.getAuthenticationSessionByIdAndClient(realm, authSessionId, client, tabId);
+            authSession = authSessionManager.getAuthenticationSessionByEncodedIdAndClient(realm, authSessionId, client, tabId);
         AuthenticationSessionModel authSessionCookie = authSessionManager.getCurrentAuthenticationSession(realm, client, tabId);
 
         if (authSession != null && authSessionCookie != null && !authSession.getParentSession().getId().equals(authSessionCookie.getParentSession().getId())) {
@@ -203,7 +206,7 @@ public class SessionCodeChecks {
         if (response.getStatus() != Response.Status.FOUND.getStatusCode()) {
             AuthenticationManager.AuthResult authResult = authenticateIdentityCookie(session, realm, false);
 
-            if (authResult != null && authResult.getSession() != null) {
+            if (authResult != null && authResult.session() != null) {
                 response = null;
 
                 if (client != null && clientData != null) {
@@ -258,7 +261,7 @@ public class SessionCodeChecks {
             event.error(Errors.CLIENT_NOT_FOUND);
             session.getProvider(LoginFormsProvider.class).setDetachedAuthSession();
             response = ErrorPage.error(session, authSession, Response.Status.BAD_REQUEST, Messages.UNKNOWN_LOGIN_REQUESTER);
-            clientCode.removeExpiredClientSession();
+            removeAuthenticationSession(authSession);
             return false;
         }
 
@@ -269,7 +272,7 @@ public class SessionCodeChecks {
             event.error(Errors.CLIENT_DISABLED);
             session.getProvider(LoginFormsProvider.class).setDetachedAuthSession();
             response = ErrorPage.error(session, authSession, Response.Status.BAD_REQUEST, Messages.LOGIN_REQUESTER_NOT_ENABLED);
-            clientCode.removeExpiredClientSession();
+            removeAuthenticationSession(authSession);
             return false;
         }
 
@@ -448,6 +451,19 @@ public class SessionCodeChecks {
                 flowPath = LoginActionsService.AUTHENTICATE_PATH;
             }
 
+            //set redirect uri and other notes from client data parameter
+            try {
+                ClientData clientData = ClientData.decodeClientDataFromParameter(clientDataString);
+                if (RedirectUtils.verifyRedirectUri(session, clientData.getRedirectUri(), authSession.getClient()) != null) {
+                    authSession.setRedirectUri(clientData.getRedirectUri());
+                    authSession.setClientNote(OIDCLoginProtocol.RESPONSE_TYPE_PARAM, clientData.getResponseType());
+                    authSession.setClientNote(OIDCLoginProtocol.RESPONSE_MODE_PARAM, clientData.getResponseMode());
+                    authSession.setClientNote(OIDCLoginProtocol.STATE_PARAM, clientData.getState());
+                }
+            } catch (Exception e) {
+                logger.debugf(e, "ClientData parameter in invalid format. ClientData parameter was %s", clientDataString);
+            }
+
             String clientData = AuthenticationProcessor.getClientData(session, authSession);
             URI redirectUri = getLastExecutionUrl(flowPath, null, authSession.getTabId(), clientData);
             logger.debugf("Authentication session restart from cookie succeeded. Redirecting to %s", redirectUri);
@@ -495,6 +511,13 @@ public class SessionCodeChecks {
 
     protected EventBuilder getEvent() {
         return event;
+    }
+
+    private void removeAuthenticationSession(AuthenticationSessionModel authSession) {
+        ClientSessionCode<AuthenticationSessionModel> codeToRemove = clientCode != null
+                ? clientCode
+                : new ClientSessionCode<>(session, realm, authSession);
+        codeToRemove.removeExpiredClientSession();
     }
 
     protected boolean checkClientDisabled(ClientModel client) {

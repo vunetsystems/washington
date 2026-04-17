@@ -16,9 +16,6 @@
  */
 package org.keycloak.services.clientregistration.policy.impl;
 
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
 import org.keycloak.common.Profile;
 import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.common.crypto.CryptoProvider;
@@ -27,6 +24,13 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.clientregistration.policy.ClientRegistrationPolicyException;
 import org.keycloak.services.resteasy.ResteasyKeycloakSession;
 import org.keycloak.services.resteasy.ResteasyKeycloakSessionFactory;
+
+import org.junit.Assert;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  *
@@ -51,8 +55,8 @@ public class TrustedHostClientRegistrationPolicyTest {
         ComponentModel model = createComponentModel("localhost");
         TrustedHostClientRegistrationPolicy policy = (TrustedHostClientRegistrationPolicy) factory.create(session, model);
 
-        policy.verifyHost("127.0.0.1");
-        Assert.assertThrows(ClientRegistrationPolicyException.class, () -> policy.verifyHost("10.0.0.1"));
+        assertTrue(policy.verifyHost("127.0.0.1"));
+        assertFalse(policy.verifyHost("10.0.0.1"));
         policy.checkURLTrusted("https://localhost", policy.getTrustedHosts(), policy.getTrustedDomains());
         Assert.assertThrows(ClientRegistrationPolicyException.class, () -> policy.checkURLTrusted("https://otherhost",
                 policy.getTrustedHosts(), policy.getTrustedDomains()));
@@ -64,8 +68,8 @@ public class TrustedHostClientRegistrationPolicyTest {
         ComponentModel model = createComponentModel("*.localhost");
         TrustedHostClientRegistrationPolicy policy = (TrustedHostClientRegistrationPolicy) factory.create(session, model);
 
-        policy.verifyHost("127.0.0.1");
-        Assert.assertThrows(ClientRegistrationPolicyException.class, () -> policy.verifyHost("10.0.0.1"));
+        assertTrue(policy.verifyHost("127.0.0.1"));
+        assertFalse(policy.verifyHost("10.0.0.1"));
         policy.checkURLTrusted("https://localhost", policy.getTrustedHosts(), policy.getTrustedDomains());
         policy.checkURLTrusted("https://other.localhost", policy.getTrustedHosts(), policy.getTrustedDomains());
         Assert.assertThrows(ClientRegistrationPolicyException.class, () -> policy.checkURLTrusted("https://otherlocalhost",
@@ -78,8 +82,8 @@ public class TrustedHostClientRegistrationPolicyTest {
         ComponentModel model = createComponentModel("127.0.0.1");
         TrustedHostClientRegistrationPolicy policy = (TrustedHostClientRegistrationPolicy) factory.create(session, model);
 
-        policy.verifyHost("127.0.0.1");
-        Assert.assertThrows(ClientRegistrationPolicyException.class, () -> policy.verifyHost("10.0.0.1"));
+        assertTrue(policy.verifyHost("127.0.0.1"));
+        assertFalse(policy.verifyHost("10.0.0.1"));
         policy.checkURLTrusted("https://127.0.0.1", policy.getTrustedHosts(), policy.getTrustedDomains());
         Assert.assertThrows(ClientRegistrationPolicyException.class, () -> policy.checkURLTrusted("https://localhost",
                 policy.getTrustedHosts(), policy.getTrustedDomains()));
@@ -97,6 +101,19 @@ public class TrustedHostClientRegistrationPolicyTest {
         policy.checkURLTrusted("https://googlebot.com", policy.getTrustedHosts(), policy.getTrustedDomains());
         Assert.assertThrows(ClientRegistrationPolicyException.class, () -> policy.checkURLTrusted("https://www.othergooglebot.com",
                 policy.getTrustedHosts(), policy.getTrustedDomains()));
+    }
+
+    @Test
+    public void testLocalhostDomainFallback() {
+        TrustedHostClientRegistrationPolicyFactory factory = new TrustedHostClientRegistrationPolicyFactory();
+        ComponentModel model = createComponentModel("*.localhost");
+        TrustedHostClientRegistrationPolicy policy = (TrustedHostClientRegistrationPolicy) factory.create(session, model);
+
+        // Simulate a hostname that would fail DNS resolution on some platforms
+        // but matches the trusted domain fallback logic
+        assertTrue(policy.verifyHost("other.localhost"));
+        assertTrue(policy.verifyHost("localhost"));
+        assertFalse(policy.verifyHost("otherlocalhost"));
     }
 
     private ComponentModel createComponentModel(String... hosts) {

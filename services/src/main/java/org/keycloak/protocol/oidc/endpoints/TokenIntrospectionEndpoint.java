@@ -16,12 +16,21 @@
  */
 package org.keycloak.protocol.oidc.endpoints;
 
-import org.jboss.resteasy.reactive.NoCache;
-import org.keycloak.http.HttpRequest;
+import java.util.List;
+
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
+
 import org.keycloak.common.ClientConnection;
+import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -32,12 +41,7 @@ import org.keycloak.services.ErrorResponseException;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
 import org.keycloak.services.clientpolicy.context.TokenIntrospectContext;
 
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.MultivaluedMap;
-import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.Response.Status;
+import org.jboss.resteasy.reactive.NoCache;
 
 /**
  * A token introspection endpoint based on RFC-7662.
@@ -95,23 +99,24 @@ public class TokenIntrospectionEndpoint {
         TokenIntrospectionProvider provider = this.session.getProvider(TokenIntrospectionProvider.class, tokenTypeHint);
 
         if (provider == null) {
-            throw throwErrorResponseException(Errors.INVALID_REQUEST, "Unsupported token type [" + tokenTypeHint + "].", Status.BAD_REQUEST);
+            event.detail(Details.TOKEN_TYPE, tokenTypeHint);
+            event.error(Errors.INVALID_REQUEST);
+            throw throwErrorResponseException(Errors.INVALID_REQUEST, "Unsupported token type.", Status.BAD_REQUEST);
         }
 
         try {
             session.clientPolicy().triggerOnEvent(new TokenIntrospectContext(formParams));
             token = formParams.getFirst(PARAM_TOKEN);
         } catch (ClientPolicyException cpe) {
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
+            event.error(cpe.getError());
             throw throwErrorResponseException(Errors.INVALID_REQUEST, cpe.getErrorDetail(), Status.BAD_REQUEST);
         }
 
         try {
-
-            Response response = provider.introspect(token, event);
-
-            this.event.success();
-
-            return response;
+            return provider.introspect(token, event);
         } catch (ErrorResponseException ere) {
             throw ere;
         } catch (Exception e) {
@@ -150,8 +155,8 @@ public class TokenIntrospectionEndpoint {
 
 
     private void checkParameterDuplicated(MultivaluedMap<String, String> formParams) {
-        for (String key : formParams.keySet()) {
-            if (formParams.get(key).size() != 1) {
+        for (List<String> strings : formParams.values()) {
+            if (strings.size() != 1) {
                 throw throwErrorResponseException(Errors.INVALID_REQUEST, "duplicated parameter", Status.BAD_REQUEST);
             }
         }

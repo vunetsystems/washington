@@ -18,7 +18,6 @@ package org.keycloak.testsuite.pages;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedList;
 import java.util.List;
 
 import org.junit.Assert;
@@ -41,9 +40,9 @@ public class OAuthGrantPage extends LanguageComboboxAwarePage {
     public static final String OFFLINE_ACCESS_CONSENT_TEXT = "Offline Access";
     public static final String ROLES_CONSENT_TEXT = "User roles";
 
-    @FindBy(css = "button[name=\"accept\"]")
+    @FindBy(css = "[name=\"accept\"]")
     private WebElement acceptButton;
-    @FindBy(css = "button[name=\"cancel\"]")
+    @FindBy(css = "[name=\"cancel\"]")
     private WebElement cancelButton;
 
 
@@ -58,10 +57,6 @@ public class OAuthGrantPage extends LanguageComboboxAwarePage {
     @Override
     public boolean isCurrent() {
         return PageUtils.getPageTitle(driver).contains("Grant Access to ");
-    }
-
-    @Override
-    public void open() {
     }
 
     public List<String> getDisplayedGrants() {

@@ -17,12 +17,14 @@
 
 package org.keycloak.testsuite.federation.ldap;
 
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.ClassRule;
-import org.junit.FixMethodOrder;
-import org.junit.Test;
-import org.junit.runners.MethodSorters;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.admin.client.resource.UserProfileResource;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.component.ComponentValidationException;
@@ -42,22 +44,21 @@ import org.keycloak.storage.ldap.idm.model.LDAPObject;
 import org.keycloak.storage.ldap.mappers.LDAPStorageMapper;
 import org.keycloak.storage.ldap.mappers.UserAttributeLDAPStorageMapper;
 import org.keycloak.testsuite.client.KeycloakTestingClient;
-import org.keycloak.testsuite.forms.VerifyProfileTest;
 import org.keycloak.testsuite.util.LDAPRule;
 import org.keycloak.testsuite.util.LDAPTestUtils;
-
-import jakarta.ws.rs.core.Response;
+import org.keycloak.testsuite.util.userprofile.UserProfileUtil;
 import org.keycloak.validate.validators.LengthValidator;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Stream;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.ClassRule;
+import org.junit.FixMethodOrder;
+import org.junit.Test;
+import org.junit.runners.MethodSorters;
 
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 /**
@@ -97,7 +98,7 @@ public class LDAPBinaryAttributesTest extends AbstractLDAPTest {
 
         // User profile unmanaged attributes supported
         UserProfileResource userProfileRes = testRealm().users().userProfile();
-        VerifyProfileTest.enableUnmanagedAttributes(userProfileRes);
+        UserProfileUtil.enableUnmanagedAttributes(userProfileRes);
     }
 
 
@@ -246,7 +247,7 @@ public class LDAPBinaryAttributesTest extends AbstractLDAPTest {
                 } else if (UserModel.USERNAME.equals(name)) {
                     return username;
                 }
-                return super.getFirstAttribute(name);
+                return null;
             }
 
             @Override

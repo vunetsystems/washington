@@ -17,44 +17,57 @@
 
 package org.keycloak.quarkus.runtime.integration.jaxrs;
 
+import jakarta.enterprise.event.Observes;
+import jakarta.ws.rs.ApplicationPath;
+
 import org.keycloak.config.BootstrapAdminOptions;
+import org.keycloak.config.ServerOptions;
+import org.keycloak.connections.jpa.JpaConnectionProvider;
 import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.platform.Platform;
 import org.keycloak.quarkus.runtime.Environment;
-import org.keycloak.quarkus.runtime.cli.command.AbstractNonServerCommand;
 import org.keycloak.quarkus.runtime.configuration.Configuration;
 import org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvider;
 import org.keycloak.quarkus.runtime.configuration.PropertyMappingInterceptor;
 import org.keycloak.quarkus.runtime.integration.QuarkusKeycloakSessionFactory;
-import org.keycloak.quarkus.runtime.integration.QuarkusPlatform;
+import org.keycloak.quarkus.runtime.storage.database.jpa.QuarkusJpaConnectionProviderFactory;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.managers.ApplianceBootstrap;
 import org.keycloak.services.resources.KeycloakApplication;
 import org.keycloak.utils.StringUtil;
 
+import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
 import io.smallrye.common.annotation.Blocking;
-import jakarta.enterprise.event.Observes;
-import jakarta.ws.rs.ApplicationPath;
+import org.jboss.logging.Logger;
+
+import static org.keycloak.common.util.Environment.isDevMode;
+import static org.keycloak.common.util.Environment.isNonServerMode;
 
 @ApplicationPath("/")
 @Blocking
-public class QuarkusKeycloakApplication extends KeycloakApplication {
+public class QuarkusKeycloakApplication extends KeycloakApplication<QuarkusKeycloakSessionFactory> {
 
     private static final String KEYCLOAK_ADMIN_ENV_VAR = "KEYCLOAK_ADMIN";
     private static final String KEYCLOAK_ADMIN_PASSWORD_ENV_VAR = "KEYCLOAK_ADMIN_PASSWORD";
 
-    void onStartupEvent(@Observes StartupEvent event) {
-        QuarkusPlatform platform = (QuarkusPlatform) Platform.getPlatform();
-        platform.started();
-        startup();
-        Environment.getParsedCommand().ifPresent(ac -> {
-            if (ac instanceof AbstractNonServerCommand) {
-                ((AbstractNonServerCommand)ac).onStart(this);
-            }
+    private static final Logger logger = Logger.getLogger(QuarkusKeycloakApplication.class);
+
+    @Override
+    protected String getDataDir() {
+        return Environment.getDataDir().orElseGet(() -> {
+            logger.warnf("%s is not set, the system temporary directory will be used as the Keycloak data directory.", Environment.KC_HOME_DIR);
+            return System.getProperty("java.io.tmpdir");
         });
+    }
+
+    @Override
+    protected void exit(Throwable cause) {
+        Quarkus.asyncExit(1);
+    }
+
+    void onStartupEvent(@Observes StartupEvent event) {
+        startup();
     }
 
     void onShutdownEvent(@Observes ShutdownEvent event) {
@@ -62,15 +75,18 @@ public class QuarkusKeycloakApplication extends KeycloakApplication {
     }
 
     @Override
-    public KeycloakSessionFactory createSessionFactory() {
-        QuarkusKeycloakSessionFactory instance = QuarkusKeycloakSessionFactory.getInstance();
-        instance.init();
-        return instance;
+    public QuarkusKeycloakSessionFactory createSessionFactory() {
+        return QuarkusKeycloakSessionFactory.getInstance();
     }
 
     @Override
-    protected void loadConfig() {
-        // no need to load config provider because we force quarkus impl
+    protected void initKeycloakSessionFactory(QuarkusKeycloakSessionFactory quarkusKeycloakSessionFactory) {
+        quarkusKeycloakSessionFactory.init();
+    }
+
+    @Override
+    protected void initAndStart() {
+        // no need - is handled by Quarkus logic and onStartupEvent
     }
 
     @Override
@@ -94,6 +110,20 @@ public class QuarkusKeycloakApplication extends KeycloakApplication {
         }
     }
 
+    @Override
+    protected boolean supportsAsyncInitialization() {
+        var asyncBootstrap = Configuration.getOptionalKcValue(ServerOptions.SERVER_ASYNC_BOOTSTRAP)
+                .map(Boolean::parseBoolean)
+                .orElse(Boolean.TRUE);
+        // skip async bootstrap in dev and non-server mode
+        return !isDevMode() && !isNonServerMode() && asyncBootstrap;
+    }
+
+    @Override
+    protected int getTransactionTimeout(QuarkusKeycloakSessionFactory sessionFactory) {
+        return ((QuarkusJpaConnectionProviderFactory) sessionFactory.getProviderFactory(JpaConnectionProvider.class)).getMigrationTransactionTimeout();
+    }
+
     private String getOption(String option, String envVar) {
         PropertyMappingInterceptor.disable(); // disable default handling
         try {
@@ -110,7 +140,7 @@ public class QuarkusKeycloakApplication extends KeycloakApplication {
     }
 
     public boolean createTemporaryMasterRealmAdminUser(String adminUserName, String adminPassword, /*Integer adminExpiration,*/ KeycloakSession session) {
-        return new ApplianceBootstrap(session).createTemporaryMasterRealmAdminUser(adminUserName, adminPassword /*, adminExpiration*/, false);
+        return new ApplianceBootstrap(session).createMasterRealmAdminUser(adminUserName, adminPassword, true /*, adminExpiration*/, false);
     }
 
     public boolean createTemporaryMasterRealmAdminService(String clientId, String clientSecret, /*Integer adminExpiration,*/ KeycloakSession session) {

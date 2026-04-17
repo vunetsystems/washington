@@ -20,8 +20,10 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.OrganizationDomainModel;
 import org.keycloak.models.OrganizationModel;
 import org.keycloak.models.RealmModel;
@@ -32,21 +34,23 @@ import org.keycloak.models.cache.infinispan.entities.InRealm;
 
 public class CachedOrganization extends AbstractRevisioned implements InRealm {
 
-    private final RealmModel realm;
+    private final String realm;
     private final String name;
     private final String alias;
     private final String description;
+    private final String redirectUrl;
     private final boolean enabled;
     private final LazyLoader<OrganizationModel, MultivaluedHashMap<String, String>> attributes;
     private final Set<OrganizationDomainModel> domains;
     private final Set<IdentityProviderModel> idps;
 
-    public CachedOrganization(Long revision, RealmModel realm, OrganizationModel organization) {
+    public CachedOrganization(long revision, RealmModel realm, OrganizationModel organization) {
         super(revision, organization.getId());
-        this.realm = realm;
+        this.realm = realm.getId();
         this.name = organization.getName();
         this.alias = organization.getAlias();
         this.description = organization.getDescription();
+        this.redirectUrl = organization.getRedirectUrl();
         this.enabled = organization.isEnabled();
         this.attributes = new DefaultLazyLoader<>(orgModel -> new MultivaluedHashMap<>(orgModel.getAttributes()), MultivaluedHashMap::new);
         this.domains = organization.getDomains().collect(Collectors.toSet());
@@ -55,10 +59,6 @@ public class CachedOrganization extends AbstractRevisioned implements InRealm {
 
     @Override
     public String getRealm() {
-        return realm.getId();
-    }
-
-    public RealmModel getRealmModel() {
         return realm;
     }
 
@@ -74,12 +74,16 @@ public class CachedOrganization extends AbstractRevisioned implements InRealm {
         return description;
     }
 
+    public String getRedirectUrl() {
+        return redirectUrl;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }
 
-    public MultivaluedHashMap<String, String> getAttributes(Supplier<OrganizationModel> organizationModel) {
-        return attributes.get(organizationModel);
+    public MultivaluedHashMap<String, String> getAttributes(KeycloakSession session, Supplier<OrganizationModel> organizationModel) {
+        return attributes.get(session, organizationModel);
     }
 
     public Stream<OrganizationDomainModel> getDomains() {

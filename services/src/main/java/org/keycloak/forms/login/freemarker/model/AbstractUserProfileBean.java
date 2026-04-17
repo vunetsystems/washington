@@ -21,7 +21,6 @@ import org.keycloak.userprofile.AttributeValidatorMetadata;
 import org.keycloak.userprofile.Attributes;
 import org.keycloak.userprofile.UserProfile;
 import org.keycloak.userprofile.UserProfileProvider;
-
 /**
  * Abstract base for Freemarker context bean providing information about user profile to render dynamic or crafted forms.  
  * 
@@ -150,6 +149,10 @@ public abstract class AbstractUserProfileBean {
 
         public boolean isMultivalued() {
             return metadata.isMultivalued();
+        }
+
+        public String getDefaultValue() {
+            return metadata.getDefaultValue();
         }
 
         public String getValue() {

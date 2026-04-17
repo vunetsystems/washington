@@ -18,10 +18,8 @@
 
 package org.keycloak.testsuite.forms;
 
-import org.jboss.arquillian.drone.api.annotation.Drone;
-import org.jboss.arquillian.test.api.ArquillianResource;
-import org.junit.Rule;
-import org.junit.Test;
+import java.util.List;
+
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.authentication.authenticators.browser.OTPFormAuthenticatorFactory;
 import org.keycloak.authentication.authenticators.directgrant.ValidatePassword;
@@ -30,14 +28,18 @@ import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.utils.DefaultAuthenticationFlows;
 import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.testsuite.AbstractAuthenticationTest;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.admin.authentication.AbstractAuthenticationTest;
 import org.keycloak.testsuite.util.FlowUtil;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.openqa.selenium.WebDriver;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
-import java.util.List;
+import org.jboss.arquillian.drone.api.annotation.Drone;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.junit.Rule;
+import org.junit.Test;
+import org.openqa.selenium.WebDriver;
 
 import static org.junit.Assert.assertEquals;
 
@@ -84,7 +86,7 @@ public class DirectGrantFlowTest extends AbstractTestRealmKeycloakTest {
 
         // User should not be able to login as there was required action added to authenticationSession by OTPFormAuthenticator
         oauth.clientId(clientId);
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("password", login, "password", null);
+        AccessTokenResponse response = oauth.doPasswordGrantRequest(login, "password");
 
         assertEquals(400, response.getStatusCode());
         assertEquals("invalid_grant", response.getError());

@@ -18,16 +18,18 @@
 package org.keycloak.testsuite.broker;
 
 import java.util.List;
-import org.hamcrest.Matchers;
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
+
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.userprofile.UserProfileContext;
+
+import org.hamcrest.Matchers;
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
 
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_ALIAS;
 
@@ -77,6 +79,7 @@ public final class KcOidcBrokerEventTest extends AbstractBrokerTest {
                 .user((String)null)
                 .detail(Details.IDENTITY_PROVIDER, IDP_OIDC_ALIAS)
                 .detail(Details.IDENTITY_PROVIDER_USERNAME, bc.getUserLogin())
+                .detail(Details.IDENTITY_PROVIDER_BROKER_SESSION_ID,  Matchers.startsWith(bc.getIDPAlias()))
                 .assertEvent();
 
         events.expect(EventType.UPDATE_PROFILE)

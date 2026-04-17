@@ -20,11 +20,8 @@ package org.keycloak.protocol.oidc.grants;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import org.jboss.logging.Logger;
-
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
-import org.keycloak.common.Profile;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
@@ -37,6 +34,8 @@ import org.keycloak.services.clientpolicy.ClientPolicyException;
 import org.keycloak.services.clientpolicy.context.TokenRefreshContext;
 import org.keycloak.services.clientpolicy.context.TokenRefreshResponseContext;
 import org.keycloak.services.util.MtlsHoKTokenUtil;
+
+import org.jboss.logging.Logger;
 
 /**
  * OAuth 2.0 Refresh Token Grant
@@ -58,12 +57,15 @@ public class RefreshTokenGrantType extends OAuth2GrantTypeBase {
         }
 
         String scopeParameter = getRequestedScopes();
+        String resourceParameter = formParams.getFirst(OAuth2Constants.RESOURCE);
 
         try {
-            session.clientPolicy().triggerOnEvent(new TokenRefreshContext(formParams));
+            session.clientPolicy().triggerOnEvent(new TokenRefreshContext(formParams, client));
             refreshToken = formParams.getFirst(OAuth2Constants.REFRESH_TOKEN);
         } catch (ClientPolicyException cpe) {
-            event.detail(Details.REASON, cpe.getErrorDetail());
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
             event.error(cpe.getError());
             throw new CorsErrorResponseException(cors, cpe.getError(), cpe.getErrorDetail(), cpe.getErrorStatus());
         }
@@ -71,7 +73,7 @@ public class RefreshTokenGrantType extends OAuth2GrantTypeBase {
         AccessTokenResponse res;
         try {
             // KEYCLOAK-6771 Certificate Bound Token
-            TokenManager.AccessTokenResponseBuilder responseBuilder = tokenManager.refreshAccessToken(session, session.getContext().getUri(), clientConnection, realm, client, refreshToken, event, headers, request, scopeParameter);
+            TokenManager.AccessTokenResponseBuilder responseBuilder = tokenManager.refreshAccessToken(session, session.getContext().getUri(), clientConnection, realm, client, refreshToken, event, headers, request, scopeParameter, resourceParameter);
 
             checkAndBindMtlsHoKToken(responseBuilder, clientConfig.isUseRefreshToken());
 
@@ -98,7 +100,9 @@ public class RefreshTokenGrantType extends OAuth2GrantTypeBase {
                 throw new CorsErrorResponseException(cors, e.getError(), e.getDescription(), Response.Status.BAD_REQUEST);
             }
         } catch (ClientPolicyException cpe) {
-            event.detail(Details.REASON, cpe.getErrorDetail());
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
             event.error(cpe.getError());
             throw new CorsErrorResponseException(cors, cpe.getError(), cpe.getErrorDetail(), cpe.getErrorStatus());
         }

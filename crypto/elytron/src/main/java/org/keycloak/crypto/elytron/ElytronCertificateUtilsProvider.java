@@ -33,11 +33,11 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-
 import javax.security.auth.x500.X500Principal;
 
-import org.jboss.logging.Logger;
 import org.keycloak.common.crypto.CertificateUtilsProvider;
+
+import org.jboss.logging.Logger;
 import org.wildfly.security.asn1.ASN1;
 import org.wildfly.security.asn1.DERDecoder;
 import org.wildfly.security.x500.GeneralName;
@@ -166,6 +166,13 @@ public class ElytronCertificateUtilsProvider implements CertificateUtilsProvider
     @Override
     public X509Certificate generateV1SelfSignedCertificate(KeyPair caKeyPair, String subject,
             BigInteger serialNumber) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.add(Calendar.YEAR, 10);
+        return generateV1SelfSignedCertificate(caKeyPair, subject, serialNumber, calendar.getTime());
+    }
+
+    @Override
+    public X509Certificate generateV1SelfSignedCertificate(KeyPair caKeyPair, String subject, BigInteger serialNumber, Date validityEndDate) {
         try {
 
             X500Principal subjectdn = subjectToX500Principle(subject);
@@ -173,9 +180,7 @@ public class ElytronCertificateUtilsProvider implements CertificateUtilsProvider
             ZonedDateTime notBefore = ZonedDateTime.ofInstant(
                     (new Date(System.currentTimeMillis() - 100000)).toInstant(),
                     ZoneId.systemDefault());
-            Calendar calendar = Calendar.getInstance();
-            calendar.add(Calendar.YEAR, 10);
-            Date validityEndDate = new Date(calendar.getTime().getTime());
+
             ZonedDateTime notAfter = ZonedDateTime.ofInstant(validityEndDate.toInstant(),
                     ZoneId.systemDefault());
 

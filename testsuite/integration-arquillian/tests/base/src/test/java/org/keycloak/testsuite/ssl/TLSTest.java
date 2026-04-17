@@ -1,16 +1,18 @@
 package org.keycloak.testsuite.ssl;
 
-import static org.keycloak.testsuite.util.ServerURLs.AUTH_SERVER_SSL_REQUIRED;
-
-import org.junit.Assume;
-import org.junit.BeforeClass;
-import org.junit.Test;
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.jose.jwk.JSONWebKeySet;
 import org.keycloak.protocol.oidc.representations.OIDCConfigurationRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.Assert;
+import org.keycloak.testsuite.util.oauth.OpenIDProviderConfigurationResponse;
+
+import org.junit.Assume;
+import org.junit.BeforeClass;
+import org.junit.Test;
+
+import static org.keycloak.testsuite.util.ServerURLs.AUTH_SERVER_SSL_REQUIRED;
 
 /**
  * This test checks if TLS can be explicitly switched off.
@@ -42,7 +44,7 @@ public class TLSTest extends AbstractTestRealmKeycloakTest {
         oauth.baseUrl(AUTH_SERVER_ROOT_WITHOUT_TLS);
 
         //when
-        OIDCConfigurationRepresentation config = oauth.doWellKnownRequest("test");
+        OIDCConfigurationRepresentation config = oauth.doWellKnownRequest();
 
         //then
         Assert.assertTrue(config.getAuthorizationEndpoint().startsWith(AUTH_SERVER_ROOT_WITHOUT_TLS));
@@ -58,13 +60,13 @@ public class TLSTest extends AbstractTestRealmKeycloakTest {
 
         // Try access "WellKnown" endpoint unsecured. It should fail
         oauth.baseUrl(AUTH_SERVER_ROOT_WITHOUT_TLS);
-        OIDCConfigurationRepresentation config = oauth.doWellKnownRequest("test");
-        Assert.assertNull(config.getAuthorizationEndpoint());
-        Assert.assertEquals("HTTPS required", config.getOtherClaims().get("error_description"));
+        OpenIDProviderConfigurationResponse providerConfigurationResponse = oauth.wellknownRequest().send();
+        Assert.assertFalse(providerConfigurationResponse.isSuccess());
+        Assert.assertEquals("HTTPS required", providerConfigurationResponse.getErrorDescription());
 
         // Try access "JWKS URL" unsecured. It should fail
         try {
-            JSONWebKeySet keySet = oauth.doCertsRequest("test");
+            JSONWebKeySet keySet = oauth.keys().getRealmKeys();
             Assert.fail("This should not be successful");
         } catch (Exception e) {
             // Expected

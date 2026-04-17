@@ -1,5 +1,6 @@
+import { BaseEnvironment } from "@keycloak/keycloak-ui-shared";
+
 export { PersonalInfo } from "./personal-info/PersonalInfo";
-export { ErrorPage } from "./root/ErrorPage";
 export { Header } from "./root/Header";
 export { PageNav } from "./root/PageNav";
 export { DeviceActivity } from "./account-security/DeviceActivity";
@@ -39,6 +40,7 @@ export { ResourcesTab } from "./resources/ResourcesTab";
 export { ResourceToolbar } from "./resources/ResourceToolbar";
 export { SharedWith } from "./resources/SharedWith";
 export { Oid4Vci } from "./oid4vci/Oid4Vci";
+export { Organizations } from "./organizations/Organizations";
 export { ShareTheResource } from "./resources/ShareTheResource";
 export {
   deleteConsent,
@@ -51,11 +53,36 @@ export {
   getPermissionRequests,
   getPersonalInfo,
   getSupportedLocales,
-  linkAccount,
   savePersonalInfo,
   unLinkAccount,
 } from "./api/methods";
-export type { Environment as AccountEnvironment } from "./environment";
+export type AccountEnvironment = BaseEnvironment & {
+  /** The URL to the root of the account console. */
+  baseUrl: string;
+  /** The locale of the user */
+  locale: string;
+  /** Name of the referrer application in the back link */
+  referrerName?: string;
+  /** UR to the referrer application in the back link */
+  referrerUrl?: string;
+  /** Feature flags */
+  features: Feature;
+};
+
+export type Feature = {
+  isRegistrationEmailAsUsername: boolean;
+  isEditUserNameAllowed: boolean;
+  isLinkedAccountsEnabled: boolean;
+  isMyResourcesEnabled: boolean;
+  deleteAccountAllowed: boolean;
+  updateEmailFeatureEnabled: boolean;
+  updateEmailActionEnabled: boolean;
+  isViewGroupsEnabled: boolean;
+  isViewOrganizationsEnabled: boolean;
+  isOid4VciEnabled: boolean;
+};
+
 export { KeycloakProvider, useEnvironment } from "@keycloak/keycloak-ui-shared";
 export { useAccountAlerts } from "./utils/useAccountAlerts";
 export { usePromise } from "./utils/usePromise";
+export { routes } from "./routes";

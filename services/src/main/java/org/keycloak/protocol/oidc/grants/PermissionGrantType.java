@@ -17,10 +17,10 @@
 
 package org.keycloak.protocol.oidc.grants;
 
+import java.util.List;
+
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
-
-import java.util.List;
 
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
@@ -33,7 +33,6 @@ import org.keycloak.events.EventType;
 import org.keycloak.jose.jws.JWSInput;
 import org.keycloak.jose.jws.JWSInputException;
 import org.keycloak.models.ClientModel;
-import org.keycloak.models.KeycloakSession;
 import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.AccessTokenResponse;
 import org.keycloak.representations.idm.authorization.AuthorizationRequest;
@@ -77,7 +76,7 @@ public class PermissionGrantType extends OAuth2GrantTypeBase {
                 } catch (JWSInputException ignore) {
                 }
                 event.error(Errors.INVALID_TOKEN);
-                throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT, "Invalid bearer token", Response.Status.UNAUTHORIZED);
+                throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT, "Invalid bearer token", Response.Status.BAD_REQUEST);
             }
 
             ClientModel client = realm.getClientByClientId(accessToken.getIssuedFor());
@@ -158,12 +157,14 @@ public class PermissionGrantType extends OAuth2GrantTypeBase {
 
         // permissions have a format like RESOURCE#SCOPE1,SCOPE2
         List<String> permissions = formParams.get("permission");
+        String responsePermissionsLimit = formParams.getFirst("response_permissions_limit");
+        Integer maxResults = responsePermissionsLimit != null ? Integer.parseInt(responsePermissionsLimit) : null;
 
         if (permissions != null) {
             event.detail(Details.PERMISSION, String.join("|", permissions));
             String permissionResourceFormat = formParams.getFirst("permission_resource_format");
             boolean permissionResourceMatchingUri = Boolean.parseBoolean(formParams.getFirst("permission_resource_matching_uri"));
-            authorizationRequest.addPermissions(permissions, permissionResourceFormat, permissionResourceMatchingUri);
+            authorizationRequest.addPermissions(permissions, permissionResourceFormat, permissionResourceMatchingUri, maxResults);
         }
 
         AuthorizationRequest.Metadata metadata = new AuthorizationRequest.Metadata();
@@ -174,10 +175,8 @@ public class PermissionGrantType extends OAuth2GrantTypeBase {
             metadata.setIncludeResourceName(Boolean.parseBoolean(responseIncludeResourceName));
         }
 
-        String responsePermissionsLimit = formParams.getFirst("response_permissions_limit");
-
         if (responsePermissionsLimit != null) {
-            metadata.setLimit(Integer.parseInt(responsePermissionsLimit));
+            metadata.setLimit(maxResults);
         }
 
         metadata.setResponseMode(formParams.getFirst("response_mode"));

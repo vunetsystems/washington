@@ -17,6 +17,28 @@
 
 package org.keycloak.testsuite.rest;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -29,10 +51,11 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.CacheControl;
 import jakarta.ws.rs.core.Response;
-import org.jboss.resteasy.reactive.NoCache;
+
 import org.keycloak.Config;
 import org.keycloak.common.Profile;
 import org.keycloak.common.Profile.Feature;
+import org.keycloak.common.VerificationException;
 import org.keycloak.common.enums.HostnameVerificationPolicy;
 import org.keycloak.common.profile.PropertiesProfileConfigResolver;
 import org.keycloak.common.util.HtmlUtils;
@@ -51,26 +74,29 @@ import org.keycloak.events.admin.AuthDetails;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.email.EmailEventListenerProviderFactory;
 import org.keycloak.http.HttpRequest;
-import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.AuthenticationFlowModel;
 import org.keycloak.models.ClientModel;
-import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.ModelDuplicateException;
-import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RealmProvider;
 import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserProvider;
 import org.keycloak.models.UserSessionModel;
-import org.keycloak.models.sessions.infinispan.changes.sessions.CrossDCLastSessionRefreshStoreFactory;
+import org.keycloak.models.session.UserSessionPersisterProvider;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.models.utils.ResetTimeOffsetEvent;
-import org.keycloak.protocol.oidc.OIDCLoginProtocol;
-import org.keycloak.protocol.oidc.grants.PreAuthorizedCodeGrantType;
-import org.keycloak.protocol.oidc.mappers.AudienceProtocolMapper;
+import org.keycloak.protocol.oid4vc.issuance.OID4VCIssuerWellKnownProvider;
+import org.keycloak.protocol.oid4vc.issuance.credentialoffer.CredentialOfferState;
+import org.keycloak.protocol.oid4vc.issuance.credentialoffer.CredentialOfferStorage;
+import org.keycloak.protocol.oid4vc.issuance.credentialoffer.preauth.JwtPreAuthCodeHandler;
+import org.keycloak.protocol.oid4vc.issuance.credentialoffer.preauth.PreAuthCodeHandler;
+import org.keycloak.protocol.oid4vc.model.CredentialsOffer;
+import org.keycloak.protocol.oid4vc.model.OID4VCAuthorizationDetail;
+import org.keycloak.protocol.oid4vc.model.PreAuthCodeCtx;
+import org.keycloak.protocol.oidc.encode.AccessTokenContext;
+import org.keycloak.protocol.oidc.encode.TokenContextEncoderProvider;
 import org.keycloak.provider.Provider;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.representations.idm.AdminEventRepresentation;
@@ -80,13 +106,12 @@ import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.services.ErrorPage;
 import org.keycloak.services.ErrorResponse;
+import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.resource.RealmResourceProvider;
 import org.keycloak.services.scheduled.ClearExpiredUserSessions;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.datastore.PeriodicEventInvalidation;
-import org.keycloak.testsuite.components.TestProvider;
-import org.keycloak.testsuite.components.TestProviderFactory;
 import org.keycloak.testsuite.components.amphibian.TestAmphibianProvider;
 import org.keycloak.testsuite.events.TestEventsListenerProvider;
 import org.keycloak.testsuite.federation.DummyUserFederationProviderFactory;
@@ -95,7 +120,6 @@ import org.keycloak.testsuite.forms.PassThroughClientAuthenticator;
 import org.keycloak.testsuite.model.infinispan.InfinispanTestUtil;
 import org.keycloak.testsuite.rest.representation.AuthenticatorState;
 import org.keycloak.testsuite.rest.resource.TestCacheResource;
-import org.keycloak.testsuite.rest.resource.TestJavascriptResource;
 import org.keycloak.testsuite.rest.resource.TestLDAPResource;
 import org.keycloak.testsuite.rest.resource.TestingExportImportResource;
 import org.keycloak.testsuite.runonserver.FetchOnServer;
@@ -109,29 +133,11 @@ import org.keycloak.truststore.TruststoreProvider;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.utils.MediaType;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.UUID;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import org.jboss.resteasy.reactive.NoCache;
 
 import static java.util.Objects.requireNonNull;
+
+import static org.keycloak.OID4VCConstants.OPENID_CREDENTIAL;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -202,8 +208,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
     public Response removeExpired(@QueryParam("realm") final String name) {
         RealmModel realm = getRealmByName(name);
 
-        session.sessions().removeExpired(realm);
-        session.authenticationSessions().removeExpired(realm);
+        session.getProvider(UserSessionPersisterProvider.class).removeExpired(realm);
         session.realms().removeExpiredClientInitialAccess();
 
         return Response.noContent().build();
@@ -369,7 +374,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
             query.client(client);
         }
 
-        if (types != null & !types.isEmpty()) {
+        if (types != null && !types.isEmpty()) {
             EventType[] t = new EventType[types.size()];
             for (int i = 0; i < t.length; i++) {
                 t[i] = EventType.valueOf(types.get(i));
@@ -698,22 +703,6 @@ public class TestingResourceProvider implements RealmResourceProvider {
     }
 
     @GET
-    @Path("/test-component")
-    @Produces(MediaType.APPLICATION_JSON)
-    public Map<String, TestProvider.DetailsRepresentation> getTestComponentDetails() {
-        RealmModel realm = session.getContext().getRealm();
-        return realm.getComponentsStream(realm.getId(), TestProvider.class.getName())
-                .collect(Collectors.toMap(ComponentModel::getName,
-                        componentModel -> {
-                            ProviderFactory<TestProvider> f = session.getKeycloakSessionFactory()
-                                    .getProviderFactory(TestProvider.class, componentModel.getProviderId());
-                            TestProviderFactory factory = (TestProviderFactory) f;
-                            TestProvider p = (TestProvider) factory.create(session, componentModel);
-                            return p.getDetails();
-                        }));
-    }
-
-    @GET
     @Path("/test-amphibian-component")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Map<String, Object>> getTestAmphibianComponentDetails() {
@@ -747,8 +736,6 @@ public class TestingResourceProvider implements RealmResourceProvider {
     @Produces(MediaType.APPLICATION_JSON)
     public Response suspendPeriodicTasks() {
         suspendTask(ClearExpiredUserSessions.TASK_NAME);
-        suspendTask(CrossDCLastSessionRefreshStoreFactory.LSR_PERIODIC_TASK_NAME);
-        suspendTask(CrossDCLastSessionRefreshStoreFactory.LSR_OFFLINE_PERIODIC_TASK_NAME);
 
         return Response.noContent().build();
     }
@@ -782,47 +769,11 @@ public class TestingResourceProvider implements RealmResourceProvider {
         return Response.noContent().build();
     }
 
-
-    /**
-     * Generate new client scope for specified service client. The "Frontend" clients, who will use this client scope, will be able to
-     * send their access token to authenticate against specified service client
-     *
-     * @param clientId Client ID of service client (typically bearer-only client)
-     * @return ID of the newly generated clientScope
-     */
-    @Path("generate-audience-client-scope")
-    @POST
-    @NoCache
-    public String generateAudienceClientScope(@QueryParam("realm") final String realmName, final @QueryParam("clientId") String clientId) {
-        try {
-            RealmModel realm = getRealmByName(realmName);
-            ClientModel serviceClient = realm.getClientByClientId(clientId);
-            if (serviceClient == null) {
-                throw new NotFoundException("Referenced service client doesn't exist");
-            }
-
-            ClientScopeModel clientScopeModel = realm.addClientScope(clientId);
-            clientScopeModel.setProtocol(serviceClient.getProtocol() == null ? OIDCLoginProtocol.LOGIN_PROTOCOL : serviceClient.getProtocol());
-            clientScopeModel.setDisplayOnConsentScreen(true);
-            clientScopeModel.setConsentScreenText(clientId);
-            clientScopeModel.setIncludeInTokenScope(true);
-
-            // Add audience protocol mapper
-            ProtocolMapperModel audienceMapper = AudienceProtocolMapper.createClaimMapper("Audience for " + clientId, clientId, null, true, false, true);
-            clientScopeModel.addProtocolMapper(audienceMapper);
-
-            return clientScopeModel.getId();
-        } catch (ModelDuplicateException e) {
-            throw new BadRequestException("Client Scope " + clientId + " already exists");
-        }
-    }
-
-
     @POST
     @Path("/run-on-server")
     @Consumes(MediaType.TEXT_PLAIN_UTF_8)
     @Produces(MediaType.TEXT_PLAIN_UTF_8)
-    public String runOnServer(String runOnServer) throws Exception {
+    public String runOnServer(String runOnServer) {
         try {
             Object r = SerializationUtil.decode(runOnServer, TestClassLoader.getInstance());
 
@@ -846,12 +797,12 @@ public class TestingResourceProvider implements RealmResourceProvider {
     @Consumes(MediaType.TEXT_PLAIN_UTF_8)
     @Produces(MediaType.TEXT_PLAIN_UTF_8)
     public String runModelTestOnServer(@QueryParam("testClassName") String testClassName,
-                                       @QueryParam("testMethodName") String testMethodName) throws Exception {
+                                       @QueryParam("testMethodName") String testMethodName) {
         try {
-            Class testClass = TestClassLoader.getInstance().loadClass(testClassName);
+            Class<?> testClass = TestClassLoader.getInstance().loadClass(testClassName);
             Method testMethod = testClass.getDeclaredMethod(testMethodName, KeycloakSession.class);
 
-            Object test = testClass.newInstance();
+            Object test = testClass.getDeclaredConstructor().newInstance();
             testMethod.invoke(test, session);
 
             return "SUCCESS";
@@ -864,22 +815,12 @@ public class TestingResourceProvider implements RealmResourceProvider {
         }
     }
 
-
-    @Path("/javascript")
-    public TestJavascriptResource getJavascriptResource() {
-        return new TestJavascriptResource(session);
-    }
-
     private void setFeatureInProfileFile(File file, Profile.Feature featureProfile, String newState) {
-        doWithProperties(file, props -> {
-            props.setProperty(PropertiesProfileConfigResolver.getPropertyKey(featureProfile), newState);
-        });
+        doWithProperties(file, props -> props.setProperty(PropertiesProfileConfigResolver.getPropertyKey(featureProfile), newState));
     }
 
     private void unsetFeatureInProfileFile(File file, Profile.Feature featureProfile) {
-        doWithProperties(file, props -> {
-            props.remove(PropertiesProfileConfigResolver.getPropertyKey(featureProfile));
-        });
+        doWithProperties(file, props -> props.remove(PropertiesProfileConfigResolver.getPropertyKey(featureProfile)));
     }
 
     private void doWithProperties(File file, Consumer<Properties> callback) {
@@ -934,11 +875,10 @@ public class TestingResourceProvider implements RealmResourceProvider {
     @Consumes(MediaType.APPLICATION_JSON)
     public void resetFeature(@PathParam("feature") String featureKey) {
 
-        Profile.Feature feature;
+        featureKey = featureKey.contains(":") ? featureKey.split(":")[0] : featureKey;
+        Profile.Feature feature = Profile.getFeatureVersions(featureKey).iterator().next();
 
-        try {
-            feature = Profile.Feature.valueOf(featureKey);
-        } catch (IllegalArgumentException e) {
+        if (feature == null) {
             System.err.printf("Feature '%s' doesn't exist!!\n", featureKey);
             throw new BadRequestException();
         }
@@ -956,16 +896,18 @@ public class TestingResourceProvider implements RealmResourceProvider {
     private Set<Profile.Feature> updateFeature(String featureKey, boolean shouldEnable) {
         Collection<Profile.Feature> features = null;
 
-        try {
-            features = Arrays.asList(Profile.Feature.valueOf(featureKey));
-        } catch (IllegalArgumentException e) {
-            Set<Feature> featureVersions = Profile.getFeatureVersions(featureKey);
-            if (!shouldEnable) {
-                features = featureVersions;
-            } else if (!featureVersions.isEmpty()) {
-                // the set is ordered by preferred feature
-                features = Arrays.asList(featureVersions.iterator().next());
+        if (featureKey.contains(":")) {
+            String unversionedKey = featureKey.split(":")[0];
+            int version = Integer.parseInt(featureKey.split(":")[1].replace("v", ""));
+
+            for (Feature versionedFeature : Profile.getFeatureVersions(unversionedKey)) {
+                if (versionedFeature.getVersion() == version) {
+                    features = Set.of(versionedFeature);
+                    break;
+                }
             }
+        } else {
+            features = Profile.getFeatureVersions(featureKey);
         }
 
         if (features == null || features.isEmpty()) {
@@ -985,8 +927,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
 
                 Profile current = Profile.getInstance();
 
-                Map<Profile.Feature, Boolean> updatedFeatures = new HashMap<>();
-                updatedFeatures.putAll(current.getFeatures());
+                Map<Feature, Boolean> updatedFeatures = new HashMap<>(current.getFeatures());
                 updatedFeatures.put(feature, shouldEnable);
 
                 Profile.init(current.getName(), updatedFeatures);
@@ -1021,7 +962,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
     public void reinitializeProviderFactoryWithSystemPropertiesScope(@QueryParam("provider-type") String providerType, @QueryParam("provider-id") String providerId,
                                                                      @QueryParam("system-properties-prefix") String systemPropertiesPrefix) throws Exception {
         Class<? extends Provider> providerClass = (Class<? extends Provider>) Class.forName(providerType);
-        ProviderFactory factory = session.getKeycloakSessionFactory().getProviderFactory(providerClass, providerId);
+        ProviderFactory<?> factory = session.getKeycloakSessionFactory().getProviderFactory(providerClass, providerId);
         factory.init(new Config.SystemPropertiesScope(systemPropertiesPrefix));
     }
 
@@ -1058,7 +999,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
         builder.append("  </HEAD>");
         builder.append("  <BODY Onload=\"document.forms[0].submit()\">");
 
-        builder.append("    <FORM METHOD=\"POST\" ACTION=\"" + postRequestUrl + "\">");
+        builder.append("    <FORM METHOD=\"POST\" ACTION=\"").append(postRequestUrl).append("\">");
 
         for (Map.Entry<String, String> param : params.entrySet()) {
             builder.append("  <INPUT TYPE=\"HIDDEN\" NAME=\"")
@@ -1155,7 +1096,9 @@ public class TestingResourceProvider implements RealmResourceProvider {
     @NoCache
     public Integer getAuthenticationSessionTabsCount(@QueryParam("realm") String realmName, @QueryParam("authSessionId") String authSessionId) {
         RealmModel realm = getRealmByName(realmName);
-        RootAuthenticationSessionModel rootAuthSession = session.authenticationSessions().getRootAuthenticationSession(realm, authSessionId);
+        session.getContext().setRealm(realm);
+        String decodedAuthSessionId = new AuthenticationSessionManager(session).decodeBase64AndValidateSignature(authSessionId);
+        RootAuthenticationSessionModel rootAuthSession = session.authenticationSessions().getRootAuthenticationSession(realm, decodedAuthSessionId);
         if (rootAuthSession == null) {
             return 0;
         }
@@ -1186,20 +1129,47 @@ public class TestingResourceProvider implements RealmResourceProvider {
     @GET
     @Path("/pre-authorized-code")
     @NoCache
-    public String getPreAuthorizedCode(@QueryParam("realm") final String realmName, @QueryParam("userSessionId") final String userSessionId, @QueryParam("clientId") final String clientId, @QueryParam("expiration") final int expiration) {
+    public String getPreAuthorizedCode(@QueryParam("realm") final String realmName, @QueryParam("userSessionId") final String userSessionId, @QueryParam("clientId") final String clientId, @QueryParam("expiration") final int expireAt) {
         RealmModel realm = getRealmByName(realmName);
-        AuthenticatedClientSessionModel ascm = session.sessions()
-                .getUserSession(realm, userSessionId)
-                .getAuthenticatedClientSessions()
-                .values()
-                .stream().filter(acsm -> acsm.getClient().getClientId().equals(clientId))
-                .findFirst()
-                .orElseThrow(() -> new RuntimeException("No authenticatedClientSession found."));
-        return PreAuthorizedCodeGrantType.getPreAuthorizedCode(session, ascm, expiration);
+        UserSessionModel userSession = session.sessions().getUserSession(realm, userSessionId);
+
+        String credConfigId = "oid4vc_natural_person_sd";
+
+        CredentialsOffer credOffer = new CredentialsOffer()
+                .setCredentialIssuer(OID4VCIssuerWellKnownProvider.getIssuer(session.getContext()))
+                .setCredentialConfigurationIds(List.of(credConfigId));
+
+        String targetUserId = userSession.getUser().getId();
+        CredentialOfferState offerState = new CredentialOfferState(credOffer, clientId, targetUserId, expireAt, credOfferId -> {
+            OID4VCAuthorizationDetail authDetail = new OID4VCAuthorizationDetail();
+            authDetail.setType(OPENID_CREDENTIAL);
+            authDetail.setCredentialConfigurationId(credConfigId);
+            authDetail.setCredentialsOfferId(credOfferId);
+            return List.of(authDetail);
+        });
+
+        var offerStorage = session.getProvider(CredentialOfferStorage.class);
+        offerStorage.putOfferState( offerState);
+
+        PreAuthCodeCtx preAuthCodeCtx = new PreAuthCodeCtx(offerState);
+        return new JwtPreAuthCodeHandler(session).createPreAuthCode(preAuthCodeCtx);
+    }
+
+    @GET
+    @Path("/tx-code")
+    @NoCache
+    public String getTxCode(@QueryParam("pre-auth-code") final String preAuthCode) throws VerificationException {
+        var preAuthCodeHandler = session.getProvider(PreAuthCodeHandler.class);
+        PreAuthCodeCtx ctx = preAuthCodeHandler.verifyPreAuthCode(preAuthCode);
+
+        var offerStorage = session.getProvider(CredentialOfferStorage.class);
+        var offerState = offerStorage.getOfferStateById(ctx.getCredentialsOfferId());
+
+        return Optional.ofNullable(offerState).map(CredentialOfferState::getTxCode).orElse(null);
     }
 
     @POST
-    @Path("/email-event-litener-provide/add-events")
+    @Path("/email-event-listener-provide/add-events")
     @Consumes(MediaType.APPLICATION_JSON)
     public void addEventsToEmailEventListenerProvider(List<EventType> events) {
         if (events != null && !events.isEmpty()) {
@@ -1210,7 +1180,7 @@ public class TestingResourceProvider implements RealmResourceProvider {
     }
 
     @POST
-    @Path("/email-event-litener-provide/remove-events")
+    @Path("/email-event-listener-provide/remove-events")
     @Consumes(MediaType.APPLICATION_JSON)
     public void removeEventsToEmailEventListenerProvider(List<EventType> events) {
         if (events != null && !events.isEmpty()) {
@@ -1219,4 +1189,12 @@ public class TestingResourceProvider implements RealmResourceProvider {
             prov.removeIncludedEvents(events.toArray(EventType[]::new));
         }
     }
+
+    @GET
+    @Path("/token-context")
+    @Produces(MediaType.APPLICATION_JSON)
+    public AccessTokenContext getTokenContext(@QueryParam("tokenId") String tokenId) {
+        return session.getProvider(TokenContextEncoderProvider.class).getTokenContextFromTokenId(tokenId);
+    }
+
 }

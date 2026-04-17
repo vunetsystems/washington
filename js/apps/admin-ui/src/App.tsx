@@ -3,7 +3,7 @@ import {
   mainPageContentId,
   useEnvironment,
 } from "@keycloak/keycloak-ui-shared";
-import { Page } from "@patternfly/react-core";
+import { Flex, FlexItem, Page } from "@patternfly/react-core";
 import { PropsWithChildren, Suspense, useEffect, useState } from "react";
 import { Outlet } from "react-router-dom";
 
@@ -12,7 +12,6 @@ import {
   ErrorBoundaryProvider,
   KeycloakSpinner,
 } from "@keycloak/keycloak-ui-shared";
-import { Banners } from "./Banners";
 import { Header } from "./PageHeader";
 import { PageNav } from "./PageNav";
 import { AdminClientContext, initAdminClient } from "./admin-client";
@@ -26,20 +25,23 @@ import { WhoAmIContextProvider } from "./context/whoami/WhoAmI";
 import type { Environment } from "./environment";
 import { SubGroups } from "./groups/SubGroupsContext";
 import { AuthWall } from "./root/AuthWall";
+import { Banners } from "./Banners";
 
-const AppContexts = ({ children }: PropsWithChildren) => (
+export const AppContexts = ({ children }: PropsWithChildren) => (
   <ErrorBoundaryProvider>
-    <ServerInfoProvider>
-      <RealmContextProvider>
-        <WhoAmIContextProvider>
-          <RecentRealmsProvider>
-            <AccessContextProvider>
-              <SubGroups>{children}</SubGroups>
-            </AccessContextProvider>
-          </RecentRealmsProvider>
-        </WhoAmIContextProvider>
-      </RealmContextProvider>
-    </ServerInfoProvider>
+    <ErrorBoundaryFallback fallback={ErrorRenderer}>
+      <ServerInfoProvider>
+        <RealmContextProvider>
+          <WhoAmIContextProvider>
+            <RecentRealmsProvider>
+              <AccessContextProvider>
+                <SubGroups>{children}</SubGroups>
+              </AccessContextProvider>
+            </RecentRealmsProvider>
+          </WhoAmIContextProvider>
+        </RealmContextProvider>
+      </ServerInfoProvider>
+    </ErrorBoundaryFallback>
   </ErrorBoundaryProvider>
 );
 
@@ -48,33 +50,49 @@ export const App = () => {
   const [adminClient, setAdminClient] = useState<KeycloakAdminClient>();
 
   useEffect(() => {
+    const fragment = "#/";
+    if (window.location.href.endsWith(fragment)) {
+      const newPath = window.location.pathname.replace(fragment, "");
+      window.history.replaceState(null, "", newPath);
+    }
     const init = async () => {
       const client = await initAdminClient(keycloak, environment);
       setAdminClient(client);
     };
     init().catch(console.error);
-  }, []);
+  }, [environment, keycloak]);
 
   if (!adminClient) return <KeycloakSpinner />;
   return (
     <AdminClientContext.Provider value={{ keycloak, adminClient }}>
       <AppContexts>
-        <Banners />
-        <Page
-          header={<Header />}
-          isManagedSidebar
-          sidebar={<PageNav />}
-          breadcrumb={<PageBreadCrumbs />}
-          mainContainerId={mainPageContentId}
+        <Flex
+          direction={{ default: "column" }}
+          flexWrap={{ default: "nowrap" }}
+          spaceItems={{ default: "spaceItemsNone" }}
+          style={{ height: "100%" }}
         >
-          <ErrorBoundaryFallback fallback={ErrorRenderer}>
-            <Suspense fallback={<KeycloakSpinner />}>
-              <AuthWall>
-                <Outlet />
-              </AuthWall>
-            </Suspense>
-          </ErrorBoundaryFallback>
-        </Page>
+          <FlexItem>
+            <Banners />
+          </FlexItem>
+          <FlexItem grow={{ default: "grow" }} style={{ minHeight: 0 }}>
+            <Page
+              header={<Header />}
+              isManagedSidebar
+              sidebar={<PageNav />}
+              breadcrumb={<PageBreadCrumbs />}
+              mainContainerId={mainPageContentId}
+            >
+              <ErrorBoundaryFallback fallback={ErrorRenderer}>
+                <Suspense fallback={<KeycloakSpinner />}>
+                  <AuthWall>
+                    <Outlet />
+                  </AuthWall>
+                </Suspense>
+              </ErrorBoundaryFallback>
+            </Page>
+          </FlexItem>
+        </Flex>
       </AppContexts>
     </AdminClientContext.Provider>
   );

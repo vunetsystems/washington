@@ -11,6 +11,7 @@ import org.keycloak.sessions.RootAuthenticationSessionModel;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Properties;
 import javax.imageio.ImageIO;
@@ -53,12 +54,12 @@ public class RecaptchaResource {
                 ? session.getContext().getRequestHeaders().getCookies().get("AUTH_SESSION_ID").getValue()
                 : null;
 
-        if (authCookie == null || authCookie.contains(".")) {
-            return Response.status(Response.Status.BAD_REQUEST).entity("Missing or invalid AUTH_SESSION_ID").build();
+        if (authCookie == null) {
+            return Response.status(Response.Status.BAD_REQUEST).entity("Missing AUTH_SESSION_ID").build();
         }
 
-        String[] parts = authCookie.split("\\.");
-        String rootSessionId = parts[0];
+        String decoded = new String(Base64.getUrlDecoder().decode(authCookie), StandardCharsets.UTF_8);
+        String rootSessionId = decoded.split("\\.")[0];
         String tabId = session.getContext().getUri().getQueryParameters().getFirst("tab_id");
 
         RootAuthenticationSessionModel rootSession = session.authenticationSessions()

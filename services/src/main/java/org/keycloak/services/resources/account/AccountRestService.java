@@ -45,16 +45,15 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import org.jboss.resteasy.reactive.NoCache;
-import org.keycloak.common.Profile.Feature;
-import org.keycloak.http.HttpRequest;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.common.Profile;
+import org.keycloak.common.Profile.Feature;
 import org.keycloak.common.enums.AccountRestApiVersion;
 import org.keycloak.common.util.StringPropertyReplacer;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.models.AccountRoles;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
@@ -80,12 +79,14 @@ import org.keycloak.storage.ReadOnlyException;
 import org.keycloak.theme.Theme;
 import org.keycloak.userprofile.AttributeMetadata;
 import org.keycloak.userprofile.Attributes;
+import org.keycloak.userprofile.EventAuditingAttributeChangeListener;
 import org.keycloak.userprofile.UserProfile;
 import org.keycloak.userprofile.UserProfileContext;
 import org.keycloak.userprofile.UserProfileProvider;
-import org.keycloak.userprofile.EventAuditingAttributeChangeListener;
 import org.keycloak.userprofile.ValidationException;
 import org.keycloak.userprofile.ValidationException.Error;
+
+import org.jboss.resteasy.reactive.NoCache;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -209,7 +210,7 @@ public class AccountRestService {
     public SessionResource sessions() {
         checkAccountApiEnabled();
         auth.requireOneOf(AccountRoles.MANAGE_ACCOUNT, AccountRoles.VIEW_PROFILE);
-        return new SessionResource(session, auth);
+        return new SessionResource(session, auth, event);
     }
 
     @Path("/credentials")
@@ -227,6 +228,7 @@ public class AccountRestService {
 
     @Path("supportedLocales")
     @GET
+    @Produces(MediaType.APPLICATION_JSON)
     public List<String> supportedLocales() {
         return auth.getRealm().getSupportedLocalesStream().collect(Collectors.toList());
     }
@@ -244,7 +246,7 @@ public class AccountRestService {
     private ClientRepresentation modelToRepresentation(ClientModel model, List<String> inUseClients, List<String> offlineClients, Map<String, UserConsentModel> consents) {
         ClientRepresentation representation = new ClientRepresentation();
         representation.setClientId(model.getClientId());
-        representation.setClientName(StringPropertyReplacer.replaceProperties(model.getName(), getProperties()));
+        representation.setClientName(model.getName());
         representation.setDescription(model.getDescription());
         representation.setUserConsentRequired(model.isConsentRequired());
         representation.setInUse(inUseClients.contains(model.getClientId()));
@@ -264,7 +266,7 @@ public class AccountRestService {
 
     private ConsentRepresentation modelToRepresentation(UserConsentModel model) {
         List<ConsentScopeRepresentation> grantedScopes = model.getGrantedClientScopes().stream()
-                .map(m -> new ConsentScopeRepresentation(m.getId(), m.getConsentScreenText()!= null ? m.getConsentScreenText() : m.getName(), StringPropertyReplacer.replaceProperties(m.getConsentScreenText(), getProperties())))
+                .map(m -> new ConsentScopeRepresentation(m.getId(), m.getConsentScreenText()!= null ? m.getConsentScreenText() : m.getName(), StringPropertyReplacer.replaceProperties(m.getConsentScreenText(), getProperties()::getProperty)))
                 .collect(Collectors.toList());
         return new ConsentRepresentation(grantedScopes, model.getCreatedDate(), model.getLastUpdatedDate());
     }

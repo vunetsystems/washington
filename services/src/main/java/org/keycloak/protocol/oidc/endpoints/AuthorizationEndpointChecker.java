@@ -24,7 +24,6 @@ import java.util.regex.Pattern;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 
-import org.jboss.logging.Logger;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.common.Profile;
@@ -41,17 +40,23 @@ import org.keycloak.protocol.oidc.TokenManager;
 import org.keycloak.protocol.oidc.endpoints.request.AuthorizationEndpointRequest;
 import org.keycloak.protocol.oidc.endpoints.request.AuthorizationEndpointRequestParserProcessor;
 import org.keycloak.protocol.oidc.endpoints.request.RequestUriType;
+import org.keycloak.protocol.oidc.resourceindicators.ResourceIndicatorConstants;
+import org.keycloak.protocol.oidc.resourceindicators.ResourceIndicatorValidation;
 import org.keycloak.protocol.oidc.utils.OIDCResponseMode;
 import org.keycloak.protocol.oidc.utils.OIDCResponseType;
 import org.keycloak.protocol.oidc.utils.RedirectUtils;
+import org.keycloak.representations.dpop.DPoP;
 import org.keycloak.services.CorsErrorResponseException;
 import org.keycloak.services.ErrorPageException;
 import org.keycloak.services.ServicesLogger;
 import org.keycloak.services.cors.Cors;
 import org.keycloak.services.messages.Messages;
+import org.keycloak.services.util.DPoPUtil;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.util.TokenUtil;
 import org.keycloak.utils.StringUtil;
+
+import org.jboss.logging.Logger;
 
 /**
  * Implements some checks typical for OIDC Authorization Endpoint. Useful to consolidate various checks on single place to avoid duplicated
@@ -239,6 +244,16 @@ public class AuthorizationEndpointChecker {
         }
     }
 
+    public void checkValidResource() throws AuthorizationCheckException {
+        if (!ResourceIndicatorValidation.isValidResourceIndicator(request.getResource())) {
+            ServicesLogger.LOGGER.invalidParameter(OIDCLoginProtocol.SCOPE_PARAM);
+            String errorMessage = "Invalid resource: " + request.getResource();
+            event.detail(Details.REASON, errorMessage);
+            event.error(Errors.INVALID_REQUEST);
+            throw new AuthorizationCheckException(Response.Status.BAD_REQUEST, OAuthErrorException.INVALID_TARGET, ResourceIndicatorConstants.ERROR_INVALID_RESOURCE);
+        }
+    }
+
     public void checkOIDCParams() throws AuthorizationCheckException {
         // If request is not OIDC request, but pure OAuth2 request and response_type is just 'token', then 'nonce' is not mandatory
         boolean isOIDCRequest = TokenUtil.isOIDCRequest(request.getScope());
@@ -291,6 +306,21 @@ public class AuthorizationEndpointChecker {
         event.detail(Details.REASON, errorMessage);
         event.error(Errors.INVALID_REQUEST);
         throw new AuthorizationCheckException(Response.Status.BAD_REQUEST, OAuthErrorException.INVALID_REQUEST, errorMessage);
+    }
+
+    public void checkParDPoPParams() throws AuthorizationCheckException {
+        DPoP dpop = session.getAttribute(DPoPUtil.DPOP_SESSION_ATTRIBUTE, DPoP.class);
+        if (dpop == null) {
+            return;
+        }
+        if (request.getDpopJkt() != null) {
+            if (!request.getDpopJkt().equals(dpop.getThumbprint())) {
+                String errorMessage = "DPoP Proof public key thumbprint does not match dpop_jkt.";
+                event.detail(Details.REASON, errorMessage);
+                event.error(Errors.INVALID_REQUEST);
+                throw new AuthorizationCheckException(Response.Status.BAD_REQUEST, OAuthErrorException.INVALID_REQUEST, errorMessage);
+            }
+        }
     }
 
     // https://tools.ietf.org/html/rfc7636#section-4

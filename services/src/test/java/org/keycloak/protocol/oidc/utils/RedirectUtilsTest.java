@@ -20,10 +20,7 @@ import java.net.URI;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.jboss.resteasy.mock.MockHttpRequest;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+
 import org.keycloak.common.Profile;
 import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.common.crypto.CryptoProvider;
@@ -32,6 +29,11 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.resteasy.HttpRequestImpl;
 import org.keycloak.services.resteasy.ResteasyKeycloakSession;
 import org.keycloak.services.resteasy.ResteasyKeycloakSessionFactory;
+
+import org.jboss.resteasy.mock.MockHttpRequest;
+import org.junit.Assert;
+import org.junit.BeforeClass;
+import org.junit.Test;
 
 /**
  * <p>Little test class for RedirectUtils methods.</p>
@@ -69,6 +71,45 @@ public class RedirectUtilsTest {
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test1/child", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.com/test", set, false));
+    }
+
+    @Test
+    public void testVerifyRedirectUriNative() {
+        Set<String> set = Stream.of(
+                "http://127.0.0.1",
+                "http://127.0.0.1/callback",
+                "http://[::1]",
+                "http://[::1]/callback",
+                "http://127.0.0.1/callback",
+                "http://localhost",
+                "http://localhost/callback"
+        ).collect(Collectors.toSet());
+
+        Assert.assertEquals("http://127.0.0.1", RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1", set, false));
+        Assert.assertEquals("http://127.0.0.1:12324", RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1:12324", set, false));
+        Assert.assertEquals("http://127.0.0.1/callback", RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1/callback", set, false));
+        Assert.assertEquals("http://127.0.0.1:12324/callback", RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1:12324/callback", set, false));
+        Assert.assertEquals("http://[::1]", RedirectUtils.verifyRedirectUri(session, null, "http://[::1]", set, false));
+        Assert.assertEquals("http://[::1]:12324", RedirectUtils.verifyRedirectUri(session, null, "http://[::1]:12324", set, false));
+        Assert.assertEquals("http://[::1]/callback", RedirectUtils.verifyRedirectUri(session, null, "http://[::1]/callback", set, false));
+        Assert.assertEquals("http://[::1]:12324/callback", RedirectUtils.verifyRedirectUri(session, null, "http://[::1]:12324/callback", set, false));
+        Assert.assertEquals("http://localhost", RedirectUtils.verifyRedirectUri(session, null, "http://localhost", set, false));
+        Assert.assertEquals("http://localhost:12324", RedirectUtils.verifyRedirectUri(session, null, "http://localhost:12324", set, false));
+        Assert.assertEquals("http://localhost/callback", RedirectUtils.verifyRedirectUri(session, null, "http://localhost/callback", set, false));
+        Assert.assertEquals("http://localhost:12324/callback", RedirectUtils.verifyRedirectUri(session, null, "http://localhost:12324/callback", set, false));
+
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1@invalid.com", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1:12324@invalid.com", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1@invalid.com/callback", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://127.0.0.1:12324@invalid.com/callback", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://[::1]@invalid.com", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://[::1]:12324@invalid.com", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://[::1]@invalid.com/callback", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://[::1]:12324@invalid.com/callback", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://localhost@invalid.com", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://localhost:12324@invalid.com", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://localhost@invalid.com/callback", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "http://localhost:12324@invalid.com/callback", set, false));
     }
 
     @Test
@@ -211,15 +252,19 @@ public class RedirectUtilsTest {
         Assert.assertEquals("https://keycloak.org/test/#encode2=a%3Cb", RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/#encode2=a%3Cb", set, false));
 
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/../", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/..;/", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test\\..\\", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test\\..;param=value\\", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%2E%2E/", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%2e%2e/", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%2e%2e;param=value\\", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%2E./", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%2E.", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test\\%2E.", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test%2f%2E%2e%2F", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test%5C%2E.%5c", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test%5C..", set, false));
+        Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test%5C..;/", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%2F%2E%2E%2Fdocumentation", set, false));
         Assert.assertEquals("https://keycloak.org/test/.../", RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/.../", set, false));
         Assert.assertEquals("https://keycloak.org/test/%2E../", RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%2E../", set, false));  // encoded
@@ -229,6 +274,7 @@ public class RedirectUtilsTest {
         Assert.assertEquals("https://keycloak.org/test/%252E%252E/#encodeTest=a%3Cb", RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%252E%252E/#encodeTest=a%3Cb", set, false)); // double-encoded
         Assert.assertEquals("https://keycloak.org/test/%25252E%25252E/", RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/%25252E%25252E/", set, false)); // triple-encoded
         Assert.assertEquals("https://keycloak.org/exact/%5C%2F/..", RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/exact/%5C%2F/..", set, false));
+        Assert.assertEquals("https://keycloak.org/test/..%3Bsomething/", RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org/test/..%3Bsomething/", set, false));
 
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak%2Eorg/test/", set, false));
         Assert.assertNull(RedirectUtils.verifyRedirectUri(session, null, "https://keycloak.org%2Ftest%2F%40sample.com", set, false));

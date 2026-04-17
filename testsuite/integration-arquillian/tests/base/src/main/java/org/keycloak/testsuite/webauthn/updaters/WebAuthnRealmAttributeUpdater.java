@@ -17,9 +17,9 @@
 
 package org.keycloak.testsuite.webauthn.updaters;
 
-import org.keycloak.admin.client.resource.RealmResource;
-
 import java.util.List;
+
+import org.keycloak.admin.client.resource.RealmResource;
 
 /**
  * @author <a href="mailto:mabartos@redhat.com">Martin Bartos</a>
@@ -86,6 +86,12 @@ public class WebAuthnRealmAttributeUpdater extends AbstractWebAuthnRealmUpdater<
     @Override
     public WebAuthnRealmAttributeUpdater setWebAuthnPolicyAcceptableAaguids(List<String> webAuthnPolicyAcceptableAaguids) {
         rep.setWebAuthnPolicyAcceptableAaguids(webAuthnPolicyAcceptableAaguids);
+        return this;
+    }
+
+    @Override
+    public WebAuthnRealmAttributeUpdater setWebAuthnPolicyPasskeysEnabled(Boolean webAuthnPolicyPasskeysEnabled) {
+        // passkeys are only used in passwordless policy
         return this;
     }
 

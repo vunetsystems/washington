@@ -1,101 +1,115 @@
 package org.keycloak.quarkus.runtime.configuration.mappers;
 
-import io.smallrye.config.ConfigSourceInterceptorContext;
-import io.smallrye.config.ConfigValue;
-
-import jakarta.ws.rs.core.MultivaluedHashMap;
-import org.jboss.logging.Logger;
-import org.keycloak.common.util.CollectionUtil;
-import org.keycloak.config.ConfigSupportLevel;
-import org.keycloak.config.OptionCategory;
-import org.keycloak.quarkus.runtime.Environment;
-import org.keycloak.quarkus.runtime.cli.PropertyException;
-import org.keycloak.quarkus.runtime.cli.command.AbstractCommand;
-import org.keycloak.quarkus.runtime.cli.command.Build;
-import org.keycloak.quarkus.runtime.cli.command.ShowConfig;
-import org.keycloak.quarkus.runtime.configuration.ConfigArgsConfigSource;
-import org.keycloak.quarkus.runtime.configuration.DisabledMappersInterceptor;
-import org.keycloak.quarkus.runtime.configuration.PersistedConfigSource;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.BiConsumer;
 import java.util.Set;
-import java.util.function.Predicate;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
-import static org.keycloak.quarkus.runtime.Environment.isParsedCommand;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+
+import org.keycloak.common.Profile;
+import org.keycloak.common.util.CollectionUtil;
+import org.keycloak.config.ConfigSupportLevel;
+import org.keycloak.config.Option;
+import org.keycloak.config.OptionCategory;
+import org.keycloak.quarkus.runtime.Environment;
+import org.keycloak.quarkus.runtime.cli.Picocli;
+import org.keycloak.quarkus.runtime.cli.PropertyException;
+import org.keycloak.quarkus.runtime.cli.command.AbstractCommand;
+import org.keycloak.quarkus.runtime.configuration.DisabledMappersInterceptor;
+import org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvider;
+import org.keycloak.quarkus.runtime.configuration.NestedPropertyMappingInterceptor;
+import org.keycloak.quarkus.runtime.configuration.PersistedConfigSource;
+
+import io.smallrye.config.ConfigSourceInterceptorContext;
+import io.smallrye.config.ConfigValue;
+import io.smallrye.config.Expressions;
+import org.jboss.logging.Logger;
+
 import static org.keycloak.quarkus.runtime.Environment.isRebuild;
 import static org.keycloak.quarkus.runtime.Environment.isRebuildCheck;
 import static org.keycloak.quarkus.runtime.configuration.KeycloakConfigSourceProvider.isKeyStoreConfigSource;
 
 public final class PropertyMappers {
 
+    public static final String KC_SPI_PREFIX = "kc.spi";
     public static String VALUE_MASK = "*******";
-    private static final MappersConfig MAPPERS = new MappersConfig();
+    private static MappersConfig MAPPERS;
     private static final Logger log = Logger.getLogger(PropertyMappers.class);
+    private final static List<PropertyMapperGrouping> GROUPINGS;
+    static {
+        GROUPINGS = List.of(new CachingPropertyMappers(), new DatabasePropertyMappers(),
+                new ConfigKeystorePropertyMappers(), new EventPropertyMappers(),
+                new ExportPropertyMappers(), new BootstrapAdminPropertyMappers(), new HostnameV2PropertyMappers(),
+                new HttpPropertyMappers(), new HttpAccessLogPropertyMappers(), new HealthPropertyMappers(),
+                new FeaturePropertyMappers(), new ImportPropertyMappers(), new ManagementPropertyMappers(),
+                new MetricsPropertyMappers(), new OpenApiPropertyMappers(), new LoggingPropertyMappers(), new ProxyPropertyMappers(),
+                new VaultPropertyMappers(), new TracingPropertyMappers(), new TransactionPropertyMappers(),
+                new SecurityPropertyMappers(), new TruststorePropertyMappers(), new TelemetryPropertyMappers(),
+                new ServerPropertyMappers());
+    }
+
+    public static List<PropertyMapperGrouping> getPropertyMapperGroupings() {
+        return GROUPINGS;
+    }
 
     private PropertyMappers(){}
 
     static {
-        MAPPERS.addAll(CachingPropertyMappers.getClusteringPropertyMappers());
-        MAPPERS.addAll(DatabasePropertyMappers.getDatabasePropertyMappers());
-        MAPPERS.addAll(HostnameV2PropertyMappers.getHostnamePropertyMappers());
-        MAPPERS.addAll(HttpPropertyMappers.getHttpPropertyMappers());
-        MAPPERS.addAll(HealthPropertyMappers.getHealthPropertyMappers());
-        MAPPERS.addAll(ConfigKeystorePropertyMappers.getConfigKeystorePropertyMappers());
-        MAPPERS.addAll(ManagementPropertyMappers.getManagementPropertyMappers());
-        MAPPERS.addAll(MetricsPropertyMappers.getMetricsPropertyMappers());
-        MAPPERS.addAll(ProxyPropertyMappers.getProxyPropertyMappers());
-        MAPPERS.addAll(VaultPropertyMappers.getVaultPropertyMappers());
-        MAPPERS.addAll(FeaturePropertyMappers.getMappers());
-        MAPPERS.addAll(LoggingPropertyMappers.getMappers());
-        MAPPERS.addAll(TracingPropertyMappers.getMappers());
-        MAPPERS.addAll(TransactionPropertyMappers.getTransactionPropertyMappers());
-        MAPPERS.addAll(ClassLoaderPropertyMappers.getMappers());
-        MAPPERS.addAll(SecurityPropertyMappers.getMappers());
-        MAPPERS.addAll(ExportPropertyMappers.getMappers());
-        MAPPERS.addAll(ImportPropertyMappers.getMappers());
-        MAPPERS.addAll(TruststorePropertyMappers.getMappers());
-        MAPPERS.addAll(BootstrapAdminPropertyMappers.getMappers());
+        reset();
+    }
+
+    public static void reset() {
+        MAPPERS = new MappersConfig();
+        GROUPINGS.forEach(g -> MAPPERS.addAll(g.getPropertyMappers()));
     }
 
     public static ConfigValue getValue(ConfigSourceInterceptorContext context, String name) {
-        return getMapperOrDefault(name, PropertyMapper.IDENTITY).getConfigValue(name, context);
-    }
+        PropertyMapper<?> mapper = getMapper(name);
 
-    public static boolean isBuildTimeProperty(String name) {
-        if (isFeaturesBuildTimeProperty(name) || isSpiBuildTimeProperty(name)) {
-            return true;
+        // During re-aug do not resolve server runtime properties and avoid including in the quarkus default value config source.
+        //
+        // The special handling of log properties is because some logging runtime properties are requested during build time
+        // and we need to resolve them. That should be fine as they are generally not considered security sensitive.
+        // If however expressions are not enabled that means quarkus is specifically looking for runtime defaults, and we should not provide a value
+        // See https://github.com/quarkusio/quarkus/pull/42157
+        if ((isRebuild() || Boolean.getBoolean(Environment.KC_TEST_REBUILD)) && isKeycloakRuntime(name, mapper)
+                && (NestedPropertyMappingInterceptor.getResolvingRoot().or(() -> Optional.of(name))
+                        .filter(n -> n.startsWith("quarkus.log.") || n.startsWith("quarkus.console.")).isEmpty()
+                        || !Expressions.isEnabled())) {
+            return ConfigValue.builder().withName(name).build();
         }
 
-        final PropertyMapper<?> mapper = getMapperOrDefault(name, null);
-        boolean isBuildTimeProperty = mapper == null ? false : mapper.isBuildTime();
-
-        return isBuildTimeProperty
-                && !"kc.version".equals(name)
-                && !ConfigArgsConfigSource.CLI_ARGS.equals(name)
-                && !"kc.home.dir".equals(name)
-                && !"kc.config.file".equals(name)
-                && !org.keycloak.common.util.Environment.PROFILE.equals(name)
-                && !"kc.show.config".equals(name)
-                && !"kc.show.config.runtime".equals(name)
-                && !"kc.config-file".equals(name);
+        if (mapper == null) {
+            return context.proceed(name);
+        }
+        return mapper.forKey(name).getConfigValue(name, context);
     }
 
-    private static boolean isSpiBuildTimeProperty(String name) {
-        return name.startsWith("kc.spi") && (name.endsWith("provider") || name.endsWith("enabled"));
+    public static boolean isSpiBuildTimeProperty(String name) {
+        // we can't require the new property formant until we're ok with a breaking change
+        //return name.startsWith(KC_SPI_PREFIX) && (name.endsWith("--provider") || name.endsWith("--enabled") || name.endsWith("--provider-default"));
+        return name.startsWith(KC_SPI_PREFIX) && (name.endsWith("-provider") || name.endsWith("-enabled") || name.endsWith("-provider-default"));
     }
 
-    private static boolean isFeaturesBuildTimeProperty(String name) {
-        return name.startsWith("kc.features");
+    public static boolean isMaybeSpiBuildTimeProperty(String name) {
+        return isSpiBuildTimeProperty(name) && !name.contains("--");
+    }
+
+    private static boolean isKeycloakRuntime(String name, PropertyMapper<?> mapper) {
+        if (mapper == null) {
+            return name.startsWith(MicroProfileConfigProvider.NS_KEYCLOAK) && !isSpiBuildTimeProperty(name);
+        }
+        return mapper.isRunTime();
     }
 
     public static Map<OptionCategory, List<PropertyMapper<?>>> getRuntimeMappers() {
@@ -123,18 +137,15 @@ public final class PropertyMappers {
     /**
      * Removes all disabled mappers from the runtime/buildtime mappers
      */
-    public static void sanitizeDisabledMappers() {
-        MAPPERS.sanitizeDisabledMappers();
+    public static void sanitizeDisabledMappers(AbstractCommand command) {
+        MAPPERS.sanitizeDisabledMappers(command);
     }
 
-    public static String maskValue(String property, String value) {
-        return maskValue(property, value, null);
+    public static String maskValue(String value, PropertyMapper<?> mapper) {
+        return maskValue(value, null, mapper);
     }
 
-    public static String maskValue(String property, String value, String configSourceName) {
-        property = removeProfilePrefixIfNeeded(property);
-        PropertyMapper<?> mapper = getMapper(property);
-
+    public static String maskValue(String value, String configSourceName, PropertyMapper<?> mapper) {
         if ((configSourceName != null && isKeyStoreConfigSource(configSourceName) || (mapper != null && mapper.isMask()))) {
             return VALUE_MASK;
         }
@@ -142,45 +153,55 @@ public final class PropertyMappers {
         return value;
     }
 
-    private static String removeProfilePrefixIfNeeded(String property) {
-        if(property.startsWith("%")) {
-            String profilePrefix = property.substring(0, property.indexOf(".") +1);
-            property = property.split(profilePrefix)[1];
-        }
-        return property;
-    }
-
-    private static PropertyMapper<?> getMapperOrDefault(String property, PropertyMapper<?> defaultMapper, OptionCategory category) {
-        property = removeProfilePrefixIfNeeded(property);
+    public static PropertyMapper<?> getMapper(String property, OptionCategory category) {
         final var mappers = new ArrayList<>(MAPPERS.getOrDefault(property, Collections.emptyList()));
         if (category != null) {
             mappers.removeIf(m -> !m.getCategory().equals(category));
         }
 
         return switch (mappers.size()) {
-            case 0 -> defaultMapper;
+            case 0 -> null;
             case 1 -> mappers.get(0);
             default -> {
-                log.debugf("Duplicated mappers for key '%s'. Used the first found.", property);
+                log.tracef("Duplicated mappers for key '%s'. Used the first found.", property);
                 yield mappers.get(0);
             }
         };
-    }
-
-    private static PropertyMapper<?> getMapperOrDefault(String property, PropertyMapper<?> defaultMapper) {
-        return getMapperOrDefault(property, defaultMapper, null);
-    }
-
-    public static PropertyMapper<?> getMapper(String property, OptionCategory category) {
-        return getMapperOrDefault(property, null, category);
     }
 
     public static PropertyMapper<?> getMapper(String property) {
         return getMapper(property, null);
     }
 
+    public static PropertyMapper<?> getMapperByCliKey(String cliKey) {
+        return getKcKeyFromCliKey(cliKey).map(PropertyMappers::getMapper).orElse(null);
+    }
+
+    public static Optional<String> getKcKeyFromCliKey(String cliKey) {
+        if (!cliKey.startsWith(Picocli.ARG_PREFIX)) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(
+                MicroProfileConfigProvider.NS_KEYCLOAK_PREFIX + cliKey.substring(Picocli.ARG_PREFIX.length()));
+    }
+
+    /**
+     * @return a mutable copy of all known mappers
+     */
     public static Set<PropertyMapper<?>> getMappers() {
-        return MAPPERS.values().stream().flatMap(Collection::stream).collect(Collectors.toSet());
+        return MAPPERS.values().stream().flatMap(Collection::stream).collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    public static Set<WildcardPropertyMapper<?>> getWildcardMappers() {
+        return MAPPERS.getWildcardMappers();
+    }
+
+    public static List<WildcardPropertyMapper<?>> getWildcardsMappedFrom(Option<?> from) {
+        var result = MAPPERS.wildcardConfig.wildcardMapFrom.get(from.getKey());
+        if (result == null) {
+            return List.of();
+        }
+        return result;
     }
 
     public static boolean isSupported(PropertyMapper<?> mapper) {
@@ -189,7 +210,9 @@ public final class PropertyMappers {
     }
 
     public static Optional<PropertyMapper<?>> getDisabledMapper(String property) {
-        if (property == null) return Optional.empty();
+        if (property == null) {
+            return Optional.empty();
+        }
 
         PropertyMapper<?> mapper = getDisabledBuildTimeMappers().get(property);
         if (mapper == null) {
@@ -199,21 +222,7 @@ public final class PropertyMappers {
     }
 
     public static boolean isDisabledMapper(String property) {
-        final Predicate<String> isDisabledMapper = (p) -> getDisabledMapper(p).isPresent() && getMapper(p) == null;
-
-        if (property.startsWith("%")) {
-            return isDisabledMapper.test(property.substring(property.indexOf('.') + 1));
-        }
-        return isDisabledMapper.test(property);
-    }
-
-    private static Set<PropertyMapper<?>> filterDeniedCategories(List<PropertyMapper<?>> mappers) {
-        final var allowedCategories = Environment.getParsedCommand()
-                .map(AbstractCommand::getOptionCategories)
-                .map(EnumSet::copyOf)
-                .orElseGet(() -> EnumSet.allOf(OptionCategory.class));
-
-        return mappers.stream().filter(f -> allowedCategories.contains(f.getCategory())).collect(Collectors.toSet());
+        return getDisabledMapper(property).isPresent() && getMapper(property) == null;
     }
 
     private static class MappersConfig extends MultivaluedHashMap<String, PropertyMapper<?>> {
@@ -224,7 +233,9 @@ public final class PropertyMappers {
         private final Map<String, PropertyMapper<?>> disabledBuildTimeMappers = new HashMap<>();
         private final Map<String, PropertyMapper<?>> disabledRuntimeMappers = new HashMap<>();
 
-        public void addAll(PropertyMapper<?>[] mappers) {
+        private final WildcardMappersConfig wildcardConfig = new WildcardMappersConfig();
+
+        public void addAll(List<? extends PropertyMapper<?>> mappers) {
             for (PropertyMapper<?> mapper : mappers) {
                 addMapper(mapper);
 
@@ -241,23 +252,59 @@ public final class PropertyMappers {
         }
 
         public void addMapper(PropertyMapper<?> mapper) {
-            handleMapper(mapper, this::add);
-        }
-
-        public void removeMapper(PropertyMapper<?> mapper) {
-            handleMapper(mapper, this::remove);
-        }
-
-        private void remove(String key, PropertyMapper<?> mapper) {
-            List<PropertyMapper<?>> list = get(key);
-            if (CollectionUtil.isNotEmpty(list)) {
-                list.remove(mapper);
+            if (mapper.hasWildcard()) {
+                wildcardConfig.addMapper((WildcardPropertyMapper<?>) mapper);
+            } else {
+                handleMapper(mapper, this::add);
             }
         }
 
-        public void sanitizeDisabledMappers() {
-            if (Environment.getParsedCommand().isEmpty()) return; // do not sanitize when no command is present
+        public void removeMapper(PropertyMapper<?> mapper) {
+            if (mapper.hasWildcard()) {
+                wildcardConfig.removeMapper((WildcardPropertyMapper<?>) mapper);
+            } else {
+                handleMapper(mapper, this::remove);
+            }
+        }
 
+        private void remove(String key, PropertyMapper<?> mapper) {
+            List<PropertyMapper<?>> list = super.get(key);
+            if (CollectionUtil.isNotEmpty(list)) {
+                list.remove(mapper);
+                if (list.isEmpty()) {
+                    super.remove(key);
+                }
+            }
+        }
+
+        @Override
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        public List<PropertyMapper<?>> get(Object key) {
+            // First check the base mappings
+            String strKey = (String) key;
+
+            List ret = super.get(key);
+            if (ret != null) {
+                return ret;
+            }
+
+            // TODO: we may want to introduce a prefix tree here as we add more wildcardMappers
+            // for now we'll just limit ourselves to searching wildcards when we see a quarkus or
+            // keycloak key
+            ret = wildcardConfig.get(strKey);
+            return !ret.isEmpty() ? ret : null;
+        }
+
+        @Override
+        public List<PropertyMapper<?>> remove(Object mapper) {
+            return super.remove(mapper);
+        }
+
+        public Set<WildcardPropertyMapper<?>> getWildcardMappers() {
+            return Collections.unmodifiableSet(wildcardConfig.wildcardMappers);
+        }
+
+        public void sanitizeDisabledMappers(AbstractCommand command) {
             DisabledMappersInterceptor.runWithDisabled(() -> { // We need to have the whole configuration available
 
                 // Initialize profile in order to check state of features. Disable Persisted CS for re-augmentation
@@ -265,39 +312,19 @@ public final class PropertyMappers {
                     PersistedConfigSource.getInstance().runWithDisabled(Environment::getCurrentOrCreateFeatureProfile);
                 } else {
                     Environment.getCurrentOrCreateFeatureProfile();
+                    if (!command.shouldStart()) {
+                        // this will use the deferred logger, which means it may not be seen in some circumstances
+                        Profile.getInstance().logUnsupportedFeatures();
+                    }
                 }
 
-                sanitizeMappers(buildTimeMappers, disabledBuildTimeMappers);
-                sanitizeMappers(runtimeTimeMappers, disabledRuntimeMappers);
+                sanitizeMappers(buildTimeMappers, disabledBuildTimeMappers, command);
+                sanitizeMappers(runtimeTimeMappers, disabledRuntimeMappers, command);
 
-                assertDuplicatedMappers();
-            });
-        }
-
-        private void assertDuplicatedMappers() {
-            final var duplicatedMappers = entrySet().stream()
-                    .filter(e -> CollectionUtil.isNotEmpty(e.getValue()))
-                    .filter(e -> e.getValue().size() > 1)
-                    .toList();
-
-            final var isBuildPhase = isRebuild() || isRebuildCheck() || isParsedCommand(Build.NAME);
-            final var allowedForCommand = isParsedCommand(ShowConfig.NAME);
-
-            if (!duplicatedMappers.isEmpty()) {
-                duplicatedMappers.forEach(f -> {
-                    final var filteredMappers = filterDeniedCategories(f.getValue());
-
-                    if (filteredMappers.size() > 1) {
-                        final var areBuildTimeMappers = filteredMappers.stream().anyMatch(PropertyMapper::isBuildTime);
-
-                        // thrown in runtime, or in build time, when some mapper is marked as buildTime + not allowed to have duplicates for specific command
-                        final var shouldBeThrown = !allowedForCommand && (!isBuildPhase || areBuildTimeMappers);
-                        if (shouldBeThrown) {
-                            throw new PropertyException(String.format("Duplicated mapper for key '%s'.", f.getKey()));
-                        }
-                    }
+                entrySet().stream().filter(e -> e.getValue().size() > 1).findFirst().ifPresent(e -> {
+                    throw new PropertyException(String.format("Duplicated mapper for key '%s'.", e.getKey()));
                 });
-            }
+            });
         }
 
         public Map<OptionCategory, List<PropertyMapper<?>>> getRuntimeMappers() {
@@ -317,10 +344,10 @@ public final class PropertyMappers {
         }
 
         private static void sanitizeMappers(Map<OptionCategory, List<PropertyMapper<?>>> mappers,
-                                            Map<String, PropertyMapper<?>> disabledMappers) {
+                                            Map<String, PropertyMapper<?>> disabledMappers, AbstractCommand command) {
             mappers.forEach((category, propertyMappers) ->
                     propertyMappers.removeIf(pm -> {
-                        final boolean shouldRemove = !pm.isEnabled();
+                        final boolean shouldRemove = !pm.isEnabled(command);
                         if (shouldRemove) {
                             MAPPERS.removeMapper(pm);
                             handleMapper(pm, disabledMappers::put);
@@ -332,10 +359,50 @@ public final class PropertyMappers {
         private static void handleMapper(PropertyMapper<?> mapper, BiConsumer<String, PropertyMapper<?>> operation) {
             operation.accept(mapper.getFrom(), mapper);
             if (!mapper.getFrom().equals(mapper.getTo())) {
-                operation.accept(mapper.getTo(), mapper);
+                String to = mapper.getTo();
+                operation.accept(to, mapper);
+                if (to.startsWith(KC_SPI_PREFIX)) {
+                    if (!mapper.getTo().contains("--")) {
+                        throw new IllegalStateException("Mapper should use the new form of the SPI option with the `--` separator: " + to);
+                    }
+                    String legacyTo = mapper.getTo().replace("--", "-");
+                    operation.accept(legacyTo, mapper);
+                }
             }
-            operation.accept(mapper.getCliFormat(), mapper);
-            operation.accept(mapper.getEnvVarFormat(), mapper);
+        }
+    }
+
+    /**
+     * Helper class for handling Mappers config for wildcards
+     */
+    private static class WildcardMappersConfig {
+        private final Set<WildcardPropertyMapper<?>> wildcardMappers = new HashSet<>();
+        private final MultivaluedHashMap<String, WildcardPropertyMapper<?>> wildcardMapFrom = new MultivaluedHashMap<>();
+
+        public void addMapper(WildcardPropertyMapper<?> mapper) {
+            if (mapper.getMapFrom() != null) {
+                wildcardMapFrom.add(mapper.getMapFrom(), mapper);
+            }
+            wildcardMappers.add(mapper);
+        }
+
+        public void removeMapper(WildcardPropertyMapper<?> mapper) {
+            wildcardMappers.remove(mapper);
+            if (mapper.getFrom() != null) {
+                wildcardMapFrom.remove(mapper.getMapFrom());
+            }
+        }
+
+        public List<WildcardPropertyMapper<?>> get(String key) {
+            // TODO: we may want to introduce a prefix tree here as we add more wildcardMappers
+            // for now we'll just limit ourselves to searching wildcards when we see a quarkus or
+            // keycloak key
+            if (key.startsWith(MicroProfileConfigProvider.NS_KEYCLOAK_PREFIX) || key.startsWith(MicroProfileConfigProvider.NS_QUARKUS_PREFIX)) {
+                return wildcardMappers.stream()
+                        .filter(m -> m.matchesWildcardOptionName(key))
+                        .toList();
+            }
+            return Collections.emptyList();
         }
     }
 }

@@ -16,17 +16,30 @@
  */
 package org.keycloak.authentication.actiontoken.execactions;
 
+import java.util.Objects;
+
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriInfo;
+
 import org.keycloak.TokenVerifier;
 import org.keycloak.TokenVerifier.Predicate;
 import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.authentication.RequiredActionFactory;
 import org.keycloak.authentication.RequiredActionProvider;
-import org.keycloak.authentication.actiontoken.*;
+import org.keycloak.authentication.actiontoken.AbstractActionTokenHandler;
+import org.keycloak.authentication.actiontoken.ActionTokenContext;
+import org.keycloak.authentication.actiontoken.TokenUtils;
 import org.keycloak.authentication.requiredactions.util.RequiredActionsValidator;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
 import org.keycloak.forms.login.LoginFormsProvider;
-import org.keycloak.models.*;
+import org.keycloak.models.Constants;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.RequiredActionProviderModel;
+import org.keycloak.models.UserModel;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.utils.RedirectUtils;
 import org.keycloak.services.Urls;
@@ -34,10 +47,6 @@ import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.sessions.AuthenticationSessionCompoundId;
 import org.keycloak.sessions.AuthenticationSessionModel;
-import java.util.Objects;
-import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriBuilder;
-import jakarta.ws.rs.core.UriInfo;
 
 import static org.keycloak.models.utils.DefaultRequiredActions.getDefaultRequiredActionCaseInsensitively;
 
@@ -90,6 +99,7 @@ public class ExecuteActionsActionTokenHandler extends AbstractActionTokenHandler
 
             return session.getProvider(LoginFormsProvider.class)
                     .setAuthenticationSession(authSession)
+                    .setUser(authSession.getAuthenticatedUser())
                     .setSuccess(Messages.CONFIRM_EXECUTION_OF_ACTIONS)
                     .setAttribute(Constants.TEMPLATE_ATTR_ACTION_URI, confirmUri)
                     .setAttribute(Constants.TEMPLATE_ATTR_REQUIRED_ACTIONS, token.getRequiredActions())

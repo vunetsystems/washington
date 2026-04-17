@@ -29,9 +29,9 @@ type LinkIdentityProviderModalProps = {
 
 type LinkRepresentation = {
   alias: string[] | string;
+  hideOnLogin: boolean;
   config: {
     "kc.org.domain": string;
-    "kc.org.broker.public": string;
   };
 };
 
@@ -51,7 +51,11 @@ export const LinkIdentityProviderModal = ({
   useEffect(
     () =>
       convertToFormValues(
-        { ...identityProvider, alias: [identityProvider?.alias] },
+        {
+          ...identityProvider,
+          alias: [identityProvider?.alias],
+          hideOnLogin: identityProvider?.hideOnLogin,
+        },
         setValue,
       ),
     [],
@@ -72,6 +76,7 @@ export const LinkIdentityProviderModal = ({
         ...foundIdentityProvider.config,
         ...config,
       };
+      foundIdentityProvider.hideOnLogin = data.hideOnLogin ?? true;
       await adminClient.identityProviders.update(
         { alias: data.alias[0] },
         foundIdentityProvider,
@@ -135,14 +140,25 @@ export const LinkIdentityProviderModal = ({
             controller={{ defaultValue: "" }}
             options={[
               { key: "", value: t("none") },
-              ...getValues("domains")!.map((d) => ({ key: d, value: d })),
+              { key: "ANY", value: t("any") },
+              ...(getValues("domains")
+                ? getValues("domains")!.map((d) => ({ key: d, value: d }))
+                : []),
             ]}
             menuAppendTo="parent"
           />
           <DefaultSwitchControl
-            name={convertAttributeNameToForm("config.kc.org.broker.public")}
-            label={t("shownOnLoginPage")}
-            labelIcon={t("shownOnLoginPageHelp")}
+            name="hideOnLogin"
+            label={t("hideOnLoginPage")}
+            labelIcon={t("hideOnLoginPageHelp")}
+            defaultValue={true}
+          />
+          <DefaultSwitchControl
+            name={convertAttributeNameToForm(
+              "config.kc.org.broker.login.hide-when-org-unknown",
+            )}
+            label={t("hideOnLoginWhenOrgNotResolved")}
+            labelIcon={t("hideOnLoginWhenOrgNotResolvedHelp")}
             stringify
           />
           <DefaultSwitchControl

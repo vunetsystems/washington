@@ -18,24 +18,22 @@
 
 package org.keycloak.testsuite.federation.ldap;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.FixMethodOrder;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.ExternalResource;
-import org.junit.runners.MethodSorters;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
 import org.keycloak.models.LDAPConstants;
-import org.keycloak.models.RealmModel;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.models.ModelException;
+import org.keycloak.models.RealmModel;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.ldap.idm.model.LDAPObject;
-import org.keycloak.testsuite.arquillian.annotation.EnableVault;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.AssertEvents;
+import org.keycloak.testsuite.arquillian.annotation.EnableVault;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.runonserver.RunOnServerException;
@@ -43,14 +41,15 @@ import org.keycloak.testsuite.util.LDAPRule;
 import org.keycloak.testsuite.util.LDAPRule.LDAPConnectionParameters;
 import org.keycloak.testsuite.util.LDAPTestConfiguration;
 import org.keycloak.testsuite.util.LDAPTestUtils;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.List;
-
-import java.util.Objects;
+import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assume;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.junit.FixMethodOrder;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.ExternalResource;
+import org.junit.runners.MethodSorters;
 
 /**
  * Test user logins utilizing various LDAP authentication methods and different LDAP connection encryption mechanisms.
@@ -154,9 +153,9 @@ public class LDAPUserLoginTest extends AbstractLDAPTest {
         loginPage.login(username, password);
         appPage.assertCurrent();
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
         EventRepresentation loginEvent = events.expectLogin().user(userId).assertEvent();
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+        AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
         appPage.logout(tokenResponse.getIdToken());
         events.expectLogout(loginEvent.getSessionId()).user(userId).assertEvent();
     }

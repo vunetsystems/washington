@@ -17,16 +17,17 @@
 
 package org.keycloak.testsuite.oidc.flows;
 
-import org.junit.Before;
+import java.util.Collections;
+import java.util.List;
+
 import org.keycloak.events.Details;
 import org.keycloak.protocol.oidc.utils.OIDCResponseType;
 import org.keycloak.representations.IDToken;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.testsuite.Assert;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AuthorizationEndpointResponse;
 
-import java.util.Collections;
-import java.util.List;
+import org.junit.Before;
 
 /**
  * Test for response_type=none
@@ -50,7 +51,7 @@ public class OIDCBasicResponseTypeNoneTest extends AbstractOIDCResponseTypeTest 
     }
 
     @Override
-    protected List<IDToken> testAuthzResponseAndRetrieveIDTokens(OAuthClient.AuthorizationEndpointResponse authzResponse, EventRepresentation loginEvent) {
+    protected List<IDToken> testAuthzResponseAndRetrieveIDTokens(AuthorizationEndpointResponse authzResponse, EventRepresentation loginEvent) {
         Assert.assertEquals(OIDCResponseType.NONE, loginEvent.getDetails().get(Details.RESPONSE_TYPE));
 
         Assert.assertNull(authzResponse.getCode());

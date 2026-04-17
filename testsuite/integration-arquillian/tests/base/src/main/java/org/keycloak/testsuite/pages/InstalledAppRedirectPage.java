@@ -22,10 +22,11 @@ package org.keycloak.testsuite.pages;
 import java.net.URI;
 import java.net.URISyntaxException;
 
-import org.junit.Assert;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.common.util.KeycloakUriBuilder;
 import org.keycloak.services.Urls;
+
+import org.junit.Assert;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebElement;
@@ -44,14 +45,8 @@ public class InstalledAppRedirectPage extends AbstractPage {
     @FindBy(id = "kc-page-title")
     private WebElement pageTitle;
 
-    @FindBy(className = "pf-v5-c-alert")
+    @FindBy(css = "div[class^='pf-v5-c-alert'], div[class^='alert-error']")
     private WebElement errorBox;
-
-    @Override
-    public void open() {
-        throw new UnsupportedOperationException("Use method: open(code, error, errorDescription)");
-    }
-
 
     public void open(String realmName, String code, String error, String errorDescription) {
         try {

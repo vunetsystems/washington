@@ -17,12 +17,13 @@
 
 package org.keycloak.services.cors;
 
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.ResponseBuilder;
 
-import org.keycloak.common.util.Resteasy;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.provider.Provider;
@@ -36,7 +37,14 @@ public interface Cors extends Provider {
 
     long DEFAULT_MAX_AGE = TimeUnit.HOURS.toSeconds(1);
     String DEFAULT_ALLOW_METHODS = "GET, HEAD, OPTIONS";
-    String DEFAULT_ALLOW_HEADERS = "Origin, Accept, X-Requested-With, Content-Type, Access-Control-Request-Method, Access-Control-Request-Headers, DPoP";
+    Set<String> DEFAULT_ALLOW_HEADERS = Set.of(
+            "Origin",
+            "Accept",
+            "X-Requested-With",
+            "Content-Type",
+            "Access-Control-Request-Method",
+            "Access-Control-Request-Headers",
+            "DPoP");
 
     String ORIGIN_HEADER = "Origin";
     String AUTHORIZATION_HEADER = "Authorization";
@@ -61,6 +69,8 @@ public interface Cors extends Provider {
 
     Cors auth();
 
+    Cors failOnInvalidOrigin();
+
     Cors allowAllOrigins();
 
     Cors allowedOrigins(KeycloakSession session, ClientModel client);
@@ -68,6 +78,10 @@ public interface Cors extends Provider {
     Cors allowedOrigins(AccessToken token);
 
     Cors allowedOrigins(String... allowedOrigins);
+
+    Cors allowedOrigins(List<String> allowedOrigins);
+
+    Cors addAllowedOrigins(List<String> allowedOrigins);
 
     Cors allowedMethods(String... allowedMethods);
 

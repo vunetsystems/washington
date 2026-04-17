@@ -17,9 +17,14 @@
 
 package org.keycloak.testsuite.oidc;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.ClientScopeResource;
@@ -43,21 +48,21 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.pages.OAuthGrantPage;
+import org.keycloak.testsuite.util.AccountHelper;
 import org.keycloak.testsuite.util.ClientManager;
-import org.keycloak.testsuite.util.OAuthClient;
 import org.keycloak.testsuite.util.RoleBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
-import org.keycloak.testsuite.util.AccountHelper;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.util.TokenUtil;
 
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.core.Response;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import static org.keycloak.OAuthErrorException.INVALID_SCOPE;
+import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 
 import static org.junit.Assert.assertEquals;
-import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 
 /**
  * Test for OAuth2 'scope' parameter and for some other aspects of client scopes
@@ -159,7 +164,6 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         ClientManager.realm(adminClient.realm("test")).clientId("test-app").directAccessGrant(true);
         oauth.clientId("test-app");
         oauth.scope(null);
-        oauth.maxAge(null);
     }
 
     @After
@@ -192,7 +196,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         assertMicroprofile(tokens.accessToken, false);
 
         // Logout
-        oauth.doLogout(tokens.refreshToken, "password");
+        oauth.doLogout(tokens.refreshToken);
         events.expectLogout(idToken.getSessionState())
                 .client("test-app")
                 .user(userId)
@@ -306,7 +310,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         assertPhone(idToken, false);
 
         // Logout
-        oauth.doLogout(tokens.refreshToken, "password");
+        oauth.doLogout(tokens.refreshToken);
         events.expectLogout(idToken.getSessionState())
                 .client("test-app")
                 .user(userId)
@@ -342,7 +346,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         addressScope.update(addressScopeRep);
 
         oauth.clientId("third-party");
-        oauth.doLoginGrant("john", "password");
+        oauth.doLogin("john", "password");
 
         grantPage.assertCurrent();
         grantPage.assertGrants(OAuthGrantPage.PROFILE_CONSENT_TEXT, OAuthGrantPage.EMAIL_CONSENT_TEXT, OAuthGrantPage.ROLES_CONSENT_TEXT);
@@ -363,7 +367,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         assertPhone(idToken, false);
 
         // Logout
-        oauth.doLogout(tokens.refreshToken, "password");
+        oauth.doLogout(tokens.refreshToken);
         events.expectLogout(idToken.getSessionState())
                 .client("third-party")
                 .user(userId)
@@ -371,7 +375,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
 
         // Login with optional scopes. Grant screen should have just "phone"
         oauth.scope("openid address phone");
-        oauth.doLoginGrant("john", "password");
+        oauth.doLogin("john", "password");
 
         grantPage.assertCurrent();
         grantPage.assertGrants(OAuthGrantPage.PHONE_CONSENT_TEXT);
@@ -407,7 +411,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
 
         // Login. Client should be displayed on consent screen
         oauth.clientId("third-party");
-        oauth.doLoginGrant("john", "password");
+        oauth.doLogin("john", "password");
 
         grantPage.assertCurrent();
         grantPage.assertGrants(OAuthGrantPage.PROFILE_CONSENT_TEXT, OAuthGrantPage.EMAIL_CONSENT_TEXT, OAuthGrantPage.ROLES_CONSENT_TEXT, "ThirdParty permissions");
@@ -451,7 +455,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
 
         // Login. ConsentTexts are empty for the client and for the "profile" scope, so it should fallback to name/clientId
         oauth.clientId("third-party");
-        oauth.doLoginGrant("john", "password");
+        oauth.doLogin("john", "password");
 
         grantPage.assertCurrent();
         grantPage.assertGrants("profile", OAuthGrantPage.EMAIL_CONSENT_TEXT, OAuthGrantPage.ROLES_CONSENT_TEXT, "third-party");
@@ -470,7 +474,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
     public void testRefreshTokenWithConsentRequired() {
         // Login with consentRequired
         oauth.clientId("third-party");
-        oauth.doLoginGrant("john", "password");
+        oauth.doLogin("john", "password");
 
         grantPage.assertCurrent();
         grantPage.assertGrants(OAuthGrantPage.PROFILE_CONSENT_TEXT, OAuthGrantPage.EMAIL_CONSENT_TEXT, OAuthGrantPage.ROLES_CONSENT_TEXT);
@@ -492,7 +496,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         assertPhone(idToken, false);
 
         // Ensure that I can refresh token
-        OAuthClient.AccessTokenResponse refreshResponse = oauth.doRefreshTokenRequest(tokens.refreshToken, "password");
+        AccessTokenResponse refreshResponse = oauth.doRefreshTokenRequest(tokens.refreshToken);
         Assert.assertEquals(200, refreshResponse.getStatusCode());
         idToken = oauth.verifyIDToken(refreshResponse.getIdToken());
 
@@ -513,7 +517,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         Assert.assertEquals(userConsents.size(), 0);
 
         // Ensure I can't refresh anymore
-        refreshResponse = oauth.doRefreshTokenRequest(refreshResponse.getRefreshToken(), "password");
+        refreshResponse = oauth.doRefreshTokenRequest(refreshResponse.getRefreshToken());
         assertEquals(400, refreshResponse.getStatusCode());
         events.expectRefresh(refreshToken1.getId(), idToken.getSessionState())
                 .client("third-party")
@@ -580,14 +584,14 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
 
         // Ensure I can refresh refreshToken1. Just role1 is present
         oauth.scope(null);
-        OAuthClient.AccessTokenResponse refreshResponse1 = oauth.doRefreshTokenRequest(tokens1.refreshToken, "password");
+        AccessTokenResponse refreshResponse1 = oauth.doRefreshTokenRequest(tokens1.refreshToken);
         Assert.assertEquals(200, refreshResponse1.getStatusCode());
         AccessToken accessToken1 = oauth.verifyToken(refreshResponse1.getAccessToken());
         Assert.assertTrue(accessToken1.getRealmAccess().isUserInRole("role-1"));
         Assert.assertFalse(accessToken1.getRealmAccess().isUserInRole("role-2"));
 
         // Ensure I can refresh refreshToken2. Just role2 is present
-        OAuthClient.AccessTokenResponse refreshResponse2 = oauth.doRefreshTokenRequest(tokens2.refreshToken, "password");
+        AccessTokenResponse refreshResponse2 = oauth.doRefreshTokenRequest(tokens2.refreshToken);
         Assert.assertEquals(200, refreshResponse2.getStatusCode());
         AccessToken accessToken2 = oauth.verifyToken(refreshResponse2.getAccessToken());
         Assert.assertFalse(accessToken2.getRealmAccess().isUserInRole("role-1"));
@@ -652,6 +656,34 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         testApp.removeOptionalClientScope(scopeParentId);
     }
 
+    @Test
+    public void testLengthyScopeParameter() {
+        // Scope parameter too long (longer than 4000 characters). Will be ignored
+        String scope = getLongScopeParameter(1000);
+        oauth.scope(scope);
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("john", "password");
+        assertEquals(200, response.getStatusCode());
+        AccessToken token = oauth.verifyToken(response.getAccessToken());
+        Assert.assertFalse(TokenUtil.isOIDCRequest(token.getScope()));
+
+        // Scope parameter relatively long. Should not be ignored
+        scope = getLongScopeParameter(800);
+        oauth.scope(scope);
+        response = oauth.doPasswordGrantRequest("john", "password");
+        assertEquals(400, response.getStatusCode());
+        assertEquals(INVALID_SCOPE, response.getError());
+    }
+
+    // Get very long "scope" parameter created from big list of some unknown scopes
+    private String getLongScopeParameter(int scopesCount) {
+        StringBuilder scopeParam = new StringBuilder("openid");
+        for (int i = 0 ; i < scopesCount ; i++) {
+            scopeParam.append(" s").append(i);
+        }
+        String scope = scopeParam.toString();
+        getLogger().infof("Scopes count: %d, Scope param length: %d", scopesCount, scope.length());
+        return scope;
+    }
 
     private void testLoginAndClientScopesPermissions(String username, String expectedRoleScopes, String... expectedRoles) {
         String userId = ApiUtil.findUserByUsername(testRealm(), username).getId();
@@ -665,7 +697,7 @@ public class OIDCScopeTest extends AbstractOIDCScopeTest {
         Tokens tokens = sendTokenRequest(loginEvent, userId,"openid email profile " + expectedRoleScopes, "test-app");
         Assert.assertNames(tokens.accessToken.getRealmAccess().getRoles(), expectedRoles);
 
-        oauth.doLogout(tokens.refreshToken, "password");
+        oauth.doLogout(tokens.refreshToken);
         events.expectLogout(tokens.idToken.getSessionState())
                 .client("test-app")
                 .user(userId)
