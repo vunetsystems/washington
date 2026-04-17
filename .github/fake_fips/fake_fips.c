@@ -34,9 +34,7 @@ static struct ctl_table crypto_sysctl_table[] = {
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec
 	},
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
-	{}
-#endif
+        {}
 };
 static struct ctl_table crypto_dir_table[] = {
 	{
@@ -46,9 +44,7 @@ static struct ctl_table crypto_dir_table[] = {
 		.child          = crypto_sysctl_table
 #endif
 	},
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 11, 0))
 	{}
-#endif
 };
 
 static struct ctl_table_header *crypto_sysctls;

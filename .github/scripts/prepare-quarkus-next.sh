@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -xeuo pipefail
 
 add_repository() {
@@ -7,7 +7,7 @@ add_repository() {
 
   local id="sonatype-snapshots"
   local name="Sonatype Snapshots"
-  local url="https://central.sonatype.com/repository/maven-snapshots/"
+  local url="https://s01.oss.sonatype.org/content/repositories/snapshots/"
 
   # Decide the tag based on the element
   local tag
@@ -50,7 +50,7 @@ add_repository "pom.xml" "repository"
 add_repository "quarkus/pom.xml" "pluginRepository"
 add_repository "operator/pom.xml" "pluginRepository"
 
-./quarkus/set-quarkus-version.sh
+./quarkus/scripts/set-quarkus-version.sh
 git commit -am "Set quarkus version to 999-SNAPSHOT"
 
 snapshot_version_hash=$(git log origin/quarkus-next --grep="Set quarkus version to 999-SNAPSHOT" --format="%H" -n 1)
