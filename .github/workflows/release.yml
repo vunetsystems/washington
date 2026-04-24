@@ -510,20 +510,42 @@ jobs:
       - name: Download Keycloak dist from latest develop build
         if: github.event_name == 'repository_dispatch'
         run: |
-          RUN_ID=$(gh api \
-            "repos/${{ github.repository }}/actions/workflows/release.yml/runs?branch=develop&status=success&per_page=10" \
-            --jq '[.workflow_runs[] | select(.conclusion == "success")] | .[0].id')
+          # Find the most recent successful develop run of this workflow that
+          # actually uploaded a keycloak-dist-dev artifact. Prior Marauder
+          # repository_dispatch runs also show up as successful develop runs
+          # but never upload the artifact, so a naive "latest" lookup would
+          # pick them up and fail.
+          CANDIDATES=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/release.yml/runs?branch=develop&status=success&per_page=30" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success") | .id] | .[]')
 
-          if [ -z "$RUN_ID" ] || [ "$RUN_ID" == "null" ]; then
-            echo "ERROR: No successful develop build found to download keycloak-dist artifact from."
+          if [ -z "$CANDIDATES" ]; then
+            echo "ERROR: No successful develop runs found."
             exit 1
           fi
 
-          echo "Downloading keycloak-dist artifact from run $RUN_ID"
-          gh run download "$RUN_ID" --name keycloak-dist --dir quarkus/container/
+          RUN_ID=""
+          for CANDIDATE in $CANDIDATES; do
+            HAS_ARTIFACT=$(gh api \
+              "repos/${{ github.repository }}/actions/runs/${CANDIDATE}/artifacts" \
+              --jq '[.artifacts[] | select(.name == "keycloak-dist-dev" and .expired == false)] | length')
+            if [ "$HAS_ARTIFACT" != "0" ]; then
+              RUN_ID="$CANDIDATE"
+              break
+            fi
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "ERROR: No successful develop run with keycloak-dist-dev artifact found in the last 30 runs."
+            echo "Merge a commit to develop (or run the workflow manually on develop) to seed the artifact, then retry."
+            exit 1
+          fi
+
+          echo "Downloading keycloak-dist-dev artifact from run $RUN_ID"
+          gh run download "$RUN_ID" --name keycloak-dist-dev --dir quarkus/container/
 
           test -n "$(ls quarkus/container/keycloak-*.tar.gz 2>/dev/null)" || {
-            echo "ERROR: keycloak-dist artifact not found in run $RUN_ID"
+            echo "ERROR: keycloak-dist-dev artifact not found in run $RUN_ID"
             exit 1
           }
         env:
@@ -614,6 +636,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: keycloak-dist
+          path: quarkus/dist/target/keycloak-*.tar.gz
+
+      - name: Upload develop artifact
+        if: needs.branch-context.outputs.branch-type == 'develop' && github.event_name != 'repository_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: keycloak-dist-dev
           path: quarkus/dist/target/keycloak-*.tar.gz
 
   # ---------------------------------------------------------------------------
