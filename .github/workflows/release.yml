@@ -719,12 +719,15 @@ jobs:
             [ -n "$MAPPED_SUFFIX" ] && IMAGE_NAME="${{ github.repository_owner }}/${MAPPED_SUFFIX}"
           fi
 
+        
           for chart in $CHART_PATHS; do
-            [ -f "$chart/values.yaml" ] && \
-              sed -i "s|imageTag:.*|imageTag: $TAG|" "$chart/values.yaml" && \
-              sed -i "s|imageName:.*|imageName: $IMAGE_NAME|" "$chart/values.yaml"
+            if [ -f "$chart/values.yaml" ]; then
+              sed -i -E "s|(imageTag: &imageTag) .*|\1 $TAG|" "$chart/values.yaml"
+              sed -i -E "s|(imageName: &imageName) .*|\1 $IMAGE_NAME|" "$chart/values.yaml"
+            fi
           done
-
+          
+          
           git diff --quiet || {
             git add .
             git commit -m "chore: update keycloak image tag to $TAG"
