@@ -16,7 +16,15 @@
  */
 package org.keycloak.services.resources.admin;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+import java.io.IOException;
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotAuthorizedException;
@@ -26,8 +34,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.NoCache;
+
 import org.keycloak.Config;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.common.Profile;
@@ -49,26 +56,19 @@ import org.keycloak.services.Urls;
 import org.keycloak.services.cors.Cors;
 import org.keycloak.services.managers.AppAuthManager;
 import org.keycloak.services.managers.AuthenticationManager;
-import org.keycloak.services.managers.ClientManager;
 import org.keycloak.services.managers.RealmManager;
 import org.keycloak.services.util.ViteManifest;
 import org.keycloak.theme.FreeMarkerException;
-import org.keycloak.theme.Theme;
 import org.keycloak.theme.freemarker.FreeMarkerProvider;
 import org.keycloak.urls.UrlType;
 import org.keycloak.utils.MediaType;
+import org.keycloak.utils.SecureContextResolver;
 
-import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Set;
-import java.util.stream.Collectors;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.NoCache;
 
-import static org.keycloak.models.Constants.IS_TEMP_ADMIN_ATTR_NAME;
+import static org.keycloak.models.UserModel.IS_TEMP_ADMIN_ATTR_NAME;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -182,22 +182,6 @@ public class AdminConsole {
         }
     }
 
-    /**
-     * Adapter configuration for the admin console for this realm
-     *
-     * @return
-     */
-    @Path("config")
-    @GET
-    @Produces(MediaType.APPLICATION_JSON)
-    @NoCache
-    public ClientManager.InstallationAdapterConfig config() {
-        ClientModel consoleApp = realm.getClientByClientId(Constants.ADMIN_CONSOLE_CLIENT_ID);
-        if (consoleApp == null) {
-            throw new NotFoundException("Could not find admin console client");
-        }
-        return new ClientManager(new RealmManager(session)).toInstallationRepresentation(realm, consoleApp, session.getContext().getUri().getBaseUri());    }
-
     @Path("whoami")
     @OPTIONS
     public Response whoAmIPreFlight() {
@@ -230,7 +214,7 @@ public class AdminConsole {
             throw new NotAuthorizedException("Bearer");
         }
 
-        final String issuedFor = authResult.getToken().getIssuedFor();
+        final String issuedFor = authResult.token().getIssuedFor();
         if (!Constants.ADMIN_CONSOLE_CLIENT_ID.equals(issuedFor)) {
             if (issuedFor == null) {
                 throw new ForbiddenException("No azp claim in the token");
@@ -242,7 +226,7 @@ public class AdminConsole {
             }
         }
 
-        UserModel user= authResult.getUser();
+        UserModel user= authResult.user();
         String displayName;
         if ((user.getFirstName() != null && !user.getFirstName().trim().equals("")) || (user.getLastName() != null && !user.getLastName().trim().equals(""))) {
             displayName = user.getFirstName();
@@ -278,7 +262,7 @@ public class AdminConsole {
         Locale locale = session.getContext().resolveLocale(user);
 
         return Cors.builder()
-                .allowedOrigins(authResult.getToken())
+                .allowedOrigins(authResult.token())
                 .allowedMethods("GET")
                 .auth()
                 .add(Response.ok(new WhoAmI(user.getId(), realm.getName(), displayName, createRealm, realmAccess, locale, Boolean.parseBoolean(user.getFirstAttribute(IS_TEMP_ADMIN_ATTR_NAME)))));
@@ -292,7 +276,11 @@ public class AdminConsole {
 
     private void addMasterRealmAccess(UserModel user, String currentRealm, Map<String, Set<String>> realmAdminAccess) {
         final RealmModel realm = session.realms().getRealmByName(currentRealm);
-        getRealmAdminAccess(realm, realm.getMasterAdminClient(), user, realmAdminAccess);
+        if (realm != null) {
+            getRealmAdminAccess(realm, realm.getMasterAdminClient(), user, realmAdminAccess);
+        } else {
+            throw new NotFoundException("Realm not found");
+        }
     }
 
     private void getRealmAdminAccess(RealmModel realm, ClientModel client, UserModel user, Map<String, Set<String>> realmAdminAccess) {
@@ -321,7 +309,7 @@ public class AdminConsole {
     }
 
     protected RealmModel getAdminstrationRealm(RealmManager realmManager) {
-        return realmManager.getKeycloakAdminstrationRealm();
+        return realmManager.getKeycloakAdministrationRealm();
     }
 
     /**
@@ -347,7 +335,9 @@ public class AdminConsole {
 
             final var map = new HashMap<String, Object>();
             final var theme = AdminRoot.getTheme(session, realm);
+            final var isSecureContext = SecureContextResolver.isSecureContext(session);
 
+            map.put("isSecureContext", isSecureContext);
             map.put("serverBaseUrl", serverBaseUrl);
             map.put("adminBaseUrl", adminBaseUrl);
             // TODO: Some variables are deprecated and only exist to provide backwards compatibility for older themes, they should be removed in a future version.
@@ -357,12 +347,13 @@ public class AdminConsole {
             map.put("consoleBaseUrl", Urls.adminConsoleRoot(adminBaseUri, realm.getName()).getPath());
             map.put("resourceUrl", Urls.themeRoot(adminBaseUri).getPath() + "/admin/" + theme.getName());
             map.put("resourceCommonUrl", Urls.themeRoot(adminBaseUri).getPath() + "/common/keycloak");
-            map.put("keycloakJsUrl", adminBaseUrl + "/js/keycloak.js?version=" + Version.RESOURCES_VERSION);
             map.put("masterRealm", Config.getAdminRealm());
             map.put("resourceVersion", Version.RESOURCES_VERSION);
             map.put("loginRealm", realm.getName());
             map.put("clientId", Constants.ADMIN_CONSOLE_CLIENT_ID);
             map.put("properties", theme.getProperties());
+            map.put("darkMode", "true".equals(theme.getProperties().getProperty("darkMode"))
+                    && realm.getAttribute("darkMode", true));
 
             final var devServerUrl = Environment.isDevMode() ? System.getenv(ViteManifest.ADMIN_VITE_URL) : null;
 

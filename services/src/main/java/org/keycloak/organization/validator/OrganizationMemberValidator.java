@@ -17,10 +17,6 @@
 
 package org.keycloak.organization.validator;
 
-import static java.util.Optional.ofNullable;
-import static org.keycloak.organization.utils.Organizations.resolveHomeBroker;
-import static org.keycloak.validate.BuiltinValidators.emailValidator;
-
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -47,6 +43,12 @@ import org.keycloak.validate.ValidationContext;
 import org.keycloak.validate.ValidationError;
 import org.keycloak.validate.ValidatorConfig;
 
+import static java.util.Optional.ofNullable;
+
+import static org.keycloak.models.OrganizationDomainModel.ANY_DOMAIN;
+import static org.keycloak.organization.utils.Organizations.resolveHomeBroker;
+import static org.keycloak.validate.BuiltinValidators.emailValidator;
+
 public class OrganizationMemberValidator extends AbstractSimpleValidator implements EnvironmentDependentProviderFactory {
 
     public static final String ID = "organization-member-validator";
@@ -64,7 +66,8 @@ public class OrganizationMemberValidator extends AbstractSimpleValidator impleme
         UserModel user = attributeContext.getUser();
         OrganizationModel organization = Organizations.resolveOrganization(session, user);
 
-        if (organization == null) {
+        // skip validation if we are not able to resolve org, or if user is not a member and the context is not IDP_REVIEW.
+        if (organization == null || (user != null && !UserProfileContext.IDP_REVIEW.equals(attributeContext.getContext()) && !organization.isMember(user))) {
             return;
         }
 
@@ -109,7 +112,7 @@ public class OrganizationMemberValidator extends AbstractSimpleValidator impleme
         if (UserProfileContext.IDP_REVIEW.equals(attributeContext.getContext())) {
             expectedDomains = resolveExpectedDomainsWhenReviewingFederatedUserProfile(organization, attributeContext);
         } else if (organization.isManaged(user)) {
-            expectedDomains = resolveExpectedDomainsForManagedUser(context, user);
+            expectedDomains = resolveExpectedDomainsForManagedUser(organization, context, user);
         } else {
             // no validation happens for unmanaged users as they are realm users linked to an organization
             return;
@@ -123,7 +126,7 @@ public class OrganizationMemberValidator extends AbstractSimpleValidator impleme
         context.addError(new ValidationError(ID, inputHint, "Email domain does not match any domain from the organization"));
     }
 
-    private static Set<String> resolveExpectedDomainsForManagedUser(ValidationContext context, UserModel user) {
+    private static Set<String> resolveExpectedDomainsForManagedUser(OrganizationModel organization, ValidationContext context, UserModel user) {
         List<IdentityProviderModel> brokers = resolveHomeBroker(context.getSession(), user);
 
         if (brokers.isEmpty()) {
@@ -134,8 +137,10 @@ public class OrganizationMemberValidator extends AbstractSimpleValidator impleme
 
         for (IdentityProviderModel broker : brokers) {
             String domain = broker.getConfig().get(OrganizationModel.ORGANIZATION_DOMAIN_ATTRIBUTE);
-
-            if (domain != null) {
+            if (ANY_DOMAIN.equals(domain)) {
+                organization.getDomains().map(OrganizationDomainModel::getName).forEach(domains::add);
+            }
+            else if (domain != null) {
                 domains.add(domain);
             }
         }
@@ -165,6 +170,9 @@ public class OrganizationMemberValidator extends AbstractSimpleValidator impleme
 
         // expect the email domain to match the domain set to the broker or none if not set
         String brokerDomain = broker.getConfig().get(OrganizationModel.ORGANIZATION_DOMAIN_ATTRIBUTE);
+        if (ANY_DOMAIN.equals(brokerDomain)) {
+            return organization.getDomains().map(OrganizationDomainModel::getName).collect(Collectors.toSet());
+        }
         return  ofNullable(brokerDomain).map(Set::of).orElse(Set.of());
     }
 }

@@ -24,29 +24,33 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.contains;
-import static org.hamcrest.Matchers.containsInAnyOrder;
-import static org.hamcrest.Matchers.hasItems;
-import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.not;
-import org.junit.Assert;
-import org.junit.ClassRule;
-import org.junit.FixMethodOrder;
-import org.junit.Test;
-import org.junit.runners.MethodSorters;
-import org.keycloak.models.LDAPConstants;
+
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserProvider;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.DatastoreProvider;
 import org.keycloak.storage.datastore.DefaultDatastoreProvider;
+import org.keycloak.storage.ldap.idm.model.LDAPObject;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.util.LDAPRule;
 import org.keycloak.testsuite.util.LDAPTestUtils;
 import org.keycloak.testsuite.util.UserBuilder;
+
+import org.junit.Assert;
+import org.junit.ClassRule;
+import org.junit.FixMethodOrder;
+import org.junit.Test;
+import org.junit.runners.MethodSorters;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
 public class LDAPSearchForUsersPaginationTest extends AbstractLDAPTest {
@@ -67,15 +71,20 @@ public class LDAPSearchForUsersPaginationTest extends AbstractLDAPTest {
             RealmModel appRealm = ctx.getRealm();
             LDAPTestUtils.addUserAttributeMapper(appRealm, ctx.getLdapModel(), "streetMapper", LDAPConstants.STREET, LDAPConstants.STREET);
 
-            // Delete all local users and add some new for testing
-            session.users().searchForUserStream(appRealm, new HashMap<>()).collect(Collectors.toList()).forEach(u -> session.users().removeUser(appRealm, u));
-
             // Delete all LDAP users and add some new for testing
             LDAPTestUtils.removeAllLDAPUsers(ctx.getLdapProvider(), appRealm);
 
-            LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john", "Some", "Some", "john14@email.org", "Acacia Avenue", "1234");
-            LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john00", "john", "Doe", "john0@email.org", "Acacia Avenue", "1234");
-            LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john01", "john", "Doe", "john1@email.org", "Acacia Avenue", "1234");
+            // Delete all local users and add some new for testing
+            session.users().searchForUserStream(appRealm, new HashMap<>()).collect(Collectors.toList()).forEach(u -> session.users().removeUser(appRealm, u));
+
+            LDAPObject ldapUser = LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john", "Some", "Some", "john14@email.org", "Acacia Avenue", "1234");
+            // somehow, for MSAD it is only possible to create an enabled user by updating the password and setting USER_ACCOUNT_CONTROL attribute to 512
+            LDAPTestUtils.updateLDAPPassword(ctx.getLdapProvider(), ldapUser, "password");
+            ldapUser = LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john00", "john", "Doe", "john0@email.org", "Acacia Avenue", "1234");
+            LDAPTestUtils.updateLDAPPassword(ctx.getLdapProvider(), ldapUser, "password");
+            ldapUser = LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john01", "john", "Doe", "john1@email.org", "Acacia Avenue", "1234");
+            LDAPTestUtils.updateLDAPPassword(ctx.getLdapProvider(), ldapUser, "password");
+
             LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john02", "john", "Doe", "john2@email.org", null, "1234");
             LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john03", "john", "Doe", "john3@email.org", null, "1234");
             LDAPTestUtils.addLDAPUser(ctx.getLdapProvider(), appRealm, "john04", "john", "Doe", "john4@email.org", null, "1234");

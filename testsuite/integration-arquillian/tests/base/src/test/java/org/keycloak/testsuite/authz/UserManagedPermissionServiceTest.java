@@ -16,24 +16,18 @@
  */
 package org.keycloak.testsuite.authz;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.keycloak.authorization.model.Policy.FilterOption.OWNER;
-
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.Response.Status;
 
-import org.junit.Test;
 import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.client.AuthorizationDeniedException;
@@ -45,6 +39,7 @@ import org.keycloak.authorization.model.Policy;
 import org.keycloak.authorization.model.Resource;
 import org.keycloak.authorization.model.ResourceServer;
 import org.keycloak.authorization.store.PolicyStore;
+import org.keycloak.common.Profile.Feature;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -61,6 +56,7 @@ import org.keycloak.representations.idm.authorization.PermissionTicketRepresenta
 import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceRepresentation;
 import org.keycloak.representations.idm.authorization.UmaPermissionRepresentation;
+import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.arquillian.annotation.UncaughtServerErrorExpected;
 import org.keycloak.testsuite.runonserver.RunOnServer;
 import org.keycloak.testsuite.util.ClientBuilder;
@@ -70,9 +66,22 @@ import org.keycloak.testsuite.util.RoleBuilder;
 import org.keycloak.testsuite.util.RolesBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
 
+import org.junit.Test;
+
+import static java.util.Collections.singletonList;
+
+import static org.keycloak.authorization.model.Policy.FilterOption.OWNER;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
+@EnableFeature(Feature.SCRIPTS)
 public class UserManagedPermissionServiceTest extends AbstractResourceServerTest {
 
     @Override
@@ -87,7 +96,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
                         .realmRole(RoleBuilder.create().name("role_d").build())
                 )
                 .group(GroupBuilder.create().name("group_a")
-                        .subGroups(Arrays.asList(GroupBuilder.create().name("group_b").build()))
+                        .subGroups(singletonList(GroupBuilder.create().name("group_b").build()))
                         .build())
                 .group(GroupBuilder.create().name("group_c").build())
                 .group(GroupBuilder.create().name("group_remove").build())
@@ -140,6 +149,36 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
         newPermission.addUser("kolo");
 
         ProtectionResource protection = getAuthzClient().protection("marta", "password");
+
+        ResourceRepresentation resourceB = new ResourceRepresentation();
+
+        resourceB.setName("Resource B");
+        resourceB.setOwnerManagedAccess(true);
+        resourceB.setOwner("kolo");
+        resourceB.addScope("Scope A", "Scope B", "Scope C");
+        resourceB = getAuthzClient().protection().resource().create(resourceB);
+        newPermission.addResource(resourceB.getId());
+
+        try {
+            protection.policy(resource.getId()).create(newPermission);
+            fail("Should fail, not allowed to set a resource other than the one referenced in the path");
+        } catch (RuntimeException ignore) {
+            Throwable cause = ignore.getCause();
+            assertTrue(cause instanceof HttpResponseException);
+            assertEquals(Status.BAD_REQUEST.getStatusCode(), ((HttpResponseException) cause).getStatusCode());
+        }
+
+        try {
+            newPermission.addResource(resource.getId());
+            protection.policy(resource.getId()).create(newPermission);
+            fail("Should fail, not allowed to set a resource other than the one referenced in the path");
+        } catch (RuntimeException ignore) {
+            Throwable cause = ignore.getCause();
+            assertTrue(cause instanceof HttpResponseException);
+            assertEquals(Status.BAD_REQUEST.getStatusCode(), ((HttpResponseException) cause).getStatusCode());
+        }
+
+        newPermission.getResources().remove(resourceB.getId());
 
         UmaPermissionRepresentation permission = protection.policy(resource.getId()).create(newPermission);
 
@@ -353,6 +392,72 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
     }
 
     @Test
+    public void testUpdateResources() {
+        ResourceRepresentation resource = new ResourceRepresentation();
+
+        resource.setName("Resource A");
+        resource.setOwnerManagedAccess(true);
+        resource.setOwner("marta");
+        resource.addScope("Scope A", "Scope B", "Scope C");
+
+        resource = getAuthzClient().protection().resource().create(resource);
+
+        ResourceRepresentation resourceB = new ResourceRepresentation();
+
+        resourceB.setName("Resource B");
+        resourceB.setOwnerManagedAccess(true);
+        resourceB.setOwner("kolo");
+        resourceB.addScope("Scope A", "Scope B", "Scope C");
+
+        resourceB = getAuthzClient().protection().resource().create(resourceB);
+
+        UmaPermissionRepresentation permission = new UmaPermissionRepresentation();
+
+        permission.setName("my-policy");
+        permission.addResource(resource.getId());
+
+        ProtectionResource protection = getAuthzClient().protection("marta", "password");
+
+        permission = protection.policy(resource.getId()).create(permission);
+
+        permission.addResource(resourceB.getId());
+
+        try {
+            protection.policy(resource.getId()).update(permission);
+            fail("Updates do not allow changing resources");
+        } catch (RuntimeException ignore) {
+        }
+
+        permission.setResources(Set.of(resource.getId()));
+        protection.policy(resource.getId()).update(permission);
+        permission.setResources(null);
+        protection.policy(resource.getId()).update(permission);
+
+        AuthorizationResource authorization = getAuthzClient().authorization("marta", "password");
+
+        AuthorizationRequest request = new AuthorizationRequest();
+
+        request.addPermission(resource.getId());
+
+        AuthorizationResponse authzResponse = authorization.authorize(request);
+
+        assertNotNull(authzResponse);
+
+        authorization = getAuthzClient().authorization("marta", "password");
+
+        request = new AuthorizationRequest();
+
+        request.addPermission(resourceB.getId());
+
+        try {
+            authorization.authorize(request);
+            fail("Updates do not allow changing resources");
+        } catch (RuntimeException denied) {
+            assertTrue(denied.getMessage().contains("403"));
+        }
+    }
+
+    @Test
     @UncaughtServerErrorExpected
     public void testUploadScriptDisabled() {
         ResourceRepresentation resource = new ResourceRepresentation();
@@ -432,14 +537,14 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             authorization.authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         try {
             getAuthzClient().authorization("alice", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         permission.addRole("role_a");
@@ -456,14 +561,14 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             authorization.authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         try {
             getAuthzClient().protection("marta", "password").policy(resource.getId()).findById(permission.getId());
             fail("Permission must not exist");
         } catch (Exception e) {
-            assertEquals(404, HttpResponseException.class.cast(e.getCause()).getStatusCode());
+            assertEquals(404, ((HttpResponseException) e.getCause()).getStatusCode());
         }
 
         // create a user based permission, where only selected users are allowed access to the resource.
@@ -483,7 +588,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             authorization.authorize(request);
             fail("User should not have permission to access the protected resource");
         } catch(Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
     }
@@ -521,7 +626,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
         UsersResource users = realmsResouce().realm(REALM_NAME).users();
         UserRepresentation marta = users.search("marta").get(0);
 
-        users.delete(marta.getId());
+        users.delete(marta.getId()).close();
 
         getTestingClient().server().run((RunOnServer) UserManagedPermissionServiceTest::testRemovePolicyWhenOwnerDeleted);
     }
@@ -566,7 +671,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
             assertTrue(e.getMessage().contains("request_submitted"));
         }
 
@@ -615,7 +720,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         request = new AuthorizationRequest();
@@ -626,7 +731,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         getAuthzClient().protection("marta", "password").policy(resource.getId()).delete(permission.getId());
@@ -635,7 +740,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
     }
 
@@ -694,7 +799,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().protection("alice", "password").policy(resource.getId()).create(new UmaPermissionRepresentation());
             fail("Error expected");
         } catch (Exception e) {
-            assertTrue(HttpResponseException.class.cast(e.getCause()).toString().contains("Only resource owner can access policies for resource"));
+            assertTrue(e.getCause().toString().contains("Only resource owner can access policies for resource"));
         }
     }
 
@@ -714,7 +819,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().protection("marta", "password").policy(resource.getId()).create(new UmaPermissionRepresentation());
             fail("Error expected");
         } catch (Exception e) {
-            assertTrue(HttpResponseException.class.cast(e.getCause()).toString().contains("Only resources with owner managed accessed can have policies"));
+            assertTrue(e.getCause().toString().contains("Only resources with owner managed accessed can have policies"));
         }
     }
 
@@ -741,7 +846,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             
             rep = getAuthzClient().protection("marta", "password").policy(resource.getId()).create(rep);
         } catch (Exception e) {
-            assertTrue(HttpResponseException.class.cast(e.getCause()).toString().contains("Only resources with owner managed accessed can have policies"));
+            assertTrue(e.getCause().toString().contains("Only resources with owner managed accessed can have policies"));
         }
 
         AuthorizationResource authorization = getAuthzClient().authorization("marta", "password");
@@ -758,7 +863,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         rep.addRole("role_a");
@@ -846,7 +951,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         request = new AuthorizationRequest();
@@ -857,7 +962,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize(request);
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
 
         request = new AuthorizationRequest();
@@ -917,7 +1022,7 @@ public class UserManagedPermissionServiceTest extends AbstractResourceServerTest
             getAuthzClient().authorization("kolo", "password").authorize();
             fail("User should not have permission");
         } catch (Exception e) {
-            assertTrue(AuthorizationDeniedException.class.isInstance(e));
+            assertTrue(e instanceof AuthorizationDeniedException);
         }
     }
 

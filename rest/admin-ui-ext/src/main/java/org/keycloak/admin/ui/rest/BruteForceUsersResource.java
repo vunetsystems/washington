@@ -5,18 +5,16 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
-import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
-import org.eclipse.microprofile.openapi.annotations.media.Content;
-import org.eclipse.microprofile.openapi.annotations.media.Schema;
-import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
-import org.jboss.logging.Logger;
+
 import org.keycloak.admin.ui.rest.model.BruteUser;
+import org.keycloak.authorization.fgap.AdminPermissionsSchema;
+import org.keycloak.common.Profile;
 import org.keycloak.common.util.Time;
 import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
@@ -25,9 +23,19 @@ import org.keycloak.models.UserLoginFailureModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
-import org.keycloak.services.resources.admin.permissions.UserPermissionEvaluator;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.fgap.UserPermissionEvaluator;
+import org.keycloak.userprofile.UserProfile;
+import org.keycloak.userprofile.UserProfileContext;
+import org.keycloak.userprofile.UserProfileProvider;
 import org.keycloak.utils.SearchQueryUtils;
+
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.jboss.logging.Logger;
 
 public class BruteForceUsersResource {
     private static final Logger logger = Logger.getLogger(BruteForceUsersResource.class);
@@ -144,29 +152,35 @@ public class BruteForceUsersResource {
     private Stream<BruteUser> searchForUser(Map<String, String> attributes, RealmModel realm, UserPermissionEvaluator usersEvaluator, Boolean briefRepresentation, Integer firstResult, Integer maxResults, Boolean includeServiceAccounts) {
         attributes.put(UserModel.INCLUDE_SERVICE_ACCOUNT, includeServiceAccounts.toString());
 
-        if (!auth.users().canView()) {
-            Set<String> groupModels = auth.groups().getGroupsWithViewPermission();
-
-            if (!groupModels.isEmpty()) {
-                session.setAttribute(UserModel.GROUPS, groupModels);
+        if (Profile.isFeatureEnabled(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ)) {
+            Set<String> groupIds = auth.groups().getGroupIdsWithViewPermission();
+            if (!groupIds.isEmpty()) {
+                session.setAttribute(UserModel.GROUPS, groupIds);
             }
         }
 
-        Stream<UserModel> userModels = session.users().searchForUserStream(realm, attributes, firstResult, maxResults);
-        return toRepresentation(realm, usersEvaluator, briefRepresentation, userModels);
+        return toRepresentation(realm, usersEvaluator, briefRepresentation, session.users().searchForUserStream(realm, attributes, firstResult, maxResults));
     }
 
     private Stream<BruteUser> toRepresentation(RealmModel realm, UserPermissionEvaluator usersEvaluator,
             Boolean briefRepresentation, Stream<UserModel> userModels) {
         boolean briefRepresentationB = briefRepresentation != null && briefRepresentation;
-        boolean canViewGlobal = usersEvaluator.canView();
 
-        usersEvaluator.grantIfNoPermission(session.getAttribute(UserModel.GROUPS) != null);
-        return userModels.filter(user -> canViewGlobal || usersEvaluator.canView(user)).map(user -> {
+        if (!AdminPermissionsSchema.SCHEMA.isAdminPermissionsEnabled(realm)) {
+            usersEvaluator.grantIfNoPermission(session.getAttribute(UserModel.GROUPS) != null);
+            userModels = userModels.filter(usersEvaluator::canView);
+            usersEvaluator.grantIfNoPermission(session.getAttribute(UserModel.GROUPS) != null);
+        }
+
+        UserProfileProvider provider = session.getProvider(UserProfileProvider.class);
+
+        return userModels.map(user -> {
+            UserProfile profile = provider.create(UserProfileContext.USER_API, user);
+            UserRepresentation rep = profile.toRepresentation(!briefRepresentationB);
             UserRepresentation userRep = briefRepresentationB ?
-                    ModelToRepresentation.toBriefRepresentation(user) :
-                    ModelToRepresentation.toRepresentation(session, realm, user);
-            userRep.setAccess(usersEvaluator.getAccess(user));
+                    ModelToRepresentation.toBriefRepresentation(user, rep, false) :
+                    ModelToRepresentation.toRepresentation(session, realm, user, rep, false);
+            userRep.setAccess(usersEvaluator.getAccessForListing(user));
             return userRep;
         }).map(this::getBruteForceStatus);
     }

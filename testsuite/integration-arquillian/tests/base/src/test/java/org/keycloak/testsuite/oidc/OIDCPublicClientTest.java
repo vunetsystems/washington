@@ -18,11 +18,8 @@
 
 package org.keycloak.testsuite.oidc;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.keycloak.OAuth2Constants;
+import java.util.List;
+
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.authentication.authenticators.client.JWTClientAuthenticator;
 import org.keycloak.events.Details;
@@ -33,13 +30,17 @@ import org.keycloak.testsuite.AbstractKeycloakTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.util.ClientManager;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
-import java.util.List;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -97,8 +98,8 @@ public class OIDCPublicClientTest extends AbstractKeycloakTest {
         String sessionId = loginEvent.getSessionId();
         String codeId = loginEvent.getDetails().get(Details.CODE_ID);
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, null);
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         assertEquals(200, response.getStatusCode());
         assertNotNull(response.getAccessToken());

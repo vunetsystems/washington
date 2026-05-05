@@ -17,10 +17,6 @@
 
 package org.keycloak.testsuite.federation.kerberos;
 
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
-import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
-
-import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -36,26 +32,7 @@ import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
 import javax.security.sasl.Sasl;
 
-import org.apache.http.NameValuePair;
-import org.apache.http.auth.AuthSchemeProvider;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.config.AuthSchemes;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.utils.URLEncodedUtils;
-import org.apache.http.config.RegistryBuilder;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.ietf.jgss.GSSCredential;
-import org.jboss.arquillian.graphene.page.Page;
-import org.jboss.resteasy.client.jaxrs.ResteasyClient;
-import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
-import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient43Engine;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.Rule;
+import jakarta.ws.rs.core.Response;
 
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.RealmResource;
@@ -84,7 +61,31 @@ import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.util.KerberosRule;
 import org.keycloak.testsuite.util.KerberosUtils;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+
+import org.apache.http.NameValuePair;
+import org.apache.http.auth.AuthSchemeProvider;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.AuthSchemes;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.utils.URLEncodedUtils;
+import org.apache.http.config.RegistryBuilder;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.ietf.jgss.GSSCredential;
+import org.jboss.arquillian.graphene.page.Page;
+import org.jboss.resteasy.client.jaxrs.ResteasyClient;
+import org.jboss.resteasy.client.jaxrs.ResteasyClientBuilder;
+import org.jboss.resteasy.client.jaxrs.engines.ApacheHttpClient43Engine;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Rule;
+
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
+import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 
 /**
  * Contains just helper methods. No test methods.
@@ -160,7 +161,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         initHttpClient(true);
         removeAllUsers();
 
-        oauth.clientId("kerberos-app");
+        oauth.client("kerberos-app", "password");
 
         ComponentRepresentation rep = getUserStorageConfiguration();
         Response resp = testRealmResource().components().add(rep);
@@ -188,11 +189,12 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 //    }
 
 
-    protected OAuthClient.AccessTokenResponse assertSuccessfulSpnegoLogin(String loginUsername, String expectedUsername, String password) throws Exception {
+    protected AccessTokenResponse assertSuccessfulSpnegoLogin(String loginUsername, String expectedUsername, String password) throws Exception {
         return assertSuccessfulSpnegoLogin("kerberos-app", loginUsername, expectedUsername, password);
     }
 
-    protected OAuthClient.AccessTokenResponse assertSuccessfulSpnegoLogin(String clientId, String loginUsername, String expectedUsername, String password) throws Exception {
+    protected AccessTokenResponse assertSuccessfulSpnegoLogin(String clientId, String loginUsername, String expectedUsername, String password) throws Exception {
+        events.clear();
         oauth.clientId(clientId);
         Response spnegoResponse = spnegoLogin(loginUsername, password);
         Assert.assertEquals(302, spnegoResponse.getStatus());
@@ -207,13 +209,11 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 
         String codeUrl = spnegoResponse.getLocation().toString();
 
-        OAuthClient.AccessTokenResponse tokenResponse = assertAuthenticationSuccess(codeUrl);
+        AccessTokenResponse tokenResponse = assertAuthenticationSuccess(codeUrl);
 
         AccessToken token = oauth.verifyToken(tokenResponse.getAccessToken());
         Assert.assertEquals(userId, token.getSubject());
         Assert.assertEquals(expectedUsername, token.getPreferredUsername());
-
-        oauth.idTokenHint(tokenResponse.getIdToken());
 
         return tokenResponse;
     }
@@ -242,7 +242,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 
 
     protected Response spnegoLogin(String username, String password) {
-        String kcLoginPageLocation = oauth.getLoginFormUrl();
+        String kcLoginPageLocation = oauth.loginForm().state("spnegoLogin").build();
 
         // Request for SPNEGO login sent with Resteasy client
         spnegoSchemeFactory.setCredentials(username, password);
@@ -264,7 +264,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         if (client != null) {
             cleanupApacheHttpClient();
         }
-        
+
         HttpClientBuilder httpClientBuilder = HttpClientBuilder.create();
         if (useSpnego) {
             BasicCredentialsProvider credentialsProvider = new BasicCredentialsProvider();
@@ -329,7 +329,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
     }
 
 
-    protected OAuthClient.AccessTokenResponse assertAuthenticationSuccess(String codeUrl) throws Exception {
+    protected AccessTokenResponse assertAuthenticationSuccess(String codeUrl) throws Exception {
         List<NameValuePair> pairs = URLEncodedUtils.parse(new URI(codeUrl), StandardCharsets.UTF_8);
         String code = null;
         String state = null;
@@ -342,7 +342,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         }
         Assert.assertNotNull(code);
         Assert.assertNotNull(state);
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
         Assert.assertNotNull(response.getAccessToken());
         events.clear();
         return response;

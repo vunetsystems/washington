@@ -16,28 +16,11 @@
  */
 package org.keycloak.services.resources.admin;
 
-import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
-import org.eclipse.microprofile.openapi.annotations.tags.Tag;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.NoCache;
-import org.keycloak.common.Profile;
-import org.keycloak.events.admin.OperationType;
-import org.keycloak.events.admin.ResourceType;
-import org.keycloak.models.ClientScopeModel;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.ModelDuplicateException;
-import org.keycloak.models.ModelException;
-import org.keycloak.models.ModelIllegalStateException;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.utils.ModelToRepresentation;
-import org.keycloak.models.utils.RepresentationToModel;
-import org.keycloak.representations.idm.ClientScopeRepresentation;
-import org.keycloak.saml.common.util.StringUtil;
-import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.ErrorResponseException;
-import org.keycloak.services.resources.KeycloakOpenAPI;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import java.util.Arrays;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -48,9 +31,36 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
-import java.util.Arrays;
-import java.util.Optional;
-import java.util.regex.Pattern;
+import org.keycloak.common.Profile;
+import org.keycloak.events.admin.OperationType;
+import org.keycloak.events.admin.ResourceType;
+import org.keycloak.models.ClientScopeModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.ModelDuplicateException;
+import org.keycloak.models.ModelException;
+import org.keycloak.models.ModelIllegalStateException;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.utils.ModelToRepresentation;
+import org.keycloak.models.utils.RepresentationToModel;
+import org.keycloak.protocol.LoginProtocol;
+import org.keycloak.protocol.LoginProtocolFactory;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
+import org.keycloak.saml.common.util.StringUtil;
+import org.keycloak.services.ErrorResponse;
+import org.keycloak.services.ErrorResponseException;
+import org.keycloak.services.resources.KeycloakOpenAPI;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
+
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.NoCache;
 
 
 /**
@@ -77,7 +87,6 @@ public class ClientScopeResource {
         this.clientScope = clientScope;
         this.session = session;
         this.adminEvent = adminEvent.resource(ResourceType.CLIENT_SCOPE);
-
     }
 
     @Path("protocol-mappers")
@@ -108,10 +117,21 @@ public class ClientScopeResource {
     @Consumes(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.CLIENT_SCOPES)
     @Operation(summary = "Update the client scope")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "409", description = "Conflict")
+    })
     public Response update(final ClientScopeRepresentation rep) {
         auth.clients().requireManageClientScopes();
+        ClientScopeResource.validateClientScope(session, rep);
         validateDynamicScopeUpdate(rep);
         try {
+            LoginProtocolFactory loginProtocolFactory = //
+                    (LoginProtocolFactory) session.getKeycloakSessionFactory().getProviderFactory(LoginProtocol.class,
+                                                                                                  clientScope.getProtocol());
+            Optional.ofNullable(loginProtocolFactory).ifPresent(lp -> lp.addClientScopeDefaults(rep));
             RepresentationToModel.updateClientScope(rep, clientScope);
             adminEvent.operation(OperationType.UPDATE).resourcePath(session.getContext().getUri()).representation(rep).success();
 
@@ -124,7 +144,6 @@ public class ClientScopeResource {
         }
     }
 
-
     /**
      * Get representation of the client scope
      *
@@ -135,9 +154,12 @@ public class ClientScopeResource {
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.CLIENT_SCOPES)
     @Operation(summary = "Get representation of the client scope")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "", content = @Content(schema = @Schema(implementation = ClientScopeRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public ClientScopeRepresentation getClientScope() {
         auth.clients().requireView(clientScope);
-
 
         return ModelToRepresentation.toRepresentation(clientScope);
     }
@@ -149,8 +171,13 @@ public class ClientScopeResource {
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.CLIENT_SCOPES)
     @Operation(summary = "Delete the client scope")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "500", description = "Internal Server Error")
+    })
     public Response deleteClientScope() {
-
         auth.clients().requireManage(clientScope);
         long clientScopesCount =  Arrays.stream(realm.getClientScopesStream().toArray()).count();
         if (clientScopesCount > 1) {
@@ -213,9 +240,34 @@ public class ClientScopeResource {
         }
     }
 
-    public static void validateClientScopeProtocol(String protocol)throws ErrorResponseException{
-        if(protocol==null || (!protocol.equals("openid-connect") && !protocol.equals("saml"))) throw ErrorResponse.error("Unexpected protocol",Response.Status.BAD_REQUEST);
+    public static void validateClientScopeProtocol(KeycloakSession session, String protocol)
+            throws ErrorResponseException {
+        KeycloakSessionFactory sessionFactory = session.getKeycloakSessionFactory();
+        Set<String> acceptedProtocols = sessionFactory.getProviderFactoriesStream(LoginProtocol.class)
+                                                      .map(type -> (LoginProtocolFactory) type)
+                                                      .map(LoginProtocolFactory::getId)
+                                                      .collect(Collectors.toSet());
+
+        if (protocol == null || !acceptedProtocols.contains(protocol)) {
+            throw ErrorResponse.error("Unexpected protocol", Response.Status.BAD_REQUEST);
+        }
     }
+
+    /**
+     * Validates client scope during creation or update
+     *
+     * @param session  the Keycloak session
+     * @param clientScope clientScope to validate
+     * @throws ErrorResponseException if error happens during client-scope validation
+     */
+    public static void validateClientScope(KeycloakSession session, ClientScopeRepresentation clientScope)
+            throws ErrorResponseException {
+        LoginProtocolFactory factory = (LoginProtocolFactory) session.getKeycloakSessionFactory().getProviderFactory(LoginProtocol.class, clientScope.getProtocol());
+        if (factory != null) {
+            factory.validateClientScope(session, clientScope);
+        }
+    }
+
     /**
      * Makes sure that an update that makes a Client Scope Dynamic is rejected if the Client Scope is assigned to a client
      * as a default scope.
@@ -225,7 +277,9 @@ public class ClientScopeResource {
         validateClientScopeName(rep.getName());
 
         // Only check this if the representation has been sent to make it dynamic
-        if (rep.getAttributes() != null && rep.getAttributes().getOrDefault(ClientScopeModel.IS_DYNAMIC_SCOPE, "false").equalsIgnoreCase("true")) {
+        if (rep.getAttributes() != null
+                && rep.getAttributes().getOrDefault(ClientScopeModel.IS_DYNAMIC_SCOPE, "false").equalsIgnoreCase("true")
+                && !clientScope.isDynamicScope()) {
             Optional<String> scopeModelOpt = realm.getClientsStream()
                     .flatMap(clientModel -> clientModel.getClientScopes(true).values().stream())
                     .map(ClientScopeModel::getId)

@@ -51,10 +51,16 @@ public interface RealmAttributes {
     String WEBAUTHN_POLICY_AVOID_SAME_AUTHENTICATOR_REGISTER = "webAuthnPolicyAvoidSameAuthenticatorRegister";
     String WEBAUTHN_POLICY_ACCEPTABLE_AAGUIDS = "webAuthnPolicyAcceptableAaguids";
     String WEBAUTHN_POLICY_EXTRA_ORIGINS = "webAuthnPolicyExtraOrigins";
+    String WEBAUTHN_POLICY_PASSKEYS_ENABLED = "webAuthnPolicyPasskeysEnabled";
 
     String ADMIN_EVENTS_EXPIRATION = "adminEventsExpiration";
 
     String FIRST_BROKER_LOGIN_FLOW_ID = "firstBrokerLoginFlowId";
 
+    String VERIFIABLE_CREDENTIALS_ENABLED = "verifiableCredentialsEnabled";
+
     String ORGANIZATIONS_ENABLED = "organizationsEnabled";
+    String ADMIN_PERMISSIONS_ENABLED = "adminPermissionsEnabled";
+    String ADMIN_PERMISSIONS_CLIENT_ID = "adminPermissionsClientId";
+    String SCIM_API_ENABLED = "scimApiEnabled";
 }

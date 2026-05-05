@@ -25,7 +25,10 @@ import org.keycloak.crypto.KeyUse;
 import org.keycloak.jose.jwe.JWEConstants;
 import org.keycloak.provider.ProviderConfigProperty;
 
-import static org.keycloak.provider.ProviderConfigProperty.*;
+import static org.keycloak.provider.ProviderConfigProperty.BOOLEAN_TYPE;
+import static org.keycloak.provider.ProviderConfigProperty.FILE_TYPE;
+import static org.keycloak.provider.ProviderConfigProperty.LIST_TYPE;
+import static org.keycloak.provider.ProviderConfigProperty.STRING_TYPE;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -54,6 +57,17 @@ public interface Attributes {
     String KEY_USE = "keyUse";
     ProviderConfigProperty KEY_USE_PROPERTY = new ProviderConfigProperty(KEY_USE, "Key use", "Whether the key should be used for signing or encryption.", LIST_TYPE,
             KeyUse.SIG.getSpecName(), KeyUse.SIG.getSpecName(), KeyUse.ENC.getSpecName());
+
+    String EC_GENERATE_CERTIFICATE_KEY = "ecGenerateCertificate";
+    ProviderConfigProperty EC_GENERATE_CERTIFICATE_PROPERTY = new ProviderConfigProperty(
+            EC_GENERATE_CERTIFICATE_KEY,
+            "Generate Certificate",
+            """
+            If a certificate should be build on creation. If the certificate is build, it will be available in the \
+            realm JWK for the key in the claim x5c and corresponding thumbprints may be available in the claims like \
+            x5t or x5t#S256.""",
+            BOOLEAN_TYPE,
+            false);
 
     String KID_KEY = "kid";
 

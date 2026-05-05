@@ -17,7 +17,19 @@
 
 package org.keycloak.testsuite.exportimport;
 
-import org.junit.Assert;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.AuthorizationResource;
@@ -27,6 +39,7 @@ import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.common.Profile;
 import org.keycloak.common.constants.KerberosConstants;
+import org.keycloak.common.constants.ServiceAccountConstants;
 import org.keycloak.models.Constants;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.credential.PasswordCredentialModel;
@@ -55,6 +68,7 @@ import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
 import org.keycloak.representations.idm.authorization.ScopeRepresentation;
+import org.keycloak.representations.userprofile.config.UPConfig;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.ldap.mappers.FullNameLDAPStorageMapper;
 import org.keycloak.storage.ldap.mappers.FullNameLDAPStorageMapperFactory;
@@ -62,24 +76,12 @@ import org.keycloak.storage.ldap.mappers.LDAPStorageMapper;
 import org.keycloak.testsuite.ProfileAssume;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.client.KeycloakTestingClient;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
+import org.keycloak.util.JsonSerialization;
 
 import org.hamcrest.Matcher;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
-import org.keycloak.util.JsonSerialization;
+import org.junit.Assert;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -106,6 +108,10 @@ public class ExportImportUtil {
         Assert.assertEquals("password", cred);
 
         RealmResource realmRsc = adminClient.realm(realm.getRealm());
+
+        UPConfig upConfig = realmRsc.users().userProfile().getConfiguration();
+        upConfig.setUnmanagedAttributePolicy(UPConfig.UnmanagedAttributePolicy.ENABLED);
+        realmRsc.users().userProfile().update(upConfig);
 
         UserRepresentation user = findByUsername(realmRsc, "loginclient");
         Assert.assertNotNull(user);
@@ -159,8 +165,8 @@ public class ExportImportUtil {
 
         // Test role mappings
         UserRepresentation admin = findByUsername(realmRsc, "admin");
-        // user without creation timestamp in import
-        Assert.assertNull(admin.getCreatedTimestamp());
+
+        Assert.assertNotNull(admin.getCreatedTimestamp());
         Set<RoleRepresentation> allRoles = allRoles(realmRsc, admin);
         Assert.assertEquals(3, allRoles.size());
         Assert.assertTrue(containsRole(allRoles, findRealmRole(realmRsc, "admin")));
@@ -519,8 +525,8 @@ public class ExportImportUtil {
         Map<String, ClientMappingsRepresentation> clientRoles = client.getScopeMappings().getAll().getClientMappings();
         if (clientRoles == null) return clientScopeMappings;
 
-        for (String clientKey : clientRoles.keySet()) {
-            List<RoleRepresentation> clientRoleScopeMappings = clientRoles.get(clientKey).getMappings();
+        for (ClientMappingsRepresentation clientMappingsRepresentation : clientRoles.values()) {
+            List<RoleRepresentation> clientRoleScopeMappings = clientMappingsRepresentation.getMappings();
             if (clientRoleScopeMappings != null) clientScopeMappings.addAll(clientRoleScopeMappings);
         }
 
@@ -532,8 +538,8 @@ public class ExportImportUtil {
         Map<String, ClientMappingsRepresentation> clientRoles = client.getScopeMappings().getAll().getClientMappings();
         if (clientRoles == null) return clientScopeMappings;
 
-        for (String clientKey : clientRoles.keySet()) {
-            List<RoleRepresentation> clientRoleScopeMappings = clientRoles.get(clientKey).getMappings();
+        for (ClientMappingsRepresentation clientMappingsRepresentation : clientRoles.values()) {
+            List<RoleRepresentation> clientRoleScopeMappings = clientMappingsRepresentation.getMappings();
             if (clientRoleScopeMappings != null) clientScopeMappings.addAll(clientRoleScopeMappings);
         }
 
@@ -731,6 +737,7 @@ public class ExportImportUtil {
           OIDCLoginProtocolFactory.MICROPROFILE_JWT_SCOPE,
           OIDCLoginProtocolFactory.ACR_SCOPE,
           OIDCLoginProtocolFactory.BASIC_SCOPE,
+          ServiceAccountConstants.SERVICE_ACCOUNT_SCOPE,
           SamlProtocolFactory.SCOPE_ROLE_LIST
         ));
 

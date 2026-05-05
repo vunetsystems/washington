@@ -19,14 +19,7 @@
 package org.keycloak.testsuite.forms;
 
 import java.util.Arrays;
-import java.util.List;
 
-import org.jboss.arquillian.drone.api.annotation.Drone;
-import org.jboss.arquillian.graphene.page.Page;
-import org.jboss.arquillian.test.api.ArquillianResource;
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
 import org.keycloak.authentication.AuthenticationFlow;
 import org.keycloak.authentication.authenticators.browser.OTPFormAuthenticatorFactory;
 import org.keycloak.authentication.authenticators.browser.PasswordFormFactory;
@@ -37,9 +30,8 @@ import org.keycloak.events.EventType;
 import org.keycloak.models.AuthenticationExecutionModel;
 import org.keycloak.models.utils.TimeBasedOTP;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
-import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
+import org.keycloak.testsuite.AbstractChangeImportedUserPasswordsTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.client.KeycloakTestingClient;
 import org.keycloak.testsuite.pages.ErrorPage;
@@ -49,10 +41,15 @@ import org.keycloak.testsuite.pages.LoginUsernameOnlyPage;
 import org.keycloak.testsuite.pages.PasswordPage;
 import org.keycloak.testsuite.pages.SelectAuthenticatorPage;
 import org.keycloak.testsuite.util.FlowUtil;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.openqa.selenium.WebDriver;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
+import org.jboss.arquillian.drone.api.annotation.Drone;
+import org.jboss.arquillian.graphene.page.Page;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
+import org.openqa.selenium.WebDriver;
 
 /**
  * Test various scenarios for multi-factor login. Test that "Try another way" link works as expected
@@ -60,7 +57,7 @@ import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
  *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
-public class MultiFactorAuthenticationTest extends AbstractTestRealmKeycloakTest {
+public class MultiFactorAuthenticationTest extends AbstractChangeImportedUserPasswordsTest {
 
     @ArquillianResource
     protected OAuthClient oauth;
@@ -88,23 +85,6 @@ public class MultiFactorAuthenticationTest extends AbstractTestRealmKeycloakTest
 
     @Rule
     public AssertEvents events = new AssertEvents(this);
-
-    @Override
-    public void configureTestRealm(RealmRepresentation testRealm) {
-    }
-
-    private RealmRepresentation loadTestRealm() {
-        RealmRepresentation res = loadJson(getClass().getResourceAsStream("/testrealm.json"), RealmRepresentation.class);
-        res.setBrowserFlow("browser");
-        return res;
-    }
-
-    @Override
-    public void addTestRealms(List<RealmRepresentation> testRealms) {
-        log.debug("Adding test realm for import from testrealm.json");
-        testRealms.add(loadTestRealm());
-    }
-
 
     // In a sub-flow with alternative credential executors, check which credentials are available and in which order
     // This also tests "try another way" link
@@ -254,7 +234,7 @@ public class MultiFactorAuthenticationTest extends AbstractTestRealmKeycloakTest
 
             selectAuthenticatorPage.selectLoginMethod(SelectAuthenticatorPage.PASSWORD);
             passwordPage.assertCurrent();
-            passwordPage.login("password");
+            passwordPage.login(getPassword("user-with-one-configured-otp"));
 
             Assert.assertFalse(passwordPage.isCurrent());
             Assert.assertFalse(loginPage.isCurrent());
@@ -297,7 +277,7 @@ public class MultiFactorAuthenticationTest extends AbstractTestRealmKeycloakTest
             passwordPage.assertTryAnotherWayLinkAvailability(false);
 
             // Login with password. Should be on the OTP page without try-another-way link available
-            passwordPage.login("password");
+            passwordPage.login(getPassword("user-with-one-configured-otp"));
             loginTotpPage.assertCurrent();
             loginTotpPage.assertTryAnotherWayLinkAvailability(false);
 
@@ -359,7 +339,7 @@ public class MultiFactorAuthenticationTest extends AbstractTestRealmKeycloakTest
             Assert.assertEquals("otp1@redhat.com", passwordPage.getAttemptedUsername());
 
             // Login
-            passwordPage.login("password");
+            passwordPage.login(getPassword("user-with-one-configured-otp"));
             events.expectLogin().user(user.getId())
                     .detail(Details.USERNAME, "otp1@redhat.com").assertEvent();
         } finally {

@@ -1,41 +1,42 @@
 package org.keycloak.testsuite.forms;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Rule;
-import org.junit.Test;
+import java.util.HashMap;
+import java.util.Map;
+
 import org.keycloak.authentication.authenticators.access.AllowAccessAuthenticatorFactory;
 import org.keycloak.authentication.authenticators.access.DenyAccessAuthenticatorFactory;
 import org.keycloak.authentication.authenticators.browser.PasswordFormFactory;
 import org.keycloak.authentication.authenticators.browser.UsernameFormFactory;
 import org.keycloak.authentication.authenticators.conditional.ConditionalRoleAuthenticatorFactory;
+import org.keycloak.authentication.authenticators.conditional.ConditionalUserAttributeValueFactory;
 import org.keycloak.authentication.authenticators.directgrant.ValidatePassword;
 import org.keycloak.authentication.authenticators.directgrant.ValidateUsername;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.models.AuthenticationExecutionModel;
-import org.keycloak.representations.idm.RealmRepresentation;
-import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
+import org.keycloak.testsuite.AbstractChangeImportedUserPasswordsTest;
 import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.authentication.authenticators.conditional.ConditionalUserAttributeValueFactory;
 import org.keycloak.testsuite.pages.ErrorPage;
 import org.keycloak.testsuite.pages.LoginUsernameOnlyPage;
 import org.keycloak.testsuite.pages.PasswordPage;
 import org.keycloak.testsuite.util.FlowUtil;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
-import java.util.HashMap;
-import java.util.Map;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Rule;
+import org.junit.Test;
+
+import static org.keycloak.testsuite.forms.BrowserFlowTest.revertFlows;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
-import static org.keycloak.testsuite.forms.BrowserFlowTest.revertFlows;
 
 /**
  * @author <a href="mailto:mabartos@redhat.com">Martin Bartos</a>
  */
-public class AllowDenyAuthenticatorTest extends AbstractTestRealmKeycloakTest {
+public class AllowDenyAuthenticatorTest extends AbstractChangeImportedUserPasswordsTest {
 
     @Page
     protected LoginUsernameOnlyPage loginUsernameOnlyPage;
@@ -48,10 +49,6 @@ public class AllowDenyAuthenticatorTest extends AbstractTestRealmKeycloakTest {
 
     @Rule
     public AssertEvents events = new AssertEvents(this);
-
-    @Override
-    public void configureTestRealm(RealmRepresentation testRealm) {
-    }
 
     @Test
     public void testDenyAccessWithDefaultMessage() {
@@ -258,7 +255,7 @@ public class AllowDenyAuthenticatorTest extends AbstractTestRealmKeycloakTest {
             loginUsernameOnlyPage.login(userCondNotMatch);
 
             passwordPage.assertCurrent();
-            passwordPage.login("password");
+            passwordPage.login(getPassword(userCondNotMatch));
 
             events.expectLogin().user(userCondNotMatchId)
                     .detail(Details.USERNAME, userCondNotMatch)
@@ -291,7 +288,7 @@ public class AllowDenyAuthenticatorTest extends AbstractTestRealmKeycloakTest {
             final String testUserWithoutRoleId = testRealm().users().search(userWithoutRole).get(0).getId();
 
             passwordPage.assertCurrent();
-            passwordPage.login("password");
+            passwordPage.login(getPassword(userWithoutRole));
 
             events.expectLogin()
                     .user(testUserWithoutRoleId)
@@ -344,7 +341,7 @@ public class AllowDenyAuthenticatorTest extends AbstractTestRealmKeycloakTest {
 
         try {
             oauth.clientId(clientId);
-            OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("password", user, "password");
+            AccessTokenResponse response = oauth.doPasswordGrantRequest(user, getPassword("test-user@localhost"));
             assertEquals(401, response.getStatusCode());
             assertEquals("Access denied", response.getError());
             assertNull(response.getErrorDescription());

@@ -25,10 +25,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.hamcrest.Matchers;
-import org.infinispan.client.hotrod.RemoteCache;
-import org.junit.Assert;
-import org.junit.Test;
 import org.keycloak.common.util.Time;
 import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
 import org.keycloak.infinispan.util.InfinispanUtils;
@@ -43,6 +39,11 @@ import org.keycloak.models.sessions.infinispan.entities.SingleUseObjectValueEnti
 import org.keycloak.services.scheduled.ClearExpiredRevokedTokens;
 import org.keycloak.testsuite.model.KeycloakModelTest;
 import org.keycloak.testsuite.model.RequireProvider;
+
+import org.hamcrest.Matchers;
+import org.infinispan.client.hotrod.RemoteCache;
+import org.junit.Assert;
+import org.junit.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -177,6 +178,12 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
     public void testRevokedTokenIsPresentAfterRestartAndEventuallyExpires() {
         String revokedKey = UUID.randomUUID() + SingleUseObjectProvider.REVOKED_KEY;
 
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+            singleUseStore.put(revokedKey,  60, Collections.emptyMap());
+        });
+
+        // Run again to ensure revocation can happen multiple times
         inComittedTransaction(session -> {
             SingleUseObjectProvider singleUseStore = session.singleUseObjects();
             singleUseStore.put(revokedKey,  60, Collections.emptyMap());

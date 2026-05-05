@@ -17,135 +17,173 @@
 
 package org.keycloak.it.cli.dist;
 
-import static org.junit.Assert.assertEquals;
-import static org.keycloak.quarkus.runtime.cli.command.AbstractStartCommand.OPTIMIZED_BUILD_OPTION_LONG;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Locale;
-import java.util.regex.Pattern;
 
-import org.apache.commons.io.FileUtils;
-import org.approvaltests.Approvals;
-import org.hamcrest.MatcherAssert;
-import org.hamcrest.Matchers;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.OS;
 import org.keycloak.it.junit5.extension.CLIResult;
 import org.keycloak.it.junit5.extension.DistributionTest;
 import org.keycloak.it.junit5.extension.RawDistOnly;
+import org.keycloak.it.junit5.extension.WithEnvVars;
 import org.keycloak.it.utils.KeycloakDistribution;
+import org.keycloak.quarkus.runtime.Environment;
+import org.keycloak.quarkus.runtime.cli.command.BootstrapAdmin;
+import org.keycloak.quarkus.runtime.cli.command.BootstrapAdminService;
+import org.keycloak.quarkus.runtime.cli.command.BootstrapAdminUser;
 import org.keycloak.quarkus.runtime.cli.command.Build;
 import org.keycloak.quarkus.runtime.cli.command.Export;
 import org.keycloak.quarkus.runtime.cli.command.Import;
 import org.keycloak.quarkus.runtime.cli.command.Start;
 import org.keycloak.quarkus.runtime.cli.command.StartDev;
+import org.keycloak.quarkus.runtime.cli.command.UpdateCompatibility;
+import org.keycloak.quarkus.runtime.cli.command.UpdateCompatibilityCheck;
+import org.keycloak.quarkus.runtime.cli.command.UpdateCompatibilityMetadata;
 
 import io.quarkus.test.junit.main.Launch;
-import io.quarkus.test.junit.main.LaunchResult;
+import org.apache.commons.io.FileUtils;
+import org.approvaltests.Approvals;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
+import static org.keycloak.quarkus.runtime.cli.command.AbstractAutoBuildCommand.OPTIMIZED_BUILD_OPTION_LONG;
+
+@WithEnvVars({"KEYCLOAK_COMMAND_MODE", "ALL", "KEYCLOAK_HELP_WIDTH", "80"})
 @DistributionTest
 @RawDistOnly(reason = "Verifying the help message output doesn't need long spin-up of docker dist tests.")
+@Tag(DistributionTest.WIN)
 public class HelpCommandDistTest {
 
     public static final String REPLACE_EXPECTED = "KEYCLOAK_REPLACE_EXPECTED";
 
     @Test
     @Launch({})
-    void testDefaultToHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testDefaultToHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({"--help"})
-    void testHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ "-h" })
-    void testHelpShort(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testHelpShort(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--help", OPTIMIZED_BUILD_OPTION_LONG})
-    void testStartOptimizedHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testStartOptimizedHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--help" })
-    void testStartHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testStartHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--optimized", "--help-all" })
-    void testStartOptimizedHelpAll(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testStartOptimizedHelpAll(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ StartDev.NAME, "--help" })
-    void testStartDevHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testStartDevHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ StartDev.NAME, "--help-all" })
-    void testStartDevHelpAll(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testStartDevHelpAll(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--help-all" })
-    void testStartHelpAll(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testStartHelpAll(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Build.NAME, "--help" })
-    void testBuildHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testBuildHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Export.NAME, "--help" })
-    void testExportHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testExportHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Export.NAME, "--help-all" })
-    void testExportHelpAll(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testExportHelpAll(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Import.NAME, "--help" })
-    void testImportHelp(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testImportHelp(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Import.NAME, "--help-all" })
-    void testImportHelpAll(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void testImportHelpAll(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ BootstrapAdmin.NAME, "--help" })
+    void testBootstrapAdmin(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ BootstrapAdmin.NAME, BootstrapAdminUser.NAME, "--help" })
+    void testBootstrapAdminUser(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ BootstrapAdmin.NAME, BootstrapAdminService.NAME, "--help" })
+    void testBootstrapAdminService(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ UpdateCompatibility.NAME, "--help" })
+    void testUpdateCompatibilityHelp(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ UpdateCompatibility.NAME, UpdateCompatibilityMetadata.NAME, "--help" })
+    void testUpdateCompatibilityMetadataHelp(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ UpdateCompatibility.NAME, UpdateCompatibilityMetadata.NAME, "--help-all" })
+    void testUpdateCompatibilityMetadataHelpAll(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ UpdateCompatibility.NAME, UpdateCompatibilityCheck.NAME, "--help" })
+    void testUpdateCompatibilityCheckHelp(CLIResult cliResult) {
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ UpdateCompatibility.NAME, UpdateCompatibilityCheck.NAME, "--help-all" })
+    void testUpdateCompatibilityCheckHelpAll(CLIResult cliResult) {
         assertHelp(cliResult);
     }
 
@@ -155,7 +193,7 @@ public class HelpCommandDistTest {
             for (String cmd : List.of("", "start", "start-dev", "build")) {
                 String debugOption = "--debug";
 
-                if (OS.WINDOWS.isCurrentOs()) {
+                if (Environment.isWindows()) {
                     debugOption = "--debug=8787";
                 }
 
@@ -165,27 +203,30 @@ public class HelpCommandDistTest {
         }
     }
 
-    private void assertSingleJvmStarted(CLIResult run) {
-        assertEquals(1, run.getOutputStream().stream().filter(s -> s.contains("Listening for transport dt_socket")).count());
+    private void assertSingleJvmStarted(CLIResult cliResult) {
+        cliResult.assertMessageWasShownExactlyNumberOfTimes("Listening for transport dt_socket", 1);
     }
 
-    private void assertHelp(CLIResult result) {
-        // normalize the output to prevent changes around the feature toggles to mark the output to differ
-        String output = result.getOutput().replaceAll("((Disables|Enables) a set of one or more features. Possible values are: )[^.]{30,}", "$1<...>");
+    private void assertHelp(CLIResult cliResult) {
+        String output = cliResult.getOutput()
+                // strip ANSI escape sequences (colors, bold, etc.) that may appear in the output
+                .replaceAll("\u001B\\[[;\\d]*m", "")
+                // normalize the output to prevent changes around the feature toggles or events to mark the output to differ
+                .replaceAll("((Disables|Enables) a set of one or more features. Possible values are: )[^.]{30,}", "$1<...>")
+                .replaceAll("(create a metric.\\s+Possible values are:)[^.]{30,}.[^.]*.", "$1<...>")
+                // strip trailing whitespace on each line that picocli may leave
+                .replaceAll("[ \\t]+(?=\\R)", "")
+                .stripTrailing();
 
-        String osName = System.getProperty("os.name");
-        if(osName.toLowerCase(Locale.ROOT).contains("windows")) {
-            // On Windows, all output should have at least one "kc.bat" in it.
-            MatcherAssert.assertThat(output, Matchers.containsString("kc.bat"));
-            output = output.replaceAll("kc.bat", "kc.sh");
-            output = output.replaceAll(Pattern.quote("data\\log\\"), "data/log/");
-            // line wrap which looks differently due to ".bat" vs. ".sh"
-            output = output.replaceAll("including\nbuild ", "including build\n");
+        if (Environment.isWindows()) {
+            output = output
+                    .replace("data\\log\\", "data/log/")
+                    .replace("\r\n", "\n");
         }
 
         try {
             Approvals.verify(output);
-        } catch (AssertionError cause) {
+        } catch (Error cause) {
             if ("true".equals(System.getenv(REPLACE_EXPECTED))) {
                 try {
                     FileUtils.write(Approvals.createApprovalNamer().getApprovedFile(".txt"), output,

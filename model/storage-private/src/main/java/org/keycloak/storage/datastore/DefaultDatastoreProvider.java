@@ -36,9 +36,9 @@ import org.keycloak.storage.ClientStorageManager;
 import org.keycloak.storage.DatastoreProvider;
 import org.keycloak.storage.ExportImportManager;
 import org.keycloak.storage.GroupStorageManager;
-import org.keycloak.storage.StoreManagers;
 import org.keycloak.storage.MigrationManager;
 import org.keycloak.storage.RoleStorageManager;
+import org.keycloak.storage.StoreManagers;
 import org.keycloak.storage.UserStorageManager;
 import org.keycloak.storage.federated.UserFederatedStorageProvider;
 
@@ -274,7 +274,7 @@ public class DefaultDatastoreProvider implements DatastoreProvider, StoreManager
     }
 
     public MigrationManager getMigrationManager() {
-        return new DefaultMigrationManager(session);
+        return new DefaultMigrationManager(session, factory.isAllowMigrateExistingDatabaseToSnapshot());
     }
 
 }

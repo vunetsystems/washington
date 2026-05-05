@@ -17,11 +17,11 @@
 
 package org.keycloak.protocol.oidc.endpoints.request;
 
-import org.keycloak.protocol.ClientData;
-import org.keycloak.rar.AuthorizationRequestContext;
-
 import java.util.HashMap;
 import java.util.Map;
+
+import org.keycloak.protocol.ClientData;
+import org.keycloak.rar.AuthorizationRequestContext;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -36,6 +36,7 @@ public class AuthorizationEndpointRequest {
     String responseMode;
     String state;
     String scope;
+    String resource;
     String loginHint;
     String display;
     String prompt;
@@ -50,6 +51,8 @@ public class AuthorizationEndpointRequest {
     // https://tools.ietf.org/html/rfc7636#section-6.1
     String codeChallenge;
     String codeChallengeMethod;
+
+    String dpopJkt;
 
     String acr;
 
@@ -89,6 +92,10 @@ public class AuthorizationEndpointRequest {
 
     public String getScope() {
         return scope;
+    }
+
+    public String getResource() {
+        return resource;
     }
 
     public String getLoginHint() {
@@ -132,6 +139,10 @@ public class AuthorizationEndpointRequest {
     public String getCodeChallengeMethod() {
         return codeChallengeMethod;
     }
+
+    public String getDpopJkt() { return dpopJkt; }
+
+    public void setDpopJkt(String dpopJkt) { this.dpopJkt = dpopJkt; }
 
     public String getDisplay() {
         return display;

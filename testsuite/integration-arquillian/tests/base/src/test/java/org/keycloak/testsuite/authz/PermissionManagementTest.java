@@ -16,17 +16,6 @@
  */
 package org.keycloak.testsuite.authz;
 
-import static org.hamcrest.Matchers.empty;
-import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.not;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -36,7 +25,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.junit.Test;
 import org.keycloak.admin.client.resource.AuthorizationResource;
 import org.keycloak.admin.client.resource.ResourceScopesResource;
 import org.keycloak.authorization.client.AuthzClient;
@@ -51,6 +39,19 @@ import org.keycloak.representations.idm.authorization.PermissionTicketRepresenta
 import org.keycloak.representations.idm.authorization.PermissionTicketToken;
 import org.keycloak.representations.idm.authorization.ResourceRepresentation;
 import org.keycloak.representations.idm.authorization.ScopeRepresentation;
+
+import org.junit.Test;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.hasItem;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -324,6 +325,51 @@ public class PermissionManagementTest extends AbstractResourceServerTest {
         ResourceRepresentation resource = addResource("Resource A", true);
         PermissionResponse response = getAuthzClient().protection("marta", "password").permission().create(new PermissionRequest(resource.getName()));
         assertNotNull(response.getTicket());
+    }
+
+    @Test
+    public void testSearchTicket() throws Exception {
+        ResourceRepresentation resource = addResource("Resource A", "kolo", true);
+        AuthzClient authzClient = getAuthzClient();
+        PermissionResponse response = authzClient.protection("marta", "password").permission().create(new PermissionRequest(resource.getId()));
+        AuthorizationRequest request = new AuthorizationRequest();
+        request.setTicket(response.getTicket());
+        request.setClaimToken(authzClient.obtainAccessToken("marta", "password").getToken());
+        try {
+            authzClient.authorization().authorize(request);
+        } catch (Exception e) {
+
+        }
+        List<PermissionTicketRepresentation> tickets = authzClient.protection("kolo", "password").permission().find(resource.getId(), null, null, null, null, true, -1, -1);
+        assertEquals(1, tickets.size());
+        tickets = authzClient.protection("marta", "password").permission().find(resource.getId(), null, null, null, null, true, -1, -1);
+        assertEquals(1, tickets.size());
+
+        response = authzClient.protection("alice", "password").permission().create(new PermissionRequest(resource.getId()));
+        request = new AuthorizationRequest();
+        request.setTicket(response.getTicket());
+        request.setClaimToken(authzClient.obtainAccessToken("alice", "password").getToken());
+        try {
+            authzClient.authorization().authorize(request);
+        } catch (Exception e) {
+        }
+        // two tickets open for kolo, one for alice and one for marta
+        tickets = authzClient.protection("kolo", "password").permission().find(resource.getId(), null, null, null, null, true, -1, -1);
+        assertEquals(2, tickets.size());
+        assertEquals(2L, (long) authzClient.protection("kolo", "password").permission().count(resource.getId(), null, null, null, null, true));
+        // one ticket for alice
+        tickets = authzClient.protection("alice", "password").permission().find(resource.getId(), null, null, null, null, true, -1, -1);
+        assertEquals(1, tickets.size());
+        assertEquals(1L, (long) authzClient.protection("alice", "password").permission().count(resource.getId(), null, null, null, null, true));
+        PermissionTicketRepresentation aliceTicket = tickets.get(0);
+        // one ticket for marta
+        tickets = authzClient.protection("marta", "password").permission().find(resource.getId(), null, null, null, null, true, -1, -1);
+        assertEquals(1, tickets.size());
+        assertEquals(1L, (long) authzClient.protection("marta", "password").permission().count(resource.getId(), null, null, null, null, true));
+        // the ticket for alice is different from the ticket for marta
+        assertFalse(aliceTicket.getId().equals(tickets.get(0).getId()));
+
+
     }
 
     private void assertPersistence(PermissionResponse response, ResourceRepresentation resource, String... scopeNames) throws Exception {

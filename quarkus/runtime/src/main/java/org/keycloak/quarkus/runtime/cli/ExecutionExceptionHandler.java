@@ -17,50 +17,59 @@
 
 package org.keycloak.quarkus.runtime.cli;
 
-import static org.keycloak.quarkus.runtime.configuration.Configuration.getConfig;
-
 import java.io.PrintWriter;
 import java.nio.file.FileSystemException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
-import org.jboss.logging.Logger;
-import org.keycloak.platform.Platform;
+import java.util.function.Function;
+
 import org.keycloak.quarkus.runtime.Environment;
 import org.keycloak.quarkus.runtime.Messages;
-import org.keycloak.quarkus.runtime.integration.QuarkusPlatform;
 
+import io.quarkus.bootstrap.logging.InitialConfigurator;
 import io.smallrye.config.ConfigValue;
+import org.jboss.logging.Logger;
 import picocli.CommandLine;
 import picocli.CommandLine.ParseResult;
 
+import static org.keycloak.quarkus.runtime.configuration.Configuration.getConfig;
+
 public final class ExecutionExceptionHandler implements CommandLine.IExecutionExceptionHandler {
 
-    private Logger logger;
+    private static Logger logger;
     private boolean verbose;
+    private static Map<String, Function<Throwable, Throwable>> exceptionTransformers = new HashMap<>();
 
     public ExecutionExceptionHandler() {}
 
     @Override
     public int handleExecutionException(Exception cause, CommandLine cmd, ParseResult parseResult) {
-        if (cause instanceof PropertyException) {
+        var exception = handleExceptionTransformers(cause);
+        if (exception instanceof PropertyException) {
             PrintWriter writer = cmd.getErr();
-            writer.println(cmd.getColorScheme().errorText(cause.getMessage()));
-            return ShortErrorMessageHandler.getInvalidInputExitCode(cause, cmd);
+            writer.println(cmd.getColorScheme().errorText(exception.getMessage()));
+            if (verbose && exception.getCause() != null) {
+                dumpException(writer, exception.getCause());
+            }
+            return ShortErrorMessageHandler.getInvalidInputExitCode(exception, cmd);
         }
         error(cmd.getErr(), "Failed to run '" + parseResult.subcommands().stream()
                 .map(ParseResult::commandSpec)
                 .map(CommandLine.Model.CommandSpec::name)
                 .findFirst()
-                .orElse(Environment.getCommand()) + "' command.", cause);
+                .orElse(Environment.getCommand()) + "' command.", exception);
         return cmd.getCommandSpec().exitCodeOnExecutionException();
     }
 
     public void error(PrintWriter errorWriter, String message, Throwable cause) {
+        var exception = handleExceptionTransformers(cause);
         if (message != null) {
             logError(errorWriter, "ERROR: " + message);
         }
 
-        if (cause != null) {
-            dumpException(errorWriter, cause);
+        if (exception != null) {
+            dumpException(errorWriter, exception);
 
             if (!verbose) {
                 logError(errorWriter, "For more details run the same command passing the '--verbose' option. Also you can use '--help' to see the details about the usage of the particular command.");
@@ -100,9 +109,8 @@ public final class ExecutionExceptionHandler implements CommandLine.IExecutionEx
 
     // The "cause" can be null
     private void logError(PrintWriter errorWriter, String errorMessage, Throwable cause) {
-        QuarkusPlatform platform = (QuarkusPlatform) Platform.getPlatform();
-        if (platform.isStarted()) {
-            // Can delegate to proper logger once the platform is started
+        if (InitialConfigurator.DELAYED_HANDLER.isActivated()) {
+            // Can delegate to proper logger once delayed handler is activated
             if (cause == null) {
                 getLogger().error(errorMessage);
             } else {
@@ -118,7 +126,7 @@ public final class ExecutionExceptionHandler implements CommandLine.IExecutionEx
         }
     }
 
-    private Logger getLogger() {
+    private static Logger getLogger() {
         if (logger == null) {
             logger = Logger.getLogger(ExecutionExceptionHandler.class);
         }
@@ -127,5 +135,35 @@ public final class ExecutionExceptionHandler implements CommandLine.IExecutionEx
 
     public void setVerbose(boolean verbose) {
         this.verbose = verbose;
+    }
+
+    public static void addExceptionTransformer(Class<?> fromClass, Function<Throwable, Throwable> transformer) {
+        if (exceptionTransformers.get(fromClass.getName()) != null) {
+            getLogger().warnf("Transformer for the '%s' class is overridden", fromClass.getName());
+        }
+        exceptionTransformers.put(fromClass.getName(), transformer);
+    }
+
+    public static void resetExceptionTransformers() {
+        exceptionTransformers = new HashMap<>();
+    }
+
+    private static Throwable handleExceptionTransformers(Throwable exception) {
+        if (exception == null) {
+            return null;
+        }
+
+        if (exceptionTransformers.isEmpty()) {
+            return exception;
+        }
+
+        var stackTrace = exception.getStackTrace();
+        for (var trace : stackTrace) {
+            var transformer = exceptionTransformers.get(trace.getClassName());
+            if (transformer != null) {
+                return transformer.apply(exception);
+            }
+        }
+        return exception;
     }
 }

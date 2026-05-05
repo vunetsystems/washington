@@ -8,7 +8,8 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
-
+import org.keycloak.services.managers.AuthenticationSessionManager;
+import org.keycloak.sessions.StickySessionEncoderProvider;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.util.Base64;
@@ -49,20 +50,25 @@ public class RecaptchaResource {
     public Response generate() {
         RealmModel realm = session.getContext().getRealm();
 
-        String authCookie = session.getContext().getRequestHeaders().getCookies().get("AUTH_SESSION_ID") != null
+        String rawCookie = session.getContext().getRequestHeaders().getCookies().get("AUTH_SESSION_ID") != null
                 ? session.getContext().getRequestHeaders().getCookies().get("AUTH_SESSION_ID").getValue()
                 : null;
 
-        if (authCookie == null || authCookie.contains(".")) {
-            return Response.status(Response.Status.BAD_REQUEST).entity("Missing or invalid AUTH_SESSION_ID").build();
+        if (rawCookie == null || rawCookie.isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST).entity("Missing AUTH_SESSION_ID").build();
         }
 
-        String[] parts = authCookie.split("\\.");
-        String rootSessionId = parts[0];
+        StickySessionEncoderProvider routeEncoder = session.getProvider(StickySessionEncoderProvider.class);
+        var decodedSession = routeEncoder.decodeSessionIdAndRoute(rawCookie);
+        String signedPart = decodedSession.sessionId();
+        AuthenticationSessionManager manager = new AuthenticationSessionManager(session);
+        String rootSessionId = manager.decodeBase64AndValidateSignature(signedPart);
+        if (rootSessionId == null) {
+            return Response.status(Response.Status.BAD_REQUEST).entity("Malformed AUTH_SESSION_ID").build();
+        }
         String tabId = session.getContext().getUri().getQueryParameters().getFirst("tab_id");
 
-        RootAuthenticationSessionModel rootSession = session.authenticationSessions()
-                .getRootAuthenticationSession(realm, rootSessionId);
+        RootAuthenticationSessionModel rootSession = session.authenticationSessions().getRootAuthenticationSession(realm, rootSessionId);
         if (rootSession == null) {
             return Response.status(Response.Status.BAD_REQUEST).entity("Invalid root session").build();
         }

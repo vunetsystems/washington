@@ -17,13 +17,6 @@
 
 package org.keycloak.theme;
 
-import org.jboss.logging.Logger;
-import org.keycloak.common.util.StringPropertyReplacer;
-import org.keycloak.common.util.SystemEnvProperties;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.ThemeManager;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -42,7 +35,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import org.keycloak.common.util.StringPropertyReplacer;
+import org.keycloak.common.util.SystemEnvProperties;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.ThemeManager;
 import org.keycloak.services.util.LocaleUtil;
+
+import org.jboss.logging.Logger;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -70,10 +70,11 @@ public class DefaultThemeManager implements ThemeManager {
     public Theme getTheme(String name, Theme.Type type) {
         Theme theme = factory.getCachedTheme(name, type);
         if (theme == null) {
-            theme = loadTheme(name, type);
+            RealmModel realm = session.getContext().getRealm();
+            theme = loadTheme(name, type, realm);
             if (theme == null) {
                 String defaultThemeName = session.getProvider(ThemeSelectorProvider.class).getDefaultThemeName(type);
-                theme = loadTheme(defaultThemeName, type);
+                theme = loadTheme(defaultThemeName, type, realm);
                 log.errorv("Failed to find {0} theme {1}, using built-in themes", type, name);
             } else {
                 theme = factory.addCachedTheme(name, type, theme);
@@ -102,7 +103,11 @@ public class DefaultThemeManager implements ThemeManager {
         factory.clearCache();
     }
 
-    private Theme loadTheme(String name, Theme.Type type) {
+    @Override
+    public void close() {
+    }
+
+    private Theme loadTheme(String name, Theme.Type type, RealmModel realm) {
         Theme theme = findTheme(name, type);
         if (theme == null) {
             return null;
@@ -127,7 +132,7 @@ public class DefaultThemeManager implements ThemeManager {
             }
         }
 
-        return new ExtendingTheme(themes, session.getAllProviders(ThemeResourceProvider.class));
+        return new ExtendingTheme(realm, themes, session.getAllProviders(ThemeResourceProvider.class));
     }
 
     private Theme findTheme(String name, Theme.Type type) {
@@ -158,17 +163,29 @@ public class DefaultThemeManager implements ThemeManager {
 
     private static class ExtendingTheme implements Theme {
 
-        private List<Theme> themes;
-        private Set<ThemeResourceProvider> themeResourceProviders;
+        private final RealmModel realm;
+        private final List<Theme> themes;
+        private final Set<ThemeResourceProvider> themeResourceProviders;
 
         private Properties properties;
 
-        private ConcurrentHashMap<String, ConcurrentHashMap<Locale, Map<Locale, Properties>>> messages =
+        private final ConcurrentHashMap<String, ConcurrentHashMap<Locale, Map<Locale, Properties>>> messages =
                 new ConcurrentHashMap<>();
 
-        public ExtendingTheme(List<Theme> themes, Set<ThemeResourceProvider> themeResourceProviders) {
+        private Pattern compiledContentHashPattern;
+
+        public ExtendingTheme(RealmModel realm, List<Theme> themes, Set<ThemeResourceProvider> themeResourceProviders) {
+            this.realm = realm;
             this.themes = themes;
             this.themeResourceProviders = themeResourceProviders;
+            try {
+                Object contentHashPattern = getProperties().get(CONTENT_HASH_PATTERN);
+                if (contentHashPattern != null) {
+                    compiledContentHashPattern = Pattern.compile(contentHashPattern.toString());
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
 
         @Override
@@ -192,6 +209,11 @@ public class DefaultThemeManager implements ThemeManager {
         }
 
         @Override
+        public boolean isAbstract() throws IOException {
+            return themes.get(0).isAbstract();
+        }
+
+        @Override
         public URL getTemplate(String name) throws IOException {
             for (Theme t : themes) {
                 URL template = t.getTemplate(name);
@@ -208,6 +230,25 @@ public class DefaultThemeManager implements ThemeManager {
             }
 
             return null;
+        }
+
+        @Override
+        public boolean hasResource(String path) throws IOException {
+            for (Theme t : themes) {
+                if (t.hasResource(path)) {
+                    return true;
+                }
+            }
+
+            for (ThemeResourceProvider t : themeResourceProviders) {
+                try (InputStream resource = t.getResourceAsStream(path)) {
+                    if (resource != null) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         @Override
@@ -237,7 +278,7 @@ public class DefaultThemeManager implements ThemeManager {
         @Override
         public Properties getMessages(String baseBundlename, Locale locale) throws IOException {
             Map<Locale, Properties> messagesByLocale = getMessagesByLocale(baseBundlename, locale);
-            return LocaleUtil.mergeGroupedMessages(locale, messagesByLocale);
+            return LocaleUtil.mergeGroupedMessages(realm, locale, messagesByLocale);
         }
         
         @Override
@@ -246,9 +287,14 @@ public class DefaultThemeManager implements ThemeManager {
             return LocaleUtil.enhancePropertiesWithRealmLocalizationTexts(realm, locale, messagesByLocale);
         }
 
+        @Override
+        public boolean hasContentHash(String path) throws IOException {
+            return compiledContentHashPattern != null && compiledContentHashPattern.matcher(path).matches();
+        }
+
         private Map<Locale, Properties> getMessagesByLocale(String baseBundlename, Locale locale) throws IOException {
             if (messages.get(baseBundlename) == null || messages.get(baseBundlename).get(locale) == null) {
-                Locale parent = getParent(locale);
+                Locale parent = LocaleUtil.getParentLocale(locale, realm);
 
                 Map<Locale, Properties> parentMessages =
                         parent == null ? Collections.emptyMap() : getMessagesByLocale(baseBundlename, parent);
@@ -292,9 +338,9 @@ public class DefaultThemeManager implements ThemeManager {
                 // This is mapping old locale codes to the new locale codes for Simplified and Traditional Chinese.
                 // Once the existing locales have been moved, this code can be removed.
                 if (l.equals("zh-CN")) {
-                    rl = "zh-HANS";
+                    rl = "zh-Hans";
                 } else if (l.equals("zh-TW")) {
-                    rl = "zh-HANT";
+                    rl = "zh-Hant";
                 }
                 Locale loc = Locale.forLanguageTag(rl);
                 label = capitalize(loc.getDisplayName(locale), locale);
@@ -352,14 +398,11 @@ public class DefaultThemeManager implements ThemeManager {
          */
         private void substituteProperties(final Properties properties) {
             for (final String propertyName : properties.stringPropertyNames()) {
-                properties.setProperty(propertyName, StringPropertyReplacer.replaceProperties(properties.getProperty(propertyName), new SystemEnvProperties()));
+                properties.setProperty(propertyName, StringPropertyReplacer.replaceProperties(properties.getProperty(propertyName), SystemEnvProperties.UNFILTERED::getProperty));
             }
         }
     }
 
-    private static Locale getParent(Locale locale) {
-        return LocaleUtil.getParentLocale(locale);
-    }
 
     private List<ThemeProvider> getProviders() {
         if (providers == null) {

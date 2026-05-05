@@ -6,18 +6,19 @@ import java.util.List;
 
 import org.keycloak.common.crypto.FipsMode;
 
+import static org.keycloak.config.OptionsUtil.DURATION_DESCRIPTION;
+
 public class HttpOptions {
 
     public static final Option<Boolean> HTTP_ENABLED = new OptionBuilder<>("http-enabled", Boolean.class)
             .category(OptionCategory.HTTP)
-            .description("Enables the HTTP listener.")
+            .description("Enables the HTTP listener. Enabled by default in development mode. Typically not enabled in production unless the server is fronted by a TLS termination proxy.")
             .defaultValue(Boolean.FALSE)
             .build();
 
     public static final Option<String> HTTP_HOST = new OptionBuilder<>("http-host", String.class)
             .category(OptionCategory.HTTP)
-            .description("The used HTTP Host.")
-            .defaultValue("0.0.0.0")
+            .description("The HTTP Host. In prod mode or when running on Windows Subsystem For Linux the default is to bind to all network addresses (0.0.0.0), which means the server may be accessible from other machines on your network. Otherwise defaults to localhost.")
             .build();
 
     public static final Option<String> HTTP_RELATIVE_PATH = new OptionBuilder<>("http-relative-path", String.class)
@@ -59,16 +60,18 @@ public class HttpOptions {
 
     public static final Option<List<String>> HTTPS_PROTOCOLS = OptionBuilder.listOptionBuilder("https-protocols", String.class)
             .category(OptionCategory.HTTP)
-            .description("The list of protocols to explicitly enable.")
-            .defaultValue(Arrays.asList("TLSv1.3,TLSv1.2"))
+            .description("The list of protocols to explicitly enable. If a value is not supported by the JRE / security configuration, it will be silently ignored.")
+            .expectedValues(Arrays.asList("TLSv1.3", "TLSv1.2"))
+            .strictExpectedValues(false)
+            .defaultValue(Arrays.asList("TLSv1.3", "TLSv1.2"))
             .build();
 
     public static final Option<String> HTTPS_CERTIFICATES_RELOAD_PERIOD = new OptionBuilder<>("https-certificates-reload-period", String.class)
             .category(OptionCategory.HTTP)
-            .description("Interval on which to reload key store, trust store, and certificate files referenced by https-* options. May be a java.time.Duration value, an integer number of seconds, or an integer followed by one of [ms, h, m, s, d]. Must be greater than 30 seconds. Use -1 to disable.")
+            .description("Interval on which to reload key store, trust store, and certificate files referenced by https-* options. " + DURATION_DESCRIPTION + " Must be greater than 30 seconds. Use -1 to disable.")
             .defaultValue("1h")
             .build();
-    
+
     public static final Option<File> HTTPS_CERTIFICATE_FILE = new OptionBuilder<>("https-certificate-file", File.class)
             .category(OptionCategory.HTTP)
             .description("The file path to a server certificate or certificate chain in PEM format.")
@@ -100,13 +103,11 @@ public class HttpOptions {
     public static final Option<File> HTTPS_TRUST_STORE_FILE = new OptionBuilder<>("https-trust-store-file", File.class)
             .category(OptionCategory.HTTP)
             .description("The trust store which holds the certificate information of the certificates to trust.")
-            .deprecated("Use the System Truststore instead, see the docs for details.")
             .build();
 
     public static final Option<String> HTTPS_TRUST_STORE_PASSWORD = new OptionBuilder<>("https-trust-store-password", String.class)
             .category(OptionCategory.HTTP)
             .description("The password of the trust store file.")
-            .deprecated("Use the System Truststore instead, see the docs for details.")
             .build();
 
     public static final Option<String> HTTPS_TRUST_STORE_TYPE = new OptionBuilder<>("https-trust-store-type", String.class)
@@ -114,14 +115,6 @@ public class HttpOptions {
             .description("The type of the trust store file. " +
                     "If not given, the type is automatically detected based on the file extension. " +
                     "If '" + SecurityOptions.FIPS_MODE.getKey() + "' is set to '" + FipsMode.STRICT + "' and no value is set, it defaults to 'BCFKS'.")
-            .deprecated("Use the System Truststore instead, see the docs for details.")
-            .build();
-
-    public static final Option<Boolean> HTTP_SERVER_ENABLED = new OptionBuilder<>("http-server-enabled", Boolean.class)
-            .category(OptionCategory.HTTP)
-            .hidden()
-            .description("Enables or disables the HTTP/s and Socket serving.")
-            .defaultValue(Boolean.TRUE)
             .build();
 
     public static final Option<Integer> HTTP_MAX_QUEUED_REQUESTS = new OptionBuilder<>("http-max-queued-requests", Integer.class)
@@ -150,4 +143,23 @@ public class HttpOptions {
                     "Specify a list of comma-separated values defined in milliseconds. Example with buckets from 5ms to 10s: 5,10,25,50,250,500,1000,2500,5000,10000")
             .build();
 
+    public static final Option<Boolean> HTTP_ACCEPT_NON_NORMALIZED_PATHS = new OptionBuilder<>("http-accept-non-normalized-paths", Boolean.class)
+            .category(OptionCategory.HTTP)
+            .description("If the server should accept paths that are not normalized according to RFC3986 or that contain a double slash ('//') or semicolon (';'). While accepting those requests might be relevant for legacy applications, it is recommended to disable it to allow for more concise URL filtering.")
+            .deprecated()
+            .defaultValue(Boolean.FALSE)
+            .build();
+
+    public static final Option<String> SHUTDOWN_TIMEOUT = new OptionBuilder<>("shutdown-timeout", String.class)
+            .category(OptionCategory.HTTP)
+            .description("The shutdown period waiting for currently running HTTP requests to finish. " + DURATION_DESCRIPTION)
+            .defaultValue("1s")
+            .build();
+
+    public static final Option<String> SHUTDOWN_DELAY = new OptionBuilder<>("shutdown-delay", String.class)
+            .category(OptionCategory.HTTP)
+            .description("Length of the pre-shutdown phase during which the server prepares for shutdown. " + DURATION_DESCRIPTION +
+                    " This period allows for loadbalancer reconfiguration and draining of TLS/HTTP keepalive connections.")
+            .defaultValue("1s")
+            .build();
 }

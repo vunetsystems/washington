@@ -43,6 +43,10 @@ export {
   KeycloakTextArea,
   type KeycloakTextAreaProps,
 } from "./controls/keycloak-text-area/KeycloakTextArea";
+export {
+  FileUploadControl,
+  type FileUploadControlProps,
+} from "./controls/FileUploadControl";
 export { IconMapper } from "./icons/IconMapper";
 export { FormPanel } from "./scroll-form/FormPanel";
 export { ScrollForm, mainPageContentId } from "./scroll-form/ScrollForm";
@@ -93,4 +97,3 @@ export {
 } from "./utils/ErrorBoundary";
 export type { FallbackProps } from "./utils/ErrorBoundary";
 export { OrganizationTable } from "./controls/OrganizationTable";
-export { initializeDarkMode } from "./utils/darkMode";

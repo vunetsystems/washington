@@ -16,9 +16,6 @@
  */
 package org.keycloak.authorization.admin;
 
-import static org.keycloak.models.utils.ModelToRepresentation.toRepresentation;
-import static org.keycloak.models.utils.RepresentationToModel.toModel;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -35,6 +32,7 @@ import java.util.stream.Collectors;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -45,15 +43,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
 
-import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
-import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
-import org.eclipse.microprofile.openapi.annotations.media.Content;
-import org.eclipse.microprofile.openapi.annotations.media.Schema;
-import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
-import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
-import org.jboss.resteasy.reactive.NoCache;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.authorization.AuthorizationProvider;
+import org.keycloak.authorization.fgap.AdminPermissionsSchema;
 import org.keycloak.authorization.model.Policy;
 import org.keycloak.authorization.model.Resource;
 import org.keycloak.authorization.model.ResourceServer;
@@ -76,7 +68,18 @@ import org.keycloak.representations.idm.authorization.ScopeRepresentation;
 import org.keycloak.services.ErrorResponseException;
 import org.keycloak.services.resources.KeycloakOpenAPI;
 import org.keycloak.services.resources.admin.AdminEventBuilder;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
+
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.jboss.resteasy.reactive.NoCache;
+
+import static org.keycloak.models.utils.ModelToRepresentation.toRepresentation;
+import static org.keycloak.models.utils.RepresentationToModel.toModel;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -87,8 +90,8 @@ public class ResourceSetService {
     private final AuthorizationProvider authorization;
     private final AdminPermissionEvaluator auth;
     private final AdminEventBuilder adminEvent;
-    private KeycloakSession session;
-    private ResourceServer resourceServer;
+    private final KeycloakSession session;
+    private final ResourceServer resourceServer;
 
     public ResourceSetService(KeycloakSession session, ResourceServer resourceServer, AuthorizationProvider authorization, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
         this.session = session;
@@ -122,6 +125,9 @@ public class ResourceSetService {
     }
 
     public ResourceRepresentation create(ResourceRepresentation resource) {
+        // direct creation of resources it's not expected for admin permission
+        AdminPermissionsSchema.SCHEMA.throwExceptionIfAdminPermissionClient(session, resourceServer.getId());
+
         requireManage();
         StoreFactory storeFactory = this.authorization.getStoreFactory();
         ResourceOwnerRepresentation owner = resource.getOwner();
@@ -156,21 +162,26 @@ public class ResourceSetService {
         @APIResponse(responseCode = "404", description = "Not Found")
     })
     public Response update(@PathParam("resource-id") String id, ResourceRepresentation resource) {
+        AdminPermissionsSchema.SCHEMA.throwExceptionIfAdminPermissionClient(session, resourceServer.getId());
         requireManage();
         resource.setId(id);
-        StoreFactory storeFactory = this.authorization.getStoreFactory();
-        ResourceStore resourceStore = storeFactory.getResourceStore();
-        Resource model = resourceStore.findById(resourceServer, resource.getId());
-
-        if (model == null) {
-            return Response.status(Status.NOT_FOUND).build();
-        }
-
+        getResource(id);
         toModel(resource, resourceServer, authorization);
 
         audit(resource, OperationType.UPDATE);
 
         return Response.noContent().build();
+    }
+
+    private Resource getResource(String id) {
+        ResourceStore resourceStore = authorization.getStoreFactory().getResourceStore();
+        Resource model = resourceStore.findById(resourceServer, id);
+
+        if (model == null || !model.getResourceServer().equals(resourceServer)) {
+            throw new NotFoundException();
+        }
+
+        return model;
     }
 
     @Path("{resource-id}")
@@ -180,16 +191,12 @@ public class ResourceSetService {
         @APIResponse(responseCode = "404", description = "Not Found")
     })
     public Response delete(@PathParam("resource-id") String id) {
+        AdminPermissionsSchema.SCHEMA.throwExceptionIfAdminPermissionClient(session, resourceServer.getId());
         requireManage();
-        StoreFactory storeFactory = authorization.getStoreFactory();
-        Resource resource = storeFactory.getResourceStore().findById(resourceServer, id);
-
-        if (resource == null) {
-            return Response.status(Status.NOT_FOUND).build();
-        }
-
+        Resource resource = getResource(id);
         //to be able to access all lazy loaded fields it's needed to create representation before it's deleted
         ResourceRepresentation resourceRep = toRepresentation(resource, resourceServer, authorization);
+        StoreFactory storeFactory = authorization.getStoreFactory();
 
         storeFactory.getResourceStore().delete(id);
 
@@ -215,14 +222,7 @@ public class ResourceSetService {
 
     public Response findById(String id, Function<Resource, ? extends ResourceRepresentation> toRepresentation) {
         requireView();
-        StoreFactory storeFactory = authorization.getStoreFactory();
-        Resource model = storeFactory.getResourceStore().findById(resourceServer, id);
-
-        if (model == null) {
-            return Response.status(Status.NOT_FOUND).build();
-        }
-
-        return Response.ok(toRepresentation.apply(model)).build();
+        return Response.ok(toRepresentation.apply(getResource(id))).build();
     }
 
     @Path("{resource-id}/scopes")
@@ -369,7 +369,7 @@ public class ResourceSetService {
         @APIResponse(responseCode = "204", description = "No Content")
     })
     public Response find(@QueryParam("name") String name) {
-        this.auth.realm().requireViewAuthorization();
+        this.auth.realm().requireViewAuthorization(resourceServer);
         StoreFactory storeFactory = authorization.getStoreFactory();
 
         if (name == null) {
@@ -520,13 +520,13 @@ public class ResourceSetService {
 
     private void requireView() {
         if (this.auth != null) {
-            this.auth.realm().requireViewAuthorization();
+            this.auth.realm().requireViewAuthorization(resourceServer);
         }
     }
 
     private void requireManage() {
         if (this.auth != null) {
-            this.auth.realm().requireManageAuthorization();
+            this.auth.realm().requireManageAuthorization(resourceServer);
         }
     }
 

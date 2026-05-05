@@ -1,5 +1,18 @@
 package org.freedesktop.dbus.messages;
 
+import java.lang.reflect.Array;
+import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
+import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
+
 import org.freedesktop.dbus.ArrayFrob;
 import org.freedesktop.dbus.Container;
 import org.freedesktop.dbus.DBusMap;
@@ -20,19 +33,6 @@ import org.freedesktop.dbus.utils.Hexdump;
 import org.freedesktop.dbus.utils.LoggingHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.UnsupportedEncodingException;
-import java.lang.reflect.Array;
-import java.lang.reflect.Type;
-import java.text.MessageFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.BiFunction;
-import java.util.stream.Collectors;
 
 /**
  * Superclass of all messages which are sent over the Bus. This class deals with all the marshalling to/from the wire
@@ -609,13 +609,7 @@ public class Message {
                     payload = _data.toString();
                 }
 
-                byte[] payloadbytes = null;
-                try {
-                    payloadbytes = payload.getBytes("UTF-8");
-                } catch (UnsupportedEncodingException _ex) {
-                    logger.debug("System does not support UTF-8 encoding", _ex);
-                    throw new DBusException("System does not support UTF-8 encoding");
-                }
+                byte[] payloadbytes = payload.getBytes(StandardCharsets.UTF_8);
                 logger.trace("Appending String of length {}", payloadbytes.length);
                 appendint(payloadbytes.length, 4);
                 appendBytes(payloadbytes);
@@ -1055,12 +1049,7 @@ public class Message {
             case ArgumentType.STRING:
                 int length = (int) demarshallint(_dataBuf, _offsets[OFFSET_DATA], 4);
                 _offsets[OFFSET_DATA] += 4;
-                try {
-                    rv = new String(_dataBuf, _offsets[OFFSET_DATA], length, "UTF-8");
-                } catch (UnsupportedEncodingException _ex) {
-                    logger.debug("System does not support UTF-8 encoding", _ex);
-                    throw new DBusException("System does not support UTF-8 encoding");
-                }
+                rv = new String(_dataBuf, _offsets[OFFSET_DATA], length, StandardCharsets.UTF_8);
                 _offsets[OFFSET_DATA] += length + 1;
                 break;
             case ArgumentType.OBJECT_PATH:

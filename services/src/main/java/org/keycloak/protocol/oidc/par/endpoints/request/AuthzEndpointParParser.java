@@ -21,7 +21,6 @@ package org.keycloak.protocol.oidc.par.endpoints.request;
 import java.util.Map;
 import java.util.Set;
 
-import org.jboss.logging.Logger;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
@@ -31,7 +30,11 @@ import org.keycloak.protocol.oidc.endpoints.request.AuthorizationEndpointRequest
 import org.keycloak.protocol.oidc.endpoints.request.AuthzEndpointRequestParser;
 import org.keycloak.protocol.oidc.par.endpoints.ParEndpoint;
 
+import org.jboss.logging.Logger;
+
+import static org.keycloak.protocol.oidc.par.endpoints.ParEndpoint.CACHE_KEY_PREFIX;
 import static org.keycloak.protocol.oidc.par.endpoints.ParEndpoint.PAR_CREATED_TIME;
+import static org.keycloak.protocol.oidc.par.endpoints.ParEndpoint.PAR_DPOP_PROOF_JKT;
 
 /**
  * Parse the parameters from PAR
@@ -47,6 +50,7 @@ public class AuthzEndpointParParser extends AuthzEndpointRequestParser {
     private String invalidRequestMessage = null;
 
     public AuthzEndpointParParser(KeycloakSession session, ClientModel client, String requestUri) {
+        super(session);
         this.session = session;
         this.client = client;
         SingleUseObjectProvider singleUseStore = session.singleUseObjects();
@@ -57,7 +61,7 @@ public class AuthzEndpointParParser extends AuthzEndpointRequestParser {
             logger.warnf(re,"Unable to parse request_uri: %s", requestUri);
             throw new RuntimeException("Unable to parse request_uri");
         }
-        Map<String, String> retrievedRequest = singleUseStore.remove(key);
+        Map<String, String> retrievedRequest = singleUseStore.remove(CACHE_KEY_PREFIX + key);
         if (retrievedRequest == null) {
             throw new RuntimeException("PAR not found. not issued or used multiple times.");
         }
@@ -69,6 +73,11 @@ public class AuthzEndpointParParser extends AuthzEndpointRequestParser {
             requestParams = retrievedRequest;
         } else {
             throw new RuntimeException("PAR expired.");
+        }
+        // If DPoP Proof existed with PAR request, its public key needs to be matched with the one with Token Request afterward
+        String dpopJkt = retrievedRequest.get(PAR_DPOP_PROOF_JKT);
+        if (dpopJkt != null) {
+            session.setAttribute(PAR_DPOP_PROOF_JKT, dpopJkt);
         }
     }
 

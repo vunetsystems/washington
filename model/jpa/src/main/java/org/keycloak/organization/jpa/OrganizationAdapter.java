@@ -17,13 +17,11 @@
 
 package org.keycloak.organization.jpa;
 
-import static java.util.Optional.ofNullable;
-
 import java.util.HashSet;
-import java.util.Map;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -44,6 +42,8 @@ import org.keycloak.organization.OrganizationProvider;
 import org.keycloak.utils.EmailValidationUtil;
 import org.keycloak.utils.StringUtil;
 
+import static java.util.Optional.ofNullable;
+
 public final class OrganizationAdapter implements OrganizationModel, JpaModel<OrganizationEntity> {
 
     private final KeycloakSession session;
@@ -52,15 +52,6 @@ public final class OrganizationAdapter implements OrganizationModel, JpaModel<Or
     private final OrganizationProvider provider;
     private GroupModel group;
     private Map<String, List<String>> attributes;
-
-    public OrganizationAdapter(KeycloakSession session, RealmModel realm, OrganizationProvider provider) {
-        this.session = session;
-        entity = new OrganizationEntity();
-        entity.setId(KeycloakModelUtils.generateId());
-        entity.setRealmId(realm.getId());
-        this.realm = realm;
-        this.provider = provider;
-    }
 
     public OrganizationAdapter(KeycloakSession session, RealmModel realm, OrganizationEntity entity, OrganizationProvider provider) {
         this.session = session;
@@ -136,6 +127,16 @@ public final class OrganizationAdapter implements OrganizationModel, JpaModel<Or
     }
 
     @Override
+    public String getRedirectUrl() {
+        return entity.getRedirectUrl();
+    }
+
+    @Override
+    public void setRedirectUrl(String redirectUrl) {
+        entity.setRedirectUrl(redirectUrl);
+    }
+
+    @Override
     public void setAttributes(Map<String, List<String>> attributes) {
         if (attributes == null) {
             return;
@@ -174,8 +175,8 @@ public final class OrganizationAdapter implements OrganizationModel, JpaModel<Or
 
     @Override
     public void setDomains(Set<OrganizationDomainModel> domains) {
-        if (domains == null || domains.isEmpty()) {
-            throw new ModelValidationException("You must provide at least one domain");
+        if (domains == null) {
+            return;
         }
 
         Map<String, OrganizationDomainModel> modelMap = domains.stream()

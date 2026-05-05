@@ -17,22 +17,22 @@
  */
 package org.keycloak.authorization.client;
 
-import static org.keycloak.constants.ServiceUrlConstants.AUTHZ_DISCOVERY_URL;
-
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Objects;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.keycloak.authorization.client.representation.ServerConfiguration;
 import org.keycloak.authorization.client.resource.AuthorizationResource;
 import org.keycloak.authorization.client.resource.ProtectionResource;
 import org.keycloak.authorization.client.util.Http;
 import org.keycloak.authorization.client.util.TokenCallable;
+import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.common.util.KeycloakUriBuilder;
 import org.keycloak.representations.AccessTokenResponse;
-import org.keycloak.util.SystemPropertiesJsonParserFactory;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import static org.keycloak.constants.ServiceUrlConstants.AUTHZ_DISCOVERY_URL;
 
 /**
  * <p>This is class serves as an entry point for clients looking for access to Keycloak Authorization Services.
@@ -91,6 +91,7 @@ public class AuthzClient {
      * @return a new instance
      */
     public static AuthzClient create(Configuration configuration) {
+        CryptoIntegration.init(AuthzClient.class.getClassLoader());
         return new AuthzClient(configuration);
     }
 
@@ -137,6 +138,7 @@ public class AuthzClient {
      * @return a {@link ProtectionResource}
      */
     public ProtectionResource protection(String userName, String password) {
+        patSupplier = null;
         return new ProtectionResource(this.http, this.serverConfiguration, configuration, createPatSupplier(userName, password));
     }
 

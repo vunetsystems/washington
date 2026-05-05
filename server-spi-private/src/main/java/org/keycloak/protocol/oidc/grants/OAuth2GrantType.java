@@ -17,22 +17,28 @@
 
 package org.keycloak.protocol.oidc.grants;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 
-import java.util.Map;
-
+import org.keycloak.OAuth2Constants;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
 import org.keycloak.http.HttpRequest;
 import org.keycloak.http.HttpResponse;
 import org.keycloak.models.ClientModel;
+import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.protocol.LoginProtocol;
 import org.keycloak.provider.Provider;
+import org.keycloak.representations.AccessToken;
 import org.keycloak.services.cors.Cors;
 
 /**
@@ -50,12 +56,36 @@ public interface OAuth2GrantType extends Provider {
     EventType getEventType();
 
     /**
+     * @return request parameters, which can be duplicated for the particular grant type. The grant request is typically rejected if
+     * request contains multiple values of some parameter, which is not listed here
+     */
+    default Set<String> getSupportedMultivaluedRequestParameters() {
+        return Collections.emptySet();
+    }
+
+    /**
      * Processes grant request.
      * @param context grant request context
      *
      * @return token response
      */
     Response process(Context context);
+
+    /**
+     * Check if the token issued from this grant type is allowed for the current request.
+     * This allows grant types to restrict token usage to specific endpoints or contexts.
+     * The default implementation returns {@code true}, meaning tokens are allowed at all endpoints.
+     * Grant types that need to restrict token usage (e.g., pre-authorized code tokens that should
+     * only be accepted at the credential endpoint) should override this method to implement
+     * specific endpoint restrictions.
+     *
+     * @param session the Keycloak session
+     * @param token   the access token
+     * @return true if the token is allowed for the current request, false otherwise
+     */
+    default boolean isTokenAllowed(KeycloakSession session, AccessToken token) {
+        return true;
+    }
 
     public static class Context {
         protected KeycloakSession session;
@@ -71,6 +101,8 @@ public interface OAuth2GrantType extends Provider {
         protected EventBuilder event;
         protected Cors cors;
         protected Object tokenManager;
+        protected String grantType;
+        protected LoginProtocol protocol;
 
         public Context(KeycloakSession session, Object clientConfig, Map<String, String> clientAuthAttributes,
                 MultivaluedMap<String, String> formParams, EventBuilder event, Cors cors, Object tokenManager) {
@@ -87,22 +119,11 @@ public interface OAuth2GrantType extends Provider {
             this.event = event;
             this.cors = cors;
             this.tokenManager = tokenManager;
-        }
-
-        public Context(Context context) {
-            this.session = context.session;
-            this.realm = context.realm;
-            this.client = context.client;
-            this.clientConfig = context.clientConfig;
-            this.clientConnection = context.clientConnection;
-            this.clientAuthAttributes = context.clientAuthAttributes;
-            this.request = context.request;
-            this.response = context.response;
-            this.headers = context.headers;
-            this.formParams = context.formParams;
-            this.event = context.event;
-            this.cors = context.cors;
-            this.tokenManager = context.tokenManager;
+            this.grantType = formParams.getFirst(OAuth2Constants.GRANT_TYPE);
+            if (this.client != null) {
+                String protocolName = this.client.getProtocol() != null ? this.client.getProtocol() : Constants.OIDC_PROTOCOL;
+                this.protocol = session.getProvider(LoginProtocol.class, protocolName);
+            }
         }
 
         public void setFormParams(MultivaluedHashMap<String, String> formParams) {
@@ -111,6 +132,10 @@ public interface OAuth2GrantType extends Provider {
 
         public void setClient(ClientModel client) {
             this.client = client;
+            if (client != null) {
+                String protocolName = this.client.getProtocol() != null ? this.client.getProtocol() : Constants.OIDC_PROTOCOL;
+                this.protocol = session.getProvider(LoginProtocol.class, protocolName);
+            }
         }
 
         public void setClientConfig(Object clientConfig) {
@@ -171,6 +196,10 @@ public interface OAuth2GrantType extends Provider {
 
         public Object getTokenManager() {
             return tokenManager;
+        }
+
+        public String getGrantType() {
+            return grantType;
         }
     }
 

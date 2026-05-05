@@ -16,11 +16,16 @@
  */
 package org.keycloak.testsuite.forms;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.util.List;
+
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.client.WebTarget;
+import jakarta.ws.rs.core.Form;
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.events.Details;
@@ -34,8 +39,8 @@ import org.keycloak.models.utils.TimeBasedOTP;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.testsuite.AbstractChangeImportedUserPasswordsTest;
 import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.AppPage.RequestType;
 import org.keycloak.testsuite.pages.LoginPage;
@@ -43,20 +48,16 @@ import org.keycloak.testsuite.pages.LoginTotpPage;
 import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
 import org.keycloak.testsuite.util.AdminClientUtil;
 import org.keycloak.testsuite.util.GreenMailRule;
-import org.keycloak.testsuite.util.OAuthClient;
 import org.keycloak.testsuite.util.RealmRepUtil;
 import org.keycloak.testsuite.util.UserBuilder;
-
-import jakarta.ws.rs.client.Client;
-import jakarta.ws.rs.client.Entity;
-import jakarta.ws.rs.client.WebTarget;
-import jakarta.ws.rs.core.Form;
-import jakarta.ws.rs.core.Response;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.util.JsonSerialization;
 
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.util.List;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
 
 import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 
@@ -64,10 +65,11 @@ import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  * @author Stan Silvert ssilvert@redhat.com (C) 2016 Red Hat Inc.
  */
-public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
+public class LoginTotpTest extends AbstractChangeImportedUserPasswordsTest {
 
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
+        super.configureTestRealm(testRealm);
         UserRepresentation user = RealmRepUtil.findUser(testRealm, "test-user@localhost");
         UserBuilder.edit(user)
                    .totpSecret("totpSecret")
@@ -101,7 +103,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginWithTotpFailure() throws Exception {
         loginPage.open();
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         Assert.assertTrue(loginTotpPage.isCurrent());
 
@@ -120,7 +122,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginWithMissingTotp() throws Exception {
         loginPage.open();
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         Assert.assertTrue(loginTotpPage.isCurrent());
 
@@ -139,7 +141,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginWithTotpSuccess() throws Exception {
         loginPage.open();
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         Assert.assertTrue(loginTotpPage.isCurrent());
 
@@ -156,7 +158,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginWithTotpRefreshTotpPage() throws Exception {
         loginPage.open();
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         Assert.assertTrue(loginTotpPage.isCurrent());
 
@@ -194,7 +196,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
         // Assert attempted-username NOT available
         loginPage.assertAttemptedUsernameAvailability(false);
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         Assert.assertTrue(loginTotpPage.isCurrent());
 
@@ -221,7 +223,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
             Form form = new Form()
                     .param(OAuth2Constants.GRANT_TYPE, OAuth2Constants.PASSWORD)
                     .param(OAuth2Constants.USERNAME, "test-user@localhost")
-                    .param(OAuth2Constants.PASSWORD, "password")
+                    .param(OAuth2Constants.PASSWORD, getPassword("test-user@localhost"))
                     .param(OAuth2Constants.CLIENT_ID, Constants.ADMIN_CLI_CLIENT_ID);
 
             // Compatibility between "otp" and "totp"
@@ -256,7 +258,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
         OTPCredentialData credentialData = JsonSerialization.readValue(otpCredential.getCredentialData(), OTPCredentialData.class);
         OTPCredentialData newCredentialData = new OTPCredentialData(credentialData.getSubType(), credentialData.getDigits(), credentialData.getCounter(), credentialData.getPeriod(), credentialData.getAlgorithm(),
                 SecretEncoding.BASE32.name());
-        UserRepresentation newUser = UserBuilder.create().username("test-otp-user@localhost").password("password").enabled(true).build();
+        UserRepresentation newUser = UserBuilder.create().username("test-otp-user@localhost").password(generatePassword("test-otp-user@localhost")).enabled(true).build();
         CredentialRepresentation credential = new CredentialRepresentation();
 
         credential.setType(otpCredential.getType());
@@ -273,7 +275,7 @@ public class LoginTotpTest extends AbstractTestRealmKeycloakTest {
         testRealm().users().create(newUser).close();
 
         loginPage.open();
-        loginPage.login(newUser.getUsername(), "password");
+        loginPage.login(newUser.getUsername(), getPassword("test-otp-user@localhost"));
 
         Assert.assertTrue(loginTotpPage.isCurrent());
 

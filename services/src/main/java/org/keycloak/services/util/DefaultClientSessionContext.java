@@ -17,8 +17,8 @@
 
 package org.keycloak.services.util;
 
+import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -26,17 +26,18 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.jboss.logging.Logger;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.common.Profile;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.ClientSessionContext;
+import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.RoleUtils;
 import org.keycloak.protocol.ProtocolMapperUtils;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
@@ -44,6 +45,8 @@ import org.keycloak.protocol.oidc.TokenManager;
 import org.keycloak.rar.AuthorizationRequestContext;
 import org.keycloak.rar.AuthorizationRequestSource;
 import org.keycloak.util.TokenUtil;
+
+import org.jboss.logging.Logger;
 
 /**
  * Not thread safe. It's per-request object
@@ -71,8 +74,11 @@ public class DefaultClientSessionContext implements ClientSessionContext {
     private Set<String> clientScopeIds;
     private String scopeString;
 
-    private DefaultClientSessionContext(AuthenticatedClientSessionModel clientSession, Set<ClientScopeModel> requestedScopes, KeycloakSession session) {
+    private final Set<String> restrictedScopes;
+
+    private DefaultClientSessionContext(AuthenticatedClientSessionModel clientSession, Set<ClientScopeModel> requestedScopes, Set<String> restrictedScopes, KeycloakSession session) {
         this.requestedScopes = requestedScopes;
+        this.restrictedScopes = restrictedScopes;
         this.clientSession = clientSession;
         this.session = session;
         this.session.setAttribute(ClientSessionContext.class.getName(), this);
@@ -95,12 +101,13 @@ public class DefaultClientSessionContext implements ClientSessionContext {
         } else {
             requestedScopes = TokenManager.getRequestedClientScopes(session, scopeParam, clientSession.getClient(), clientSession.getUserSession().getUser());
         }
-        return new DefaultClientSessionContext(clientSession, requestedScopes.collect(Collectors.toSet()), session);
+        return new DefaultClientSessionContext(clientSession, requestedScopes.collect(Collectors.toSet()), null, session);
     }
 
 
-    public static DefaultClientSessionContext fromClientSessionAndClientScopes(AuthenticatedClientSessionModel clientSession, Set<ClientScopeModel> requestedScopes, KeycloakSession session) {
-        return new DefaultClientSessionContext(clientSession, requestedScopes, session);
+    public static DefaultClientSessionContext fromClientSessionAndClientScopes(AuthenticatedClientSessionModel clientSession,
+            Set<ClientScopeModel> requestedScopes, Set<String> restrictedScopes, KeycloakSession session) {
+        return new DefaultClientSessionContext(clientSession, requestedScopes, restrictedScopes, session);
     }
 
     @Override
@@ -129,6 +136,16 @@ public class DefaultClientSessionContext implements ClientSessionContext {
         return allowedClientScopes.stream();
     }
 
+    @Override
+    public boolean isOfflineTokenRequested() {
+        Boolean offlineAccessRequested = getAttribute(OAuth2Constants.OFFLINE_ACCESS, Boolean.class);
+        if (offlineAccessRequested != null) return offlineAccessRequested;
+
+        ClientScopeModel offlineAccessScope = KeycloakModelUtils.getClientScopeByName(clientSession.getRealm(), OAuth2Constants.OFFLINE_ACCESS);
+        offlineAccessRequested = offlineAccessScope == null ? false : getClientScopeIds().contains(offlineAccessScope.getId());
+        setAttribute(OAuth2Constants.OFFLINE_ACCESS, offlineAccessRequested);
+        return offlineAccessRequested;
+    }
 
     @Override
     public Stream<RoleModel> getRolesStream() {
@@ -233,16 +250,20 @@ public class DefaultClientSessionContext implements ClientSessionContext {
     // Loading data
 
     private boolean isAllowed(ClientScopeModel clientScope) {
-        if (isClientScopePermittedForUser(clientScope)) {
-            return true;
+        if (restrictedScopes != null && !restrictedScopes.contains(clientScope.getName())) {
+            logger.tracef("Client scope '%s' is not among the restricted scopes list and will not be processed", clientScope.getName());
+            return false;
         }
 
-        if (logger.isTraceEnabled()) {
-            logger.tracef("User '%s' not permitted to have client scope '%s'",
-                    clientSession.getUserSession().getUser().getUsername(), clientScope.getName());
+        if (!isClientScopePermittedForUser(clientScope)) {
+            if (logger.isTraceEnabled()) {
+                logger.tracef("User '%s' not permitted to have client scope '%s'",
+                        clientSession.getUserSession().getUser().getUsername(), clientScope.getName());
+            }
+            return false;
         }
 
-        return false;
+        return true;
     }
 
     // Return true if clientScope can be used by the user.
@@ -264,6 +285,14 @@ public class DefaultClientSessionContext implements ClientSessionContext {
 
         // Expand (resolve composite roles)
         clientScopeRoles = RoleUtils.expandCompositeRoles(clientScopeRoles);
+
+        //remove roles that are not contained in requested audience
+        if (attributes.get(Constants.REQUESTED_AUDIENCE_CLIENTS) != null) {
+            final Set<String> requestedClientIdsFromAudience = Arrays.stream(getAttribute(Constants.REQUESTED_AUDIENCE_CLIENTS, ClientModel[].class))
+                    .map(ClientModel::getId)
+                    .collect(Collectors.toSet());
+            clientScopeRoles.removeIf(role-> role.isClientRole() && !requestedClientIdsFromAudience.contains(role.getContainerId()));
+        }
 
         // Check if expanded roles of clientScope has any intersection with expanded roles of user. If not, it is not permitted
         clientScopeRoles.retainAll(getUserRoles());

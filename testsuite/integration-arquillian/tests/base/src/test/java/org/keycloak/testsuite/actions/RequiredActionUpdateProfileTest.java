@@ -16,25 +16,14 @@
  */
 package org.keycloak.testsuite.actions;
 
-import static org.hamcrest.Matchers.anyOf;
-import static org.hamcrest.Matchers.containsString;
-import static org.junit.Assert.assertFalse;
-import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_ADMIN;
-import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_USER;
-
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.hamcrest.Matchers;
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
 import org.keycloak.admin.client.resource.UserProfileResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.events.Details;
@@ -46,7 +35,7 @@ import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.representations.userprofile.config.UPAttribute;
 import org.keycloak.representations.userprofile.config.UPAttributePermissions;
 import org.keycloak.representations.userprofile.config.UPConfig;
-import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
+import org.keycloak.testsuite.AbstractChangeImportedUserPasswordsTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.arquillian.annotation.IgnoreBrowserDriver;
@@ -58,15 +47,28 @@ import org.keycloak.testsuite.pages.LoginUpdateProfileEditUsernameAllowedPage;
 import org.keycloak.testsuite.util.UserBuilder;
 import org.keycloak.userprofile.UserProfileContext;
 import org.keycloak.utils.StringUtil;
-import java.util.HashSet;
+
+import org.hamcrest.Matchers;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
 import org.openqa.selenium.ElementClickInterceptedException;
 import org.openqa.selenium.htmlunit.HtmlUnitDriver;
+
+import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_ADMIN;
+import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_USER;
+
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.Assert.assertFalse;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
-public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTest {
+public class RequiredActionUpdateProfileTest extends AbstractChangeImportedUserPasswordsTest {
 
     @Rule
     public AssertEvents events = new AssertEvents(this);
@@ -85,6 +87,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
 
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
+        super.configureTestRealm(testRealm);
         ActionUtil.addRequiredActionForUser(testRealm, "test-user@localhost", UserModel.RequiredAction.UPDATE_PROFILE.name());
         ActionUtil.addRequiredActionForUser(testRealm, "john-doh@localhost", UserModel.RequiredAction.UPDATE_PROFILE.name());
     }
@@ -99,7 +102,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
                 .lastName("Brady")
                 .emailVerified(true)
                 .requiredAction(UserModel.RequiredAction.UPDATE_PROFILE.name()).build();
-        ApiUtil.createUserAndResetPasswordWithAdminClient(testRealm(), user, "password");
+        ApiUtil.createUserAndResetPasswordWithAdminClient(testRealm(), user, generatePassword("test-user@localhost"));
 
         ApiUtil.removeUserByUsername(testRealm(), "john-doh@localhost");
         user = UserBuilder.create().enabled(true)
@@ -109,14 +112,16 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
                 .lastName("Doh")
                 .emailVerified(true)
                 .requiredAction(UserModel.RequiredAction.UPDATE_PROFILE.name()).build();
-        ApiUtil.createUserAndResetPasswordWithAdminClient(testRealm(), user, "password");
+        ApiUtil.createUserAndResetPasswordWithAdminClient(testRealm(), user, generatePassword("john-doh@localhost"));
     }
 
     @Test
     public void updateProfile() {
         loginPage.open();
-
-        loginPage.login("test-user@localhost", "password");
+        UserRepresentation user = ActionUtil.findUserWithAdminClient(adminClient, "test-user@localhost");
+        user.setEmailVerified(true);
+        adminClient.realm("test").users().get(user.getId()).update(user);
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         updateProfilePage.assertCurrent();
         assertFalse(updateProfilePage.isCancelDisplayed());
@@ -132,7 +137,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
         events.expectLogin().assertEvent();
 
         // assert user is really updated in persistent store
-        UserRepresentation user = ActionUtil.findUserWithAdminClient(adminClient, "test-user@localhost");
+        user = ActionUtil.findUserWithAdminClient(adminClient, "test-user@localhost");
         Assert.assertEquals("New first", user.getFirstName());
         Assert.assertEquals("New last", user.getLastName());
         Assert.assertEquals("new@email.com", user.getEmail());
@@ -145,7 +150,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateUsername() {
         loginPage.open();
 
-        loginPage.login("john-doh@localhost", "password");
+        loginPage.login("john-doh@localhost", getPassword("john-doh@localhost"));
 
         String userId = ActionUtil.findUserWithAdminClient(adminClient, "john-doh@localhost").getId();
 
@@ -177,7 +182,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateProfileMissingFirstName() {
         loginPage.open();
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -198,7 +203,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateProfileMissingLastName() {
         loginPage.open();
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -220,7 +225,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateProfileMissingEmail() {
         loginPage.open();
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -246,7 +251,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateProfileInvalidEmail() {
         loginPage.open();
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -269,7 +274,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateProfileMissingUsername() {
         loginPage.open();
 
-        loginPage.login("john-doh@localhost", "password");
+        loginPage.login("john-doh@localhost", getPassword("john-doh@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -292,7 +297,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateProfileDuplicateUsername() {
         loginPage.open();
 
-        loginPage.login("john-doh@localhost", "password");
+        loginPage.login("john-doh@localhost", getPassword("john-doh@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -315,7 +320,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     public void updateProfileDuplicatedEmail() {
         loginPage.open();
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -336,11 +341,11 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
 
     @Test
     public void updateProfileDuplicateUsernameWithEmail() {
-        getCleanup().addUserId(createUser(TEST_REALM_NAME, "user1@local.com", "password", "user1", "user1", "user1@local.org"));
+        getCleanup().addUserId(createUser(TEST_REALM_NAME, "user1@local.com", generatePassword("user1@local.com"), "user1", "user1", "user1@local.org"));
 
         loginPage.open();
 
-        loginPage.login("john-doh@localhost", "password");
+        loginPage.login("john-doh@localhost", getPassword("john-doh@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -361,11 +366,11 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
 
     @Test
     public void updateProfileDuplicatedEmailWithUsername() {
-        getCleanup().addUserId(createUser(TEST_REALM_NAME, "user1@local.com", "password", "user1", "user1", "user1@local.org"));
+        getCleanup().addUserId(createUser(TEST_REALM_NAME, "user1@local.com", generatePassword("user1@local.com"), "user1", "user1", "user1@local.org"));
 
         loginPage.open();
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -387,7 +392,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
     @Test
     public void updateProfileExpiredCookies() {
         loginPage.open();
-        loginPage.login("john-doh@localhost", "password");
+        loginPage.login("john-doh@localhost", getPassword("john-doh@localhost"));
 
         updateProfilePage.assertCurrent();
 
@@ -421,7 +426,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
 
             loginPage.open();
 
-            loginPage.login("test-user@localhost", "password");
+            loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
             updateProfilePage.assertCurrent();
             assertFalse(updateProfilePage.isCancelDisplayed());
@@ -469,7 +474,7 @@ public class RequiredActionUpdateProfileTest extends AbstractTestRealmKeycloakTe
             userProfile.update(testUpConfig);
 
             loginPage.open();
-            loginPage.login("john-doh@localhost", "password");
+            loginPage.login("john-doh@localhost", getPassword("john-doh@localhost"));
             updateProfilePage.assertCurrent();
 
             for (String attribute : attributes) {

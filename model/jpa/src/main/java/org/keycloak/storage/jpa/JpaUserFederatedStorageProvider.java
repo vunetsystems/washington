@@ -16,8 +16,18 @@
  */
 package org.keycloak.storage.jpa;
 
-import org.jboss.logging.Logger;
-import org.keycloak.common.util.Base64;
+import java.util.Base64;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.TypedQuery;
+
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.common.util.Time;
 import org.keycloak.component.ComponentModel;
@@ -53,15 +63,7 @@ import org.keycloak.storage.jpa.entity.FederatedUserRequiredActionEntity;
 import org.keycloak.storage.jpa.entity.FederatedUserRequiredActionEntity.Key;
 import org.keycloak.storage.jpa.entity.FederatedUserRoleMappingEntity;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.TypedQuery;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import jakarta.persistence.LockModeType;
+import org.jboss.logging.Logger;
 
 import static org.keycloak.models.jpa.PaginationUtils.paginateQuery;
 import static org.keycloak.utils.StreamsUtil.closing;
@@ -483,7 +485,7 @@ public class JpaUserFederatedStorageProvider implements
 
         return closing(paginateQuery(query, firstResult, max).getResultStream());
     }
-    
+
     @Override
     public Stream<String> getRoleMembersStream(RealmModel realm, RoleModel role, Integer firstResult, Integer max) {
         TypedQuery<String> query = em.createNamedQuery("fedRoleMembership", String.class);
@@ -564,6 +566,7 @@ public class JpaUserFederatedStorageProvider implements
     public void updateCredential(RealmModel realm, String userId, CredentialModel cred) {
         FederatedUserCredentialEntity entity = em.find(FederatedUserCredentialEntity.class, cred.getId());
         if (!checkCredentialEntity(entity, userId)) return;
+        validateDuplicateUserCredential(userId, cred.getUserLabel(), cred.getId());
         createIndex(realm, userId);
         entity.setCreatedDate(cred.getCreatedDate());
         entity.setType(cred.getType());
@@ -572,8 +575,26 @@ public class JpaUserFederatedStorageProvider implements
         entity.setUserLabel(cred.getUserLabel());
     }
 
+    /**
+     * Validates if a credential with the same user label already exists for the given user.
+     * Excludes the credential itself if updating an existing one.
+     */
+    private void validateDuplicateUserCredential(String userId, String userLabel, String credentialId) {
+        if (userLabel != null) {
+            boolean exists = getStoredCredentialEntitiesStream(userId)
+                    .anyMatch(existing -> existing.getUserLabel() != null
+                            && existing.getUserLabel().trim().equalsIgnoreCase(userLabel.trim())
+                            && (credentialId == null || !existing.getId().equals(credentialId)));
+
+            if (exists) {
+                throw new ModelDuplicateException("Device already exists with the same name", CredentialModel.USER_LABEL);
+            }
+        }
+    }
+
     @Override
     public CredentialModel createCredential(RealmModel realm, String userId, CredentialModel cred) {
+        validateDuplicateUserCredential(userId, cred.getUserLabel(), null);
         createIndex(realm, userId);
         FederatedUserCredentialEntity entity = new FederatedUserCredentialEntity();
         String id = cred.getId() == null ? KeycloakModelUtils.generateId() : cred.getId();
@@ -633,7 +654,7 @@ public class JpaUserFederatedStorageProvider implements
         // Backwards compatibility - users from previous version still have "salt" in the DB filled.
         // We migrate it to new secretData format on-the-fly
         if (entity.getSalt() != null) {
-            String newSecretData = entity.getSecretData().replace("__SALT__", Base64.encodeBytes(entity.getSalt()));
+            String newSecretData = entity.getSecretData().replace("__SALT__", Base64.getEncoder().encodeToString(entity.getSalt()));
             entity.setSecretData(newSecretData);
             entity.setSalt(null);
         }

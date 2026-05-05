@@ -18,8 +18,8 @@
 package org.keycloak.it.cli.dist;
 
 import java.nio.file.Path;
-import org.junit.jupiter.api.Test;
-import org.keycloak.crypto.fips.KeycloakFipsSecurityProvider;
+
+import org.keycloak.crypto.fips.FIPS1402Provider;
 import org.keycloak.it.junit5.extension.CLIResult;
 import org.keycloak.it.junit5.extension.DistributionTest;
 import org.keycloak.it.junit5.extension.RawDistOnly;
@@ -27,13 +27,15 @@ import org.keycloak.it.utils.KeycloakDistribution;
 import org.keycloak.it.utils.RawKeycloakDistribution;
 
 import io.quarkus.test.junit.main.Launch;
-import io.quarkus.test.junit.main.LaunchResult;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
-@DistributionTest(keepAlive = true, defaultOptions = { "--features=fips", "--http-enabled=true", "--hostname-strict=false", "--log-level=org.keycloak.common.crypto.CryptoIntegration:trace" })
+@DistributionTest(keepAlive = true, defaultOptions = { "--db=dev-file", "--features=fips", "--http-enabled=true", "--hostname-strict=false" })
 @RawDistOnly(reason = "Containers are immutable")
+@Tag(DistributionTest.SLOW)
 public class FipsDistTest {
 
-    private static final String BCFIPS_VERSION = "BCFIPS version 1.000205";
+    private static final String BCFIPS_VERSION = "BCFIPS version 2.0102";
 
     @Test
     void testFipsNonApprovedMode(KeycloakDistribution dist) {
@@ -42,8 +44,7 @@ public class FipsDistTest {
             cliResult.assertStarted();
             // Not shown as FIPS is not a preview anymore
             cliResult.assertMessageWasShownExactlyNumberOfTimes("Preview features enabled: fips:v1", 0);
-            cliResult.assertMessage("Java security providers: [ \n"
-                    + " KC(" + BCFIPS_VERSION + ", FIPS-JVM: " + KeycloakFipsSecurityProvider.isSystemFipsEnabled() + ") version 1.0 - class org.keycloak.crypto.fips.KeycloakFipsSecurityProvider");
+            cliResult.assertMessage("FIPS1402Provider created: KC(" + BCFIPS_VERSION + ", FIPS-JVM: " + FIPS1402Provider.isSystemFipsEnabled() + ")");
         });
     }
 
@@ -55,9 +56,8 @@ public class FipsDistTest {
 
             CLIResult cliResult = dist.run("start", "--fips-mode=strict");
             cliResult.assertMessage("password must be at least 112 bits");
-            cliResult.assertMessage("Java security providers: [ \n"
-                    + " KC(" + BCFIPS_VERSION + " Approved Mode, FIPS-JVM: " + KeycloakFipsSecurityProvider.isSystemFipsEnabled() + ") version 1.0 - class org.keycloak.crypto.fips.KeycloakFipsSecurityProvider");
-            
+            cliResult.assertMessage("FIPS1402Provider created: KC(" + BCFIPS_VERSION + " Approved Mode, FIPS-JVM: " + FIPS1402Provider.isSystemFipsEnabled() + ")");
+
             dist.setEnvVar("KC_BOOTSTRAP_ADMIN_PASSWORD", "adminadminadmin");
             cliResult = dist.run("start", "--fips-mode=strict");
             cliResult.assertStarted();
@@ -67,8 +67,7 @@ public class FipsDistTest {
 
     @Test
     @Launch({ "start", "--fips-mode=non-strict" })
-    void failStartDueToMissingFipsDependencies(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    void failStartDueToMissingFipsDependencies(CLIResult cliResult) {
         cliResult.assertError("Failed to configure FIPS. Make sure you have added the Bouncy Castle FIPS dependencies to the 'providers' directory.");
     }
 
@@ -77,7 +76,6 @@ public class FipsDistTest {
         runOnFipsEnabledDistribution(dist, () -> {
             dist.copyOrReplaceFileFromClasspath("/server.keystore", Path.of("conf", "server.keystore"));
             CLIResult cliResult = dist.run("start", "--fips-mode=strict");
-            dist.assertStopped();
             cliResult.assertMessage("ERROR: java.lang.IllegalArgumentException: malformed sequence");
         });
     }
@@ -125,7 +123,6 @@ public class FipsDistTest {
         runOnFipsEnabledDistribution(dist, () -> {
             dist.copyOrReplaceFileFromClasspath("/server.keystore.pkcs12", Path.of("conf", "server.keystore"));
             CLIResult cliResult = dist.run("start", "--fips-mode=strict", "--https-key-store-password=passwordpassword");
-            dist.assertStopped();
             cliResult.assertMessage("ERROR: java.lang.IllegalArgumentException: malformed sequence");
         });
     }
@@ -149,8 +146,7 @@ public class FipsDistTest {
 
             CLIResult cliResult = dist.run("--verbose", "start", "--fips-mode=non-strict", "--https-key-store-password=passwordpassword",
                     "--https-trust-store-file=" + truststorePath, "--https-trust-store-password=passwordpassword");
-            cliResult.assertError("Unable to determine 'https-trust-store-type' automatically. Adjust the file extension or specify the property.");
-
+            cliResult.assertMessage("Unable to determine 'https-trust-store-type' automatically. Adjust the file extension or specify the property.");
             dist.stop();
 
             dist.copyOrReplaceFileFromClasspath("/server.keystore.pkcs12", Path.of("conf", "server.p12"));
@@ -174,6 +170,7 @@ public class FipsDistTest {
         rawDist.copyProvider("org.bouncycastle", "bc-fips");
         rawDist.copyProvider("org.bouncycastle", "bctls-fips");
         rawDist.copyProvider("org.bouncycastle", "bcpkix-fips");
+        rawDist.copyProvider("org.bouncycastle", "bcutil-fips");
     }
 
 }

@@ -1,7 +1,11 @@
 package org.keycloak.testsuite.cli.admin;
 
-import org.junit.Assert;
-import org.junit.Test;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.List;
+import java.util.UUID;
+
 import org.keycloak.client.cli.config.ConfigData;
 import org.keycloak.client.cli.config.FileConfigHandler;
 import org.keycloak.client.cli.config.RealmConfigData;
@@ -12,11 +16,8 @@ import org.keycloak.testsuite.util.KeystoreUtils;
 import org.keycloak.testsuite.util.TempFileResource;
 import org.keycloak.util.JsonSerialization;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.util.List;
-import java.util.UUID;
+import org.junit.Assert;
+import org.junit.Test;
 
 import static org.keycloak.client.admin.cli.KcAdmMain.CMD;
 import static org.keycloak.client.cli.util.OsUtil.EOL;
@@ -51,7 +52,7 @@ public class KcAdmTest extends AbstractAdmCliTest {
         List<String> lines = exe.stdoutLines();
         Assert.assertTrue("stdout output not empty", lines.size() > 0);
         Assert.assertEquals("stdout first line", "Keycloak Admin CLI", lines.get(0));
-        Assert.assertEquals("stdout one but last line", "Use '" + KcAdmExec.CMD + " help <command>' for more information about a given command.", lines.get(lines.size() - 2));
+        Assert.assertEquals("stdout one but last line", "Use '" + CMD + " help <command>' for more information about a given command.", lines.get(lines.size() - 2));
         Assert.assertEquals("stdout last line", "", lines.get(lines.size() - 1));
 
 
@@ -61,7 +62,7 @@ public class KcAdmTest extends AbstractAdmCliTest {
         exe = KcAdmExec.execute("config");
         assertExitCodeAndStreamSizes(exe, 2, 8, 0);
         Assert.assertEquals("error message",
-                "Usage: kcadm.sh config SUB_COMMAND [ARGUMENTS]",
+                "Usage: " + CMD + " config SUB_COMMAND [ARGUMENTS]",
                 exe.stdoutLines().get(0));
 
         exe = KcAdmExec.execute("config credentials");
@@ -608,8 +609,8 @@ public class KcAdmTest extends AbstractAdmCliTest {
         //non-TLS endpoint
         oauth.baseUrl(serverUrl);
         oauth.realm("master");
-        oauth.clientId("admin-cli");
-        String token = oauth.doGrantAccessTokenRequest("", "admin", "admin").getAccessToken();
+        oauth.client("admin-cli");
+        String token = oauth.doPasswordGrantRequest("admin", "admin").getAccessToken();
         testCRUDWithOnTheFlyAuth(serverUrl, " --token " + token, "",
                 "");
 
@@ -672,7 +673,7 @@ public class KcAdmTest extends AbstractAdmCliTest {
         // should contain an error message
         assertExitCodeAndStreamSizes(exec, 0, 0, 1);
     }
-    
+
     @Test
     public void testEnvPasswordWithRegularCommand() {
         execute("config credentials --server " + serverUrl + " --realm master --user admin --password admin");
@@ -682,6 +683,19 @@ public class KcAdmTest extends AbstractAdmCliTest {
                 .execute();
         // should not contain an error message
         assertExitCodeAndStreamSizes(exec, 0, 1, 0);
+    }
+
+    @Test
+    public void testStatusOptionForConfigCred() {
+        execute("config credentials --server " + serverUrl + " --realm master --user admin --password admin");
+        KcAdmExec exec = execute("config credentials --status");
+        assertExitCodeAndStreamSizes(exec, 0, 1, 0);
+        Assert.assertTrue(exec.stdoutString().startsWith("Logged in (server: " + serverUrl + ", realm: master, expired: false, timeToExpiry:"));
+        Assert.assertTrue(exec.stdoutString().endsWith("from now)\n"));
+        exec = execute("config credentials --status --server " + serverUrl + " --realm master --user admin --password admin");
+        assertExitCodeAndStreamSizes(exec, 0, 1, 0);
+        Assert.assertTrue(exec.stdoutString().startsWith("Logged in (server: " + serverUrl + ", realm: master, expired: false, timeToExpiry:"));
+        Assert.assertTrue(exec.stdoutString().endsWith("from now)\n"));
     }
 
 }

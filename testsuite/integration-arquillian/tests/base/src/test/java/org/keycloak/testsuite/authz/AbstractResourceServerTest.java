@@ -16,8 +16,6 @@
  */
 package org.keycloak.testsuite.authz;
 
-import static org.junit.Assert.assertEquals;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,6 +46,8 @@ import org.keycloak.testsuite.util.RoleBuilder;
 import org.keycloak.testsuite.util.RolesBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
 
+import static org.junit.Assert.assertEquals;
+
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
@@ -70,7 +70,10 @@ public abstract class AbstractResourceServerTest extends AbstractAuthzTest {
                 .user(UserBuilder.create().username("alice").password("password")
                         .addRoles("uma_authorization", "uma_protection")
                         .role("resource-server-test", "uma_protection"))
-                .user(UserBuilder.create().username("kolo").password("password"))
+                .user(UserBuilder.create().username("kolo").password("password")
+                        .addRoles("uma_authorization", "uma_protection")
+                        .role("resource-server-test", "uma_protection")
+                )
                 .client(ClientBuilder.create().clientId("resource-server-test")
                         .secret("secret")
                         .authorizationServicesEnabled(true)

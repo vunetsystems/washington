@@ -17,13 +17,14 @@
 
 package org.keycloak.testsuite.pages;
 
-import org.junit.Assert;
-import org.keycloak.testsuite.util.DroneUtils;
-import org.keycloak.testsuite.util.WaitUtils;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.keycloak.testsuite.util.DroneUtils;
+import org.keycloak.testsuite.util.UIUtils;
+import org.keycloak.testsuite.util.WaitUtils;
+
+import org.junit.Assert;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebDriver;
@@ -96,7 +97,7 @@ public abstract class LanguageComboboxAwarePage extends AbstractPage {
     }
 
     public void clickTryAnotherWayLink() {
-        tryAnotherWayLink.click();
+        UIUtils.clickLink(tryAnotherWayLink);
     }
 
     public void assertAccountLinkAvailability(boolean expectedAvailability) {
@@ -109,7 +110,7 @@ public abstract class LanguageComboboxAwarePage extends AbstractPage {
     }
 
     public void clickAccountLink() {
-        accountLink.click();
+        UIUtils.clickLink(accountLink);
     }
 
     // If false, we don't expect "attempted username" link available on the page. If true, we expect that it is available on the page
@@ -121,16 +122,20 @@ public abstract class LanguageComboboxAwarePage extends AbstractPage {
         try {
             driver.findElement(By.id("kc-attempted-username"));
             Assert.assertTrue(expectedAvailability);
+            // make sure the username field is not shown if the attempted username field is present
+            Assert.assertTrue(driver.findElements(By.id("username")).isEmpty());
         } catch (NoSuchElementException nse) {
             Assert.assertFalse(expectedAvailability);
         }
     }
 
     public String getAttemptedUsername() {
-        return attemptedUsernameLabel.getAttribute("value");
+        String text = attemptedUsernameLabel.getAttribute("value");
+        if (text == null) return attemptedUsernameLabel.getText();
+        return text;
     }
 
     public void clickResetLogin() {
-        resetLoginLink.click();
+        UIUtils.clickLink(resetLoginLink);
     }
 }

@@ -7,15 +7,17 @@
     <parent>
         <artifactId>keycloak-parent</artifactId>
         <groupId>org.keycloak</groupId>
-        <version>999.0.0-SNAPSHOT</version>
+        <version>26.6.0</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
     <name>Keycloak Operator</name>
+    <description>Keycloak Operator</description>
     <artifactId>keycloak-operator</artifactId>
 
     <properties>
         <maven.compiler.parameters>true</maven.compiler.parameters>
+        <kc.quarkus.tests.groups>!invalid</kc.quarkus.tests.groups>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.container-image.group>keycloak</quarkus.container-image.group>
@@ -46,6 +48,10 @@
         <!-- Fabric8 -->
         <dependency>
             <groupId>io.fabric8</groupId>
+            <artifactId>crd-generator-api-v2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
             <artifactId>generator-annotations</artifactId>
             <scope>provided</scope>
         </dependency>
@@ -53,6 +59,11 @@
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-junit-jupiter</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>openshift-model-monitoring</artifactId>
+            <scope>provided</scope>
         </dependency>
 
         <!-- Quarkus -->
@@ -90,6 +101,10 @@
             </exclusions>
         </dependency>
         <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-openshift-client</artifactId>
+        </dependency>
+        <dependency>
           <groupId>io.quarkus</groupId>
           <artifactId>quarkus-container-image-docker</artifactId>
           <optional>true</optional>
@@ -100,18 +115,30 @@
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
         </dependency>
-
-        <!-- FIXME: Adding BC for now as removing the Bouncycastle dependencies from the operator makes it unusable on K3s and possibly on other kubernetes distributions (e.g. Rancher is based on K3s). -->
         <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcprov-jdk18on</artifactId>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-admin-client</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.bouncycastle</groupId>
-            <artifactId>bcpkix-jdk18on</artifactId>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-admin-v2-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-admin-v2-rest</artifactId>
         </dependency>
 
         <!-- Test -->
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kube-api-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kube-api-test-client-inject</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-test-common</artifactId>
@@ -119,12 +146,17 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-junit5</artifactId>
+            <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-junit5-mockito</artifactId>
+            <artifactId>quarkus-junit-mockito</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit-component</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -148,6 +180,11 @@
             <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.keycloak</groupId>
+            <artifactId>keycloak-admin-client-tests</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -157,6 +194,7 @@
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-maven-plugin</artifactId>
                 <version>${quarkus.build.version}</version>
+                <extensions>true</extensions>
             </plugin>
             </plugins>
         </pluginManagement>
@@ -165,6 +203,7 @@
                 <groupId>io.quarkus</groupId>
                 <artifactId>quarkus-maven-plugin</artifactId>
                 <version>${quarkus.build.version}</version>
+                <extensions>true</extensions>
                 <executions>
                     <execution>
                     <goals>
@@ -236,6 +275,17 @@
                 </executions>
             </plugin>
 
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>-proc:full</arg> <!-- adding sundrio to annotationProcessorPaths doesn't play well with Fabric8 -->
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <executions>
@@ -253,9 +303,11 @@
                 </executions>
                 <configuration>
                     <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <!-- Used in KeycloakDeploymentTest#testPreconfiguredPodLabels -->
                         <OPERATOR_TEST_LABEL_EXPRESSION>my-value</OPERATOR_TEST_LABEL_EXPRESSION>
                     </systemPropertyVariables>
+                    <groups>${kc.quarkus.tests.groups}</groups>
                 </configuration>
             </plugin>
 

@@ -27,7 +27,7 @@ import { DefaultSwitchControl } from "../components/SwitchControl";
 import { FormattedLink } from "../components/external-link/FormattedLink";
 import { FixedButtonsGroup } from "../components/form/FixedButtonGroup";
 import { FormAccess } from "../components/form/FormAccess";
-import { KeyValueInput } from "../components/key-value-form/KeyValueInput";
+import { RealmLoAMapping } from "../components/realm-loa-mapping/RealmLoAMapping";
 import { useRealm } from "../context/realm-context/RealmContext";
 import {
   addTrailingSlash,
@@ -36,6 +36,8 @@ import {
 } from "../util";
 import useIsFeatureEnabled, { Feature } from "../utils/useIsFeatureEnabled";
 import { UIRealmRepresentation } from "./RealmSettingsTabs";
+import { SIGNATURE_ALGORITHMS } from "../clients/add/SamlSignature";
+import type { RealmLoAMappingType } from "../components/realm-loa-mapping/RealmLoAMapping";
 
 type RealmSettingsGeneralTabProps = {
   realm: UIRealmRepresentation;
@@ -110,7 +112,14 @@ function RealmSettingsGeneralTabForm({
   } = form;
   const isFeatureEnabled = useIsFeatureEnabled();
   const isOrganizationsEnabled = isFeatureEnabled(Feature.Organizations);
+  const isAdminPermissionsV2Enabled = isFeatureEnabled(
+    Feature.AdminFineGrainedAuthzV2,
+  );
   const isOpenid4vciEnabled = isFeatureEnabled(Feature.OpenId4VCI);
+  const isStepUpAuthenticationSaml = isFeatureEnabled(
+    Feature.StepUpAuthenticationSaml,
+  );
+  const isScimApiEnabled = isFeatureEnabled(Feature.ScimApi);
 
   const setupForm = () => {
     convertToFormValues(realm, setValue);
@@ -120,13 +129,18 @@ function RealmSettingsGeneralTabForm({
         UNMANAGED_ATTRIBUTE_POLICIES[0],
     );
     if (realm.attributes?.["acr.loa.map"]) {
-      const result = Object.entries(
+      const acrLoaMap = Object.entries(
         JSON.parse(realm.attributes["acr.loa.map"]),
-      ).flatMap(([key, value]) => ({ key, value }));
-      result.concat({ key: "", value: "" });
+      ).flatMap(([acr, loa]) => ({ acr, loa }) as RealmLoAMappingType);
+
+      if (isStepUpAuthenticationSaml && realm.attributes?.["acr.uri.map"]) {
+        const acrUriMap = JSON.parse(realm.attributes["acr.uri.map"]);
+        acrLoaMap.forEach((row) => (row.uri = acrUriMap?.[row?.acr]));
+      }
+
       setValue(
         convertAttributeNameToForm("attributes.acr.loa.map") as any,
-        result,
+        acrLoaMap,
       );
     }
   };
@@ -205,14 +219,19 @@ function RealmSettingsGeneralTabForm({
             fieldId="acrToLoAMapping"
             labelIcon={
               <HelpItem
-                helpText={t("acrToLoAMappingHelp")}
+                helpText={
+                  isStepUpAuthenticationSaml
+                    ? t("acrToLoAMappingRealmSamlHelp")
+                    : t("acrToLoAMappingHelp")
+                }
                 fieldLabelId="acrToLoAMapping"
               />
             }
           >
-            <KeyValueInput
+            <RealmLoAMapping
               label={t("acrToLoAMapping")}
               name={convertAttributeNameToForm("attributes.acr.loa.map")}
+              uri={isStepUpAuthenticationSaml}
             />
           </FormGroup>
           <DefaultSwitchControl
@@ -227,6 +246,27 @@ function RealmSettingsGeneralTabForm({
               labelIcon={t("organizationsEnabledHelp")}
             />
           )}
+          {isAdminPermissionsV2Enabled && (
+            <DefaultSwitchControl
+              name="adminPermissionsEnabled"
+              label={t("adminPermissionsEnabled")}
+              labelIcon={t("adminPermissionsEnabledHelp")}
+            />
+          )}
+          {isOpenid4vciEnabled && (
+            <DefaultSwitchControl
+              name="verifiableCredentialsEnabled"
+              label={t("verifiableCredentialsEnabled")}
+              labelIcon={t("verifiableCredentialsEnabledHelp")}
+            />
+          )}
+          {isScimApiEnabled && (
+            <DefaultSwitchControl
+              name="scimApiEnabled"
+              label={t("scimApiEnabled")}
+              labelIcon={t("scimApiEnabledHelp")}
+            />
+          )}
           <SelectControl
             name="unmanagedAttributePolicy"
             label={t("unmanagedAttributes")}
@@ -238,6 +278,20 @@ function RealmSettingsGeneralTabForm({
               key: policy,
               value: t(`unmanagedAttributePolicy.${policy}`),
             }))}
+          />
+          <SelectControl
+            name={convertAttributeNameToForm<FormFields>(
+              "attributes.saml.signature.algorithm",
+            )}
+            label={t("signatureAlgorithmIdentityProviderMetadata")}
+            labelIcon={t("signatureAlgorithmIdentityProviderMetadataHelp")}
+            controller={{
+              defaultValue: "",
+            }}
+            options={[
+              { key: "", value: t("choose") },
+              ...SIGNATURE_ALGORITHMS.map((v) => ({ key: v, value: v })),
+            ]}
           />
           <FormGroup
             label={t("endpoints")}
@@ -266,13 +320,23 @@ function RealmSettingsGeneralTabForm({
                   title={t("samlIdentityProviderMetadata")}
                 />
               </StackItem>
-              {isOpenid4vciEnabled && (
+              {isOpenid4vciEnabled && realm.verifiableCredentialsEnabled && (
                 <StackItem>
                   <FormattedLink
                     href={`${addTrailingSlash(
                       serverBaseUrl,
-                    )}realms/${realmName}/.well-known/openid-credential-issuer`}
+                    )}.well-known/openid-credential-issuer/realms/${realmName}`}
                     title={t("oid4vcIssuerMetadata")}
+                  />
+                </StackItem>
+              )}
+              {isScimApiEnabled && realm.scimApiEnabled && (
+                <StackItem>
+                  <FormattedLink
+                    href={`${addTrailingSlash(
+                      serverBaseUrl,
+                    )}realms/${realmName}/scim/v2`}
+                    title={t("SCIM Endpoint")}
                   />
                 </StackItem>
               )}

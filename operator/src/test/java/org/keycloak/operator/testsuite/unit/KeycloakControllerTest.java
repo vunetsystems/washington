@@ -17,17 +17,17 @@
 
 package org.keycloak.operator.testsuite.unit;
 
+import org.keycloak.operator.controllers.KeycloakController;
+import org.keycloak.operator.crds.v2beta1.deployment.Keycloak;
+import org.keycloak.operator.crds.v2beta1.deployment.spec.IngressSpecBuilder;
+import org.keycloak.operator.testsuite.utils.K8sUtils;
+
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.openshift.api.model.config.v1.Ingress;
 import io.fabric8.openshift.api.model.config.v1.IngressBuilder;
 import io.javaoperatorsdk.operator.api.reconciler.Context;
 import io.javaoperatorsdk.operator.api.reconciler.UpdateControl;
-
 import org.junit.jupiter.api.Test;
-import org.keycloak.operator.controllers.KeycloakController;
-import org.keycloak.operator.crds.v2alpha1.deployment.Keycloak;
-import org.keycloak.operator.crds.v2alpha1.deployment.spec.IngressSpecBuilder;
-import org.keycloak.operator.testsuite.utils.K8sUtils;
 import org.mockito.Mockito;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,9 +53,9 @@ class KeycloakControllerTest {
         // both the instances and hostname should be updated
         UpdateControl<Keycloak> update = controller.reconcile(kc, mockContext);
 
-        assertTrue(update.isUpdateResource());
-        assertEquals(1, update.getResource().getSpec().getInstances());
-        assertEquals("example-kc-ingress-ns.openshift.com", update.getResource().getSpec().getHostnameSpec().getHostname());
+        assertTrue(update.isPatchResource());
+        assertEquals(1, update.getResource().orElseThrow().getSpec().getInstances());
+        assertEquals("example-kc-ingress-ns.openshift.com", update.getResource().orElseThrow().getSpec().getHostnameSpec().getHostname());
 
         // just the instances should be updated if not openshift-default
         kc = K8sUtils.getDefaultKeycloakDeployment();
@@ -63,9 +63,9 @@ class KeycloakControllerTest {
         kc.getSpec().setInstances(null);
         kc.getSpec().getHostnameSpec().setHostname(null);
         update = controller.reconcile(kc, mockContext);
-        assertTrue(update.isUpdateResource());
-        assertEquals(1, update.getResource().getSpec().getInstances());
-        assertNull(update.getResource().getSpec().getHostnameSpec().getHostname());
+        assertTrue(update.isPatchResource());
+        assertEquals(1, update.getResource().orElseThrow().getSpec().getInstances());
+        assertNull(update.getResource().orElseThrow().getSpec().getHostnameSpec().getHostname());
     }
 
 }

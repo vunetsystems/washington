@@ -22,8 +22,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import org.jboss.logging.Logger;
 import org.keycloak.crypto.Algorithm;
+
+import org.jboss.logging.Logger;
 
 public class WebAuthnPolicy implements Serializable {
 
@@ -41,6 +42,7 @@ public class WebAuthnPolicy implements Serializable {
     protected boolean avoidSameAuthenticatorRegister = false;
     protected List<String> acceptableAaguids;
     protected List<String> extraOrigins;
+    protected Boolean passkeysEnabled; // only used for passwordless
 
     public WebAuthnPolicy() {
     }
@@ -138,5 +140,13 @@ public class WebAuthnPolicy implements Serializable {
 
     public void setExtraOrigins(List<String> extraOrigins) {
         this.extraOrigins = extraOrigins;
+    }
+
+    public Boolean isPasskeysEnabled() {
+        return passkeysEnabled;
+    }
+
+    public void setPasskeysEnabled(Boolean passkeysEnabled) {
+        this.passkeysEnabled = passkeysEnabled;
     }
 }

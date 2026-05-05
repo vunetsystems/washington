@@ -17,8 +17,9 @@
 
 package org.keycloak.testsuite.oidc.flows;
 
-import org.junit.Before;
-import org.junit.Test;
+import java.util.Arrays;
+import java.util.List;
+
 import org.keycloak.events.Details;
 import org.keycloak.jose.jws.crypto.HashUtils;
 import org.keycloak.protocol.oidc.OIDCConfigAttributes;
@@ -26,10 +27,10 @@ import org.keycloak.protocol.oidc.utils.OIDCResponseType;
 import org.keycloak.representations.IDToken;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.testsuite.Assert;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AuthorizationEndpointResponse;
 
-import java.util.Arrays;
-import java.util.List;
+import org.junit.Before;
+import org.junit.Test;
 
 /**
  * Tests with response_type=code id_token token as detached signature
@@ -53,7 +54,7 @@ public class OIDCHybridResponseTypeCodeIDTokenAsDetachedSigTokenTest extends Abs
     }
 
 
-    protected List<IDToken> testAuthzResponseAndRetrieveIDTokens(OAuthClient.AuthorizationEndpointResponse authzResponse, EventRepresentation loginEvent) {
+    protected List<IDToken> testAuthzResponseAndRetrieveIDTokens(AuthorizationEndpointResponse authzResponse, EventRepresentation loginEvent) {
         Assert.assertEquals(OIDCResponseType.CODE + " " + OIDCResponseType.ID_TOKEN + " " + OIDCResponseType.TOKEN, loginEvent.getDetails().get(Details.RESPONSE_TYPE));
 
         // IDToken from the authorization response
