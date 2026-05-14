@@ -1330,15 +1330,6 @@
                 <scope>test</scope>
                 <version>${microprofile-metrics-api.version}</version>
             </dependency>
-
-
-            <dependency>
-                <groupId>com.squareup.okio</groupId>
-                <artifactId>okio</artifactId>
-                <version>1.17.6</version>
-            </dependency>
-
-            <!-- SCIM -->
             <dependency>
                 <groupId>org.keycloak</groupId>
                 <artifactId>keycloak-scim-core</artifactId>
