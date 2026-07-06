@@ -6,6 +6,8 @@ var HashSet = java.util.HashSet;
 // Implicit privilege mappings: granting privilege -> array of privileges it grants
 var implicitPrivilegeMappings = {
   'alerts:read': ['dataModel:read', 'definitions:read', 'preferences:read'],
+  "apiKey:read": ["users:read", "serviceAccount:read"],
+  "apiKey:write": ["users:read", "users:write", "users:manageBulkObjects", "serviceAccount:read", "serviceAccount:write"],
   'alerts:write': ['dataModel:read', 'definitions:read', 'preferences:read'],
   'dashboards:admin': ['dashboards:write', 'dataModel:read', 'insights:read', 'utm:read', 'dataSource:manage'],
   'dashboards:write': ['dataModel:read', 'insights:read', 'utm:read'],
@@ -24,6 +26,8 @@ var implicitPrivilegeMappings = {
   'reports:read': ['dataModel:read', 'definitions:read', 'preferences:read'],
   'reports:write': ['dataModel:read', 'definitions:read', 'preferences:read'],
   'resources:manage': ['alerts:read', 'dataModel:read', 'insights:read', 'utm:read'],
+  "serviceAccount:read": ["users:read"],
+  "serviceAccount:write": ["users:read","users:write","users:manageBulkObjects"],
   'utm:read': ['dataModel:read'],
   'utm:write': ['dataModel:read'],
   'vumodule:modifySources': ['alerts:read', 'definitions:read', 'vumodule:read', 'dataModel:read'],
