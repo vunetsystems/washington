@@ -23,15 +23,21 @@ import java.util.Optional;
 
 import org.keycloak.Config;
 import org.keycloak.common.Profile;
+import org.keycloak.common.util.Environment;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.provider.EnvironmentDependentProviderFactory;
 import org.keycloak.urls.HostnameProvider;
 import org.keycloak.urls.HostnameProviderFactory;
 
+import org.jboss.logging.Logger;
+
 /**
  * @author Vaclav Muzikar <vmuzikar@redhat.com>
  */
 public class HostnameV2ProviderFactory implements HostnameProviderFactory, EnvironmentDependentProviderFactory {
+
+    private static final Logger LOGGER = Logger.getLogger(HostnameV2ProviderFactory.class);
+
     private static final String INVALID_HOSTNAME = "Provided hostname is neither a plain hostname nor a valid URL";
     private String hostname;
     private URI hostnameUrl;
@@ -40,8 +46,11 @@ public class HostnameV2ProviderFactory implements HostnameProviderFactory, Envir
 
     @Override
     public void init(Config.Scope config) {
+        if (Environment.isNonServerMode()) {
+            return;
+        }
         // Strict mode is used just for enforcing that hostname is set
-        Boolean strictMode = config.getBoolean("hostname-strict", false);
+        boolean strictMode = config.getBoolean("hostname-strict", false);
 
         String hostnameRaw = config.get("hostname");
         if (strictMode && hostnameRaw == null) {
@@ -49,6 +58,7 @@ public class HostnameV2ProviderFactory implements HostnameProviderFactory, Envir
         } else if (hostnameRaw != null && !strictMode) {
             // We might not need this validation as it doesn't matter in this case if strict is true or false. It's just for consistency – hostname XOR !strict.
 //            throw new IllegalArgumentException("hostname is configured, hostname-strict must be set to true");
+            LOGGER.info("If hostname is specified, hostname-strict is effectively ignored");
         }
 
         // Set hostname, can be either a full URL, or just hostname
@@ -63,6 +73,10 @@ public class HostnameV2ProviderFactory implements HostnameProviderFactory, Envir
         Optional.ofNullable(config.get("hostname-admin")).ifPresent(h ->
                 adminUrl = validateAndCreateUri(h, "Provided hostname-admin is not a valid URL"));
 
+        if (adminUrl != null && hostnameUrl == null) {
+            throw new IllegalArgumentException("hostname must be set to a URL when hostname-admin is set");
+        }
+
         // Dynamic backchannel requires hostname to be specified as full URL. Otherwise we might end up with some parts of the
         // backend request in frontend URLs. Therefore frontend (and admin) needs to be fully static.
         backchannelDynamic = config.getBoolean("hostname-backchannel-dynamic", false);
@@ -73,7 +87,7 @@ public class HostnameV2ProviderFactory implements HostnameProviderFactory, Envir
             throw new IllegalArgumentException("hostname-backchannel-dynamic must be set to false if hostname is not provided as full URL");
         }
     }
-    
+
     private void validateAndSetHostname(String hostname) {
         URI result;
         try {
@@ -91,7 +105,7 @@ public class HostnameV2ProviderFactory implements HostnameProviderFactory, Envir
     private URI validateAndCreateUri(String uri, String validationFailedMessage) {
         URI result;
         try {
-            result = URI.create(uri);
+            result = URI.create(uri.endsWith("/") ? uri : uri + "/");
         }
         catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(validationFailedMessage, e);

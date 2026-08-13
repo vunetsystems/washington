@@ -1,22 +1,42 @@
 package org.keycloak.services.resources.account;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Scanner;
+import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriInfo;
-import org.jboss.resteasy.reactive.NoCache;
+
 import org.keycloak.authentication.requiredactions.DeleteAccount;
+import org.keycloak.authentication.requiredactions.UpdateEmail;
 import org.keycloak.common.Profile;
 import org.keycloak.common.Version;
 import org.keycloak.common.util.Environment;
 import org.keycloak.models.AccountRoles;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.Constants;
+import org.keycloak.models.FederatedIdentityModel;
+import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.IdentityProviderQuery;
+import org.keycloak.models.IdentityProviderStorageProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.RequiredActionProviderModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.utils.RedirectUtils;
 import org.keycloak.services.Urls;
 import org.keycloak.services.managers.AppAuthManager;
@@ -29,32 +49,20 @@ import org.keycloak.services.util.ViteManifest;
 import org.keycloak.services.validation.Validation;
 import org.keycloak.theme.FreeMarkerException;
 import org.keycloak.theme.Theme;
+import org.keycloak.theme.beans.LocaleBean;
 import org.keycloak.theme.beans.MessageFormatterMethod;
 import org.keycloak.theme.freemarker.FreeMarkerProvider;
 import org.keycloak.urls.UrlType;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.utils.MediaType;
+import org.keycloak.utils.SecureContextResolver;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Scanner;
-import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import org.jboss.resteasy.reactive.NoCache;
 
 /**
  * Created by st on 29/03/17.
  */
 public class AccountConsole implements AccountResourceProvider {
-
-    // Used when some other context (ie. IdentityBrokerService) wants to forward error to account management and display it here
-    public static final String ACCOUNT_MGMT_FORWARDED_ERROR_NOTE = "ACCOUNT_MGMT_FORWARDED_ERROR";
 
     private final Pattern bundleParamPattern = Pattern.compile("(\\{\\s*(\\d+)\\s*\\})");
 
@@ -79,7 +87,7 @@ public class AccountConsole implements AccountResourceProvider {
     public void init() {
         AuthenticationManager.AuthResult authResult = authManager.authenticateIdentityCookie(session, realm);
         if (authResult != null) {
-            auth = new Auth(realm, authResult.getToken(), authResult.getUser(), client, authResult.getSession(), true);
+            auth = new Auth(realm, authResult.token(), authResult.user(), client, authResult.session(), true);
         }
     }
 
@@ -94,8 +102,13 @@ public class AccountConsole implements AccountResourceProvider {
 
     @GET
     @NoCache
-    @Path("{any:.*}")
-    public Response getMainPage() throws IOException, FreeMarkerException {
+    @Path("{path:.*}")
+    public Response getMainPage(@PathParam("path") String path) throws IOException, FreeMarkerException {
+
+        return renderAccountConsole();
+    }
+
+    protected Response renderAccountConsole() throws IOException, FreeMarkerException {
         final var serverUriInfo = session.getContext().getUri(UrlType.FRONTEND);
         final var serverBaseUri = serverUriInfo.getBaseUri();
         // Strip any trailing slashes from the URL.
@@ -109,6 +122,9 @@ public class AccountConsole implements AccountResourceProvider {
                 .path("/")
                 .build(realm);
 
+        final var isSecureContext = SecureContextResolver.isSecureContext(session);
+
+        map.put("isSecureContext", isSecureContext);
         map.put("serverBaseUrl", serverBaseUrl);
         // TODO: Some variables are deprecated and only exist to provide backwards compatibility for older themes, they should be removed in a future version.
         // Note that these should be removed from the template of the Account Console as well.
@@ -120,6 +136,17 @@ public class AccountConsole implements AccountResourceProvider {
         map.put("resourceUrl", Urls.themeRoot(serverBaseUri).getPath() + "/" + Constants.ACCOUNT_MANAGEMENT_CLIENT_ID + "/" + theme.getName());
         map.put("resourceCommonUrl", Urls.themeRoot(serverBaseUri).getPath() + "/common/keycloak");
         map.put("resourceVersion", Version.RESOURCES_VERSION);
+
+        MultivaluedMap<String, String> queryParameters = session.getContext().getUri().getQueryParameters();
+        var requestedScopes = queryParameters.getFirst(OIDCLoginProtocol.SCOPE_PARAM);
+
+        if (requestedScopes == null) {
+            requestedScopes = AuthenticationManager.getRequestedScopes(session, realm.getClientByClientId(Constants.ACCOUNT_CONSOLE_CLIENT_ID));
+        }
+
+        if (requestedScopes != null) {
+            map.put(OIDCLoginProtocol.SCOPE_PARAM, requestedScopes);
+        }
 
         String[] referrer = getReferrer();
         if (referrer != null) {
@@ -133,20 +160,24 @@ public class AccountConsole implements AccountResourceProvider {
         Locale locale = session.getContext().resolveLocale(user);
         map.put("locale", locale.toLanguageTag());
         Properties messages = theme.getEnhancedMessages(realm, locale);
+        map.put("localeDir", new LocaleBean(realm, locale, session.getContext().getUri().getRequestUriBuilder(), messages).isRtl() ? "rtl" : "ltr");
         map.put("msg", new MessageFormatterMethod(locale, messages));
         map.put("msgJSON", messagesToJsonString(messages));
         map.put("supportedLocales", supportedLocales(messages));
         map.put("properties", theme.getProperties());
+        map.put("darkMode", "true".equals(theme.getProperties().getProperty("darkMode"))
+                && realm.getAttribute("darkMode", true));
         map.put("theme", (Function<String, String>) file -> {
             try {
                 final InputStream resource = theme.getResourceAsStream(file);
-                return new Scanner(resource, "UTF-8").useDelimiter("\\A").next();
+                return new Scanner(resource, StandardCharsets.UTF_8).useDelimiter("\\A").next();
             } catch (IOException e) {
                 throw new RuntimeException("could not load file", e);
             }
         });
 
         map.put("isAuthorizationEnabled", Profile.isFeatureEnabled(Profile.Feature.AUTHORIZATION));
+        map.put("isLinkedAccountsEnabled", isLinkedAccountsEnabled(user));
 
         boolean deleteAccountAllowed = false;
         boolean isViewGroupsEnabled = false;
@@ -160,12 +191,11 @@ public class AccountConsole implements AccountResourceProvider {
         map.put("deleteAccountAllowed", deleteAccountAllowed);
 
         map.put("isViewGroupsEnabled", isViewGroupsEnabled);
-        map.put("isViewOrganizationsEnabled", Profile.isFeatureEnabled(Profile.Feature.ORGANIZATION));
-        map.put("isOid4VciEnabled", Profile.isFeatureEnabled(Profile.Feature.OID4VC_VCI));
+        map.put("isViewOrganizationsEnabled", realm.isOrganizationsEnabled());
+        map.put("isOid4VciEnabled", realm.isVerifiableCredentialsEnabled());
 
         map.put("updateEmailFeatureEnabled", Profile.isFeatureEnabled(Profile.Feature.UPDATE_EMAIL));
-        RequiredActionProviderModel updateEmailActionProvider = realm.getRequiredActionProviderByAlias(UserModel.RequiredAction.UPDATE_EMAIL.name());
-        map.put("updateEmailActionEnabled", updateEmailActionProvider != null && updateEmailActionProvider.isEnabled());
+        map.put("updateEmailActionEnabled", UpdateEmail.isEnabled(realm));
 
         final var devServerUrl = Environment.isDevMode() ? System.getenv(ViteManifest.ACCOUNT_VITE_URL) : null;
 
@@ -188,17 +218,21 @@ public class AccountConsole implements AccountResourceProvider {
         }
 
         FreeMarkerProvider freeMarkerUtil = session.getProvider(FreeMarkerProvider.class);
-        String result = freeMarkerUtil.processTemplate(map, "index.ftl", theme);
+        String result = renderAccountConsole(freeMarkerUtil, map);
         Response.ResponseBuilder builder = Response.status(Response.Status.OK).type(MediaType.TEXT_HTML_UTF_8).language(Locale.ENGLISH).entity(result);
         return builder.build();
     }
 
-    private Map<String, String> supportedLocales(Properties messages) {
+    protected String renderAccountConsole(FreeMarkerProvider freeMarkerUtil, Map<String, Object> map) throws FreeMarkerException {
+        return freeMarkerUtil.processTemplate(map, "index.ftl", theme);
+    }
+
+    protected Map<String, String> supportedLocales(Properties messages) {
         return realm.getSupportedLocalesStream()
                 .collect(Collectors.toMap(Function.identity(), l -> messages.getProperty("locale_" + l, l)));
     }
 
-    private String messagesToJsonString(Properties props) {
+    protected String messagesToJsonString(Properties props) {
         if (props == null) return "";
         Properties newProps = new Properties();
         for (String prop : props.stringPropertyNames()) {
@@ -275,4 +309,20 @@ public class AccountConsole implements AccountResourceProvider {
         return new String[]{referrer, referrerName, referrerUri};
     }
 
+    protected boolean isLinkedAccountsEnabled(UserModel user) {
+        if (user == null) {
+            return false;
+        }
+
+        IdentityProviderStorageProvider identityProviders = session.identityProviders();
+        Stream<IdentityProviderModel> realmBrokers = identityProviders.getAllStream(IdentityProviderQuery.userAuthentication()
+                .with(IdentityProviderModel.ENABLED, "true")
+                .with(IdentityProviderModel.ORGANIZATION_ID, ""),
+                0, 1);
+        Stream<IdentityProviderModel> linkedBrokers = session.users().getFederatedIdentitiesStream(realm, user)
+                .map(FederatedIdentityModel::getIdentityProvider)
+                .map(identityProviders::getByAlias);
+
+        return Stream.concat(realmBrokers, linkedBrokers).findAny().isPresent();
+    }
 }

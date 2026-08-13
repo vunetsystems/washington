@@ -17,10 +17,14 @@
 
 package org.keycloak.testsuite.oidc;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 import org.keycloak.authentication.authenticators.browser.OTPFormAuthenticatorFactory;
 import org.keycloak.authentication.authenticators.browser.UsernamePasswordFormFactory;
 import org.keycloak.authentication.authenticators.conditional.ConditionalLoaAuthenticator;
@@ -31,9 +35,14 @@ import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.TimeBasedOTP;
-import org.keycloak.representations.ClaimsRepresentation;
 import org.keycloak.representations.IDToken;
-import org.keycloak.representations.idm.*;
+import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
+import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
+import org.keycloak.representations.idm.EventRepresentation;
+import org.keycloak.representations.idm.ProtocolMapperRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.forms.LevelOfAssuranceFlowTest;
 import org.keycloak.testsuite.pages.LoginPage;
@@ -43,9 +52,10 @@ import org.keycloak.testsuite.util.FlowUtil;
 import org.keycloak.testsuite.util.UserBuilder;
 import org.keycloak.util.JsonSerialization;
 
-import java.io.IOException;
-import java.util.*;
-import java.util.stream.Collectors;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
 
 /**
  * @author Ben Cresitello-Dittmar
@@ -184,11 +194,6 @@ public class AuthenticationMethodReferenceTest extends AbstractOIDCScopeTest{
     public void cleanup() {
         clearAmr("browser");
 
-        // remove claims config for acr
-        ClaimsRepresentation claims = new ClaimsRepresentation();
-        claims.setIdTokenClaims(Collections.emptyMap());
-        oauth.claims(claims);
-
         // reset default browser flow
         setBrowserFlow("browser");
 
@@ -288,13 +293,13 @@ public class AuthenticationMethodReferenceTest extends AbstractOIDCScopeTest{
      */
     @Test
     public void testAmrPastMaxAge() {
-        setAmr("browser", "auth-username-password-form", "password", 0);
+        setAmr("browser", "auth-username-password-form", "password", 10);
 
         List<String> expectedAmrs = new ArrayList<>();
         authenticatePassword("test-user", PASSWORD);
 
-        // server time forward by 60 seconds to ensure max age is exceeded
-        setTimeOffset(60);
+        // server time forward by 20 seconds to ensure max age is exceeded
+        setTimeOffset(20);
 
         Tokens tokens = assertLogin(passwordUserId);
 
@@ -395,7 +400,7 @@ public class AuthenticationMethodReferenceTest extends AbstractOIDCScopeTest{
         if (execution.getAuthenticationConfig() == null){
             // create config if it doesn't exist
             AuthenticatorConfigRepresentation config = new AuthenticatorConfigRepresentation();
-            config.setAlias("test");
+            config.setAlias(KeycloakModelUtils.generateId());
             config.setConfig(new HashMap<>(){{
                 put(AMR_VALUE_KEY, amrValue);
                 put(AMR_MAX_AGE_KEY, maxAge.toString());
@@ -477,7 +482,7 @@ public class AuthenticationMethodReferenceTest extends AbstractOIDCScopeTest{
      */
     private void logout(String userId, Tokens tokens){
         // Logout
-        oauth.doLogout(tokens.refreshToken, CLIENT_SECRET);
+        oauth.doLogout(tokens.refreshToken);
         events.expectLogout(tokens.idToken.getSessionState())
                 .client(CLIENT_ID)
                 .user(userId)

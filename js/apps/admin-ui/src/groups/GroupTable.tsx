@@ -7,7 +7,6 @@ import { SearchInput, ToolbarItem } from "@patternfly/react-core";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { useAdminClient } from "../admin-client";
 import { ListEmptyState } from "@keycloak/keycloak-ui-shared";
 import { KeycloakDataTable } from "@keycloak/keycloak-ui-shared";
 import { useAccess } from "../context/access/Access";
@@ -18,32 +17,27 @@ import { DeleteGroup } from "./components/DeleteGroup";
 import { GroupToolbar } from "./components/GroupToolbar";
 import { MoveDialog } from "./components/MoveDialog";
 import { getLastId } from "./groupIdUtils";
+import { useGroupResource } from "../context/group-resource/GroupResourceContext";
 
 type GroupTableProps = {
   refresh: () => void;
 };
 
 export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
-  const { adminClient } = useAdminClient();
-
+  const groups = useGroupResource();
   const { t } = useTranslation();
-
   const [selectedRows, setSelectedRows] = useState<GroupRepresentation[]>([]);
-
   const [rename, setRename] = useState<GroupRepresentation>();
   const [isCreateModalOpen, toggleCreateOpen] = useToggle();
+  const [duplicateId, setDuplicateId] = useState<string>();
   const [showDelete, toggleShowDelete] = useToggle();
   const [move, setMove] = useState<GroupRepresentation>();
-
   const { currentGroup } = useSubGroups();
-
   const [key, setKey] = useState(0);
   const refresh = () => setKey(key + 1);
   const [search, setSearch] = useState<string>();
-
   const location = useLocation();
   const id = getLastId(location.pathname);
-
   const { hasAccess } = useAccess();
   const isManager = hasAccess("manage-users") || currentGroup()?.access?.manage;
 
@@ -56,14 +50,14 @@ export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
         max: max,
         parentId: id,
       };
-      groupsData = await adminClient.groups.listSubGroups(args);
+      groupsData = await groups.listSubGroups(args);
     } else {
       const args: GroupQuery = {
         search: search || "",
         first: first || undefined,
         max: max || undefined,
       };
-      groupsData = await adminClient.groups.find(args);
+      groupsData = await groups.find(args);
     }
 
     return groupsData;
@@ -103,6 +97,17 @@ export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
           }}
         />
       )}
+      {duplicateId && (
+        <GroupsModal
+          id={duplicateId}
+          duplicateId={duplicateId}
+          refresh={() => {
+            refresh();
+            viewRefresh();
+          }}
+          handleModalToggle={() => setDuplicateId(undefined)}
+        />
+      )}
       {move && (
         <MoveDialog
           source={move}
@@ -131,6 +136,9 @@ export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
                 value={search}
                 onChange={(_, value) => {
                   setSearch(value);
+                  if (value === "") {
+                    refresh();
+                  }
                 }}
                 onSearch={refresh}
                 onClear={() => {
@@ -151,7 +159,7 @@ export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
             ? []
             : [
                 {
-                  title: t("rename"),
+                  title: t("edit"),
                   onRowClick: async (group) => {
                     setRename(group);
                     return false;
@@ -172,6 +180,17 @@ export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
                     return false;
                   },
                 },
+                ...(!id
+                  ? [
+                      {
+                        title: t("duplicate"),
+                        onRowClick: async (group: GroupRepresentation) => {
+                          setDuplicateId(group.id);
+                          return false;
+                        },
+                      },
+                    ]
+                  : []),
                 {
                   isSeparator: true,
                 },
@@ -190,7 +209,7 @@ export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
             name: "name",
             displayKey: "groupName",
             cellRenderer: (group) =>
-              group.access?.view ? (
+              groups.isOrgGroups() || group.access?.view ? ( // The org UI does not use access
                 <Link key={group.id} to={`${location.pathname}/${group.id}`}>
                   {group.name}
                 </Link>
@@ -202,9 +221,11 @@ export const GroupTable = ({ refresh: viewRefresh }: GroupTableProps) => {
         emptyState={
           <ListEmptyState
             hasIcon={true}
-            message={t(`noGroupsInThis${id ? "SubGroup" : "Realm"}`)}
+            message={t(
+              `noGroupsInThis${id ? "SubGroup" : groups.isOrgGroups() ? "Organization" : "Realm"}`,
+            )}
             instructions={t(
-              `noGroupsInThis${id ? "SubGroup" : "Realm"}Instructions`,
+              `noGroupsInThis${id ? "SubGroup" : groups.isOrgGroups() ? "Organization" : "Realm"}Instructions`,
             )}
             primaryActionText={t("createGroup")}
             onPrimaryAction={toggleCreateOpen}

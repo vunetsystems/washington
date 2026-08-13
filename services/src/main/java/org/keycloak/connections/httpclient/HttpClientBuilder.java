@@ -17,25 +17,6 @@
 
 package org.keycloak.connections.httpclient;
 
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.conn.ssl.AllowAllHostnameVerifier;
-import org.apache.http.conn.ssl.BrowserCompatHostnameVerifier;
-import org.apache.http.conn.ssl.DefaultHostnameVerifier;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
-import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
-import org.apache.http.conn.ssl.StrictHostnameVerifier;
-import org.apache.http.conn.ssl.X509HostnameVerifier;
-import org.apache.http.conn.util.PublicSuffixMatcherLoader;
-import org.apache.http.impl.NoConnectionReuseStrategy;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.ssl.SSLContexts;
-import org.keycloak.common.enums.HostnameVerificationPolicy;
-
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 import java.security.KeyManagementException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -45,6 +26,24 @@ import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.TimeUnit;
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
+import org.keycloak.common.enums.HostnameVerificationPolicy;
+
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.conn.ssl.BrowserCompatHostnameVerifier;
+import org.apache.http.conn.ssl.DefaultHostnameVerifier;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.StrictHostnameVerifier;
+import org.apache.http.conn.util.PublicSuffixMatcherLoader;
+import org.apache.http.impl.NoConnectionReuseStrategy;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.ssl.SSLContexts;
 
 /**
  * Abstraction for creating HttpClients. Allows SSL configuration.
@@ -75,6 +74,8 @@ public class HttpClientBuilder {
         }
     }
 
+    public static long DEFAULT_CONNECTION_REQUEST_TIMEOUT_MILLIS = 5000L;
+
     protected KeyStore truststore;
     protected KeyStore clientKeyStore;
     protected String clientPrivateKeyPassword;
@@ -92,9 +93,20 @@ public class HttpClientBuilder {
     protected TimeUnit socketTimeoutUnits = TimeUnit.MILLISECONDS;
     protected long establishConnectionTimeout = -1;
     protected TimeUnit establishConnectionTimeoutUnits = TimeUnit.MILLISECONDS;
+    protected long connectionRequestTimeout = DEFAULT_CONNECTION_REQUEST_TIMEOUT_MILLIS;
+    protected TimeUnit connectionRequestTimeoutUnits = TimeUnit.MILLISECONDS;
     protected boolean disableCookies = false;
     protected ProxyMappings proxyMappings;
     protected boolean expectContinueEnabled = false;
+    protected final org.apache.http.impl.client.HttpClientBuilder apacheBuilder;
+
+    public HttpClientBuilder() {
+        this(HttpClients.custom());
+    }
+
+    public HttpClientBuilder(org.apache.http.impl.client.HttpClientBuilder apacheBuilder) {
+        this.apacheBuilder = apacheBuilder;
+    }
 
     /**
      * Socket inactivity timeout
@@ -121,6 +133,20 @@ public class HttpClientBuilder {
     {
         this.establishConnectionTimeout = timeout;
         this.establishConnectionTimeoutUnits = unit;
+        return this;
+    }
+
+    /**
+     * When trying to obtain a connection, what is the timeout?
+     *
+     * @param timeout
+     * @param unit
+     * @return
+     */
+    public HttpClientBuilder connectionRequestTimeout(long timeout, TimeUnit unit)
+    {
+        this.connectionRequestTimeout = timeout;
+        this.connectionRequestTimeoutUnits = unit;
         return this;
     }
 
@@ -252,9 +278,10 @@ public class HttpClientBuilder {
             RequestConfig requestConfig = RequestConfig.custom()
                     .setConnectTimeout((int) TimeUnit.MILLISECONDS.convert(establishConnectionTimeout, establishConnectionTimeoutUnits))
                     .setSocketTimeout((int) TimeUnit.MILLISECONDS.convert(socketTimeout, socketTimeoutUnits))
+                    .setConnectionRequestTimeout((int) TimeUnit.MILLISECONDS.convert(connectionRequestTimeout, connectionRequestTimeoutUnits))
                     .setExpectContinueEnabled(expectContinueEnabled).build();
 
-            org.apache.http.impl.client.HttpClientBuilder builder = HttpClients.custom()
+            org.apache.http.impl.client.HttpClientBuilder builder = getApacheHttpClientBuilder()
                     .setDefaultRequestConfig(requestConfig)
                     .setSSLSocketFactory(sslsf)
                     .setMaxConnTotal(connectionPoolSize)
@@ -276,14 +303,14 @@ public class HttpClientBuilder {
 
             if (disableCookies) builder.disableCookieManagement();
 
-            if (!reuseConnections) {
-                builder.setConnectionReuseStrategy(new NoConnectionReuseStrategy());
-            }
-
             return builder.build();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    protected org.apache.http.impl.client.HttpClientBuilder getApacheHttpClientBuilder() {
+        return apacheBuilder;
     }
 
     private SSLContext createSslContext(

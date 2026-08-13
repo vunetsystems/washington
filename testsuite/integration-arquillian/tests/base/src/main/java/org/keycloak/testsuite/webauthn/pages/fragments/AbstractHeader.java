@@ -19,10 +19,11 @@ package org.keycloak.testsuite.webauthn.pages.fragments;
 
 import org.openqa.selenium.WebElement;
 
-import static org.junit.Assert.assertEquals;
-import static org.keycloak.testsuite.util.UIUtils.clickLink;
+import static org.keycloak.testsuite.util.UIUtils.click;
 import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
 import static org.keycloak.testsuite.util.UIUtils.isElementVisible;
+
+import static org.junit.Assert.assertEquals;
 
 /**
  * @author Vaclav Muzikar <vmuzikar@redhat.com>
@@ -49,7 +50,7 @@ public abstract class AbstractHeader extends AbstractFragmentWithMobileLayout {
 
     protected void clickToolsBtn(WebElement btn) {
         clickOptions();
-        clickLink(btn);
+        click(btn);
     }
 
     protected boolean isToolsBtnVisible(WebElement btn) {

@@ -17,22 +17,21 @@
 package org.keycloak.testsuite.forms;
 
 import java.io.Closeable;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+
 import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.core.Form;
 import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriBuilder;
-import org.apache.commons.lang3.RandomStringUtils;
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.ClientResource;
-import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.common.Profile;
+import org.keycloak.common.util.Base64Url;
 import org.keycloak.cookie.CookieType;
 import org.keycloak.crypto.Algorithm;
 import org.keycloak.events.Details;
@@ -47,13 +46,12 @@ import org.keycloak.models.UserModel.RequiredAction;
 import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.models.utils.SessionTimeoutHelper;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
-import org.keycloak.protocol.oidc.OIDCLoginProtocolService;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.ClientScopeRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
+import org.keycloak.testsuite.AbstractChangeImportedUserPasswordsTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.ProfileAssume;
 import org.keycloak.testsuite.admin.ApiUtil;
@@ -65,57 +63,67 @@ import org.keycloak.testsuite.pages.LoginConfigTotpPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.pages.LoginPasswordUpdatePage;
 import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
+import org.keycloak.testsuite.util.AccountHelper;
 import org.keycloak.testsuite.util.AdminClientUtil;
 import org.keycloak.testsuite.util.ContainerAssume;
-import org.keycloak.testsuite.util.DroneUtils;
 import org.keycloak.testsuite.util.InfinispanTestTimeServiceRule;
 import org.keycloak.testsuite.util.Matchers;
-import org.keycloak.testsuite.util.OAuthClient;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.TokenSignatureUtil;
 import org.keycloak.testsuite.util.UserBuilder;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
+
+import org.apache.commons.lang3.RandomStringUtils;
+import org.hamcrest.MatcherAssert;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
 import org.openqa.selenium.Cookie;
-import org.keycloak.testsuite.util.AccountHelper;
 import org.openqa.selenium.JavascriptExecutor;
 
+import static org.keycloak.common.Profile.Feature.DYNAMIC_SCOPES;
+import static org.keycloak.testsuite.admin.ApiUtil.findClientByClientId;
+import static org.keycloak.testsuite.util.ServerURLs.getAuthServerContextRoot;
+import static org.keycloak.testsuite.util.oauth.OAuthClient.SERVER_ROOT;
+
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
-import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.keycloak.common.Profile.Feature.DYNAMIC_SCOPES;
-import static org.keycloak.testsuite.admin.ApiUtil.findClientByClientId;
-import static org.keycloak.testsuite.util.OAuthClient.AUTH_SERVER_ROOT;
-import static org.keycloak.testsuite.util.OAuthClient.SERVER_ROOT;
-import static org.keycloak.testsuite.util.ServerURLs.getAuthServerContextRoot;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
-public class LoginTest extends AbstractTestRealmKeycloakTest {
+public class LoginTest extends AbstractChangeImportedUserPasswordsTest {
 
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
+        super.configureTestRealm(testRealm);
         UserRepresentation user = UserBuilder.create()
                                              .username("login-test")
                                              .email("login@test.com")
                                              .enabled(true)
-                                             .password("password")
+                                             .password(generatePassword("login-test"))
                                              .build();
 
         UserRepresentation user2 = UserBuilder.create()
                                               .username("login-test2")
                                               .email("login2@test.com")
                                               .enabled(true)
-                                              .password("password")
+                                              .password(generatePassword("login2-test"))
                                               .build();
 
         UserRepresentation admin = UserBuilder.create()
                 .username("admin")
-                .password("admin")
+                .password(generatePassword("admin"))
                 .enabled(true)
                 .build();
         HashMap<String, List<String>> clientRoles = new HashMap<>();
@@ -163,13 +171,13 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void testBrowserSecurityHeaders() {
         Client client = AdminClientUtil.createResteasyClient();
-        Response response = client.target(oauth.getLoginFormUrl()).request().get();
+        Response response = client.target(oauth.loginForm().build()).request().get();
         assertThat(response.getStatus(), is(equalTo(200)));
         for (BrowserSecurityHeaders header : BrowserSecurityHeaders.values()) {
             String headerValue = response.getHeaderString(header.getHeaderName());
             String expectedValue = header.getDefaultValue();
             if (expectedValue.isEmpty()) {
-                Assert.assertNull(headerValue);
+                assertNull(headerValue);
             } else {
                 Assert.assertNotNull(headerValue);
                 assertThat(headerValue, is(equalTo(expectedValue)));
@@ -192,7 +200,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
         try {
             Client client = AdminClientUtil.createResteasyClient();
-            Response response = client.target(oauth.getLoginFormUrl()).request().get();
+            Response response = client.target(oauth.loginForm().build()).request().get();
             String headerValue = response.getHeaderString(cspReportOnlyHeader);
             assertThat(headerValue, is(equalTo(expectedCspReportOnlyValue)));
             response.close();
@@ -208,9 +216,15 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     public void testPOSTAuthenticationRequest() {
         Client client = AdminClientUtil.createResteasyClient();
 
+        Form form = new Form()
+                .param(OAuth2Constants.SCOPE, "openid")
+                .param(OAuth2Constants.CLIENT_ID, oauth.getClientId())
+                .param(OAuth2Constants.RESPONSE_TYPE, "code")
+                .param(OAuth2Constants.REDIRECT_URI, oauth.getRedirectUri())
+                .param(OAuth2Constants.STATE, "123456");
+
         //POST request to http://localhost:8180/auth/realms/test/protocol/openid-connect/auth;
-        UriBuilder b = OIDCLoginProtocolService.authUrl(UriBuilder.fromUri(AUTH_SERVER_ROOT));
-        Response response = client.target(b.build(oauth.getRealm())).request().post(oauth.getLoginEntityForPOST());
+        Response response = client.target(oauth.getEndpoints().getAuthorization()).request().post(Entity.form(form));
 
         assertThat(response.getStatus(), is(equalTo(200)));
         assertThat(response, Matchers.body(containsString("Sign in")));
@@ -225,12 +239,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
                 .updateWith(r -> r.setEventsEnabled(true)).update()) {
             String randomLongString = RandomStringUtils.random(2500, true, true);
             String longRedirectUri = oauth.getRedirectUri() + "?longQueryParameterValue=" + randomLongString;
-            UriBuilder longLoginUri = UriBuilder.fromUri(oauth.getLoginFormUrl()).replaceQueryParam(OAuth2Constants.REDIRECT_URI, longRedirectUri);
-
-            DroneUtils.getCurrentDriver().navigate().to(longLoginUri.build().toString());
+            oauth.loginForm().param(OAuth2Constants.REDIRECT_URI, longRedirectUri).open();
 
             loginPage.assertCurrent();
-            loginPage.login("login-test", "password");
+            loginPage.login("login-test", getPassword("login-test"));
 
             events.expectLogin().user(userId).detail(OAuth2Constants.REDIRECT_URI, longRedirectUri).assertEvent();
         }
@@ -246,17 +258,18 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         Assert.assertEquals("login-test2", loginPage.getUsername());
         Assert.assertEquals("", loginPage.getPassword());
 
-        Assert.assertEquals("Invalid username or password.", loginPage.getInputError());
+        Assert.assertEquals("Invalid username or password.", loginPage.getUsernameInputError());
+        assertNull(loginPage.getPasswordInputError());
 
         events.expectLogin().user(user2Id).session((String) null).error("invalid_user_credentials")
                 .detail(Details.USERNAME, "login-test2")
                 .removeDetail(Details.CONSENT)
                 .assertEvent();
 
-        loginPage.login("login-test", "password");
+        loginPage.login("login-test", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
     }
@@ -272,7 +285,8 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         Assert.assertEquals("login-test", loginPage.getUsername());
         Assert.assertEquals("", loginPage.getPassword());
 
-        Assert.assertEquals("Invalid username or password.", loginPage.getInputError());
+        Assert.assertEquals("Invalid username or password.", loginPage.getUsernameInputError());
+        assertNull(loginPage.getPasswordInputError());
 
         events.expectLogin().user(userId).session((String) null).error("invalid_user_credentials")
                 .detail(Details.USERNAME, "login-test")
@@ -291,7 +305,8 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         Assert.assertEquals("login-test", loginPage.getUsername());
         Assert.assertEquals("", loginPage.getPassword());
 
-        Assert.assertEquals("Invalid username or password.", loginPage.getInputError());
+        Assert.assertEquals("Invalid username or password.", loginPage.getUsernameInputError());
+        assertNull(loginPage.getPasswordInputError());
 
         events.expectLogin().user(userId).session((String) null).error("invalid_user_credentials")
                 .detail(Details.USERNAME, "login-test")
@@ -337,7 +352,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
         try {
             loginPage.open();
-            loginPage.login("login-test", "password");
+            loginPage.login("login-test", getPassword("login-test"));
 
             loginPage.assertCurrent();
 
@@ -363,7 +378,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
         try {
             loginPage.open();
-            loginPage.login("test-user@localhost", "password");
+            loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
             appPage.assertCurrent();
             appPage.openAccount();
@@ -374,7 +389,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
             loginPage.assertCurrent();
 
             // try to log in as different user
-            loginPage.login("keycloak-user@localhost", "password");
+            loginPage.login("keycloak-user@localhost", getPassword("keycloak-user@localhost"));
 
             appPage.assertCurrent();
         } finally {
@@ -385,7 +400,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginInvalidUsername() {
         loginPage.open();
-        loginPage.login("invalid", "password");
+        loginPage.login("invalid", "invalid");
 
         loginPage.assertCurrent();
 
@@ -400,10 +415,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
                 .removeDetail(Details.CONSENT)
                 .assertEvent();
 
-        loginPage.login("login-test", "password");
+        loginPage.login("login-test", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
     }
@@ -426,10 +441,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     // KEYCLOAK-2557
     public void loginUserWithEmailAsUsername() {
         loginPage.open();
-        loginPage.login("login@test.com", "password");
+        loginPage.login("login@test.com", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).detail(Details.USERNAME, "login@test.com").assertEvent();
     }
@@ -437,10 +452,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginSuccess() {
         loginPage.open();
-        loginPage.login("login-test", "password");
+        loginPage.login("login-test", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
     }
@@ -450,10 +465,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         ContainerAssume.assumeAuthServerSSL();
 
         loginPage.open();
-        loginPage.login("login-test", "password");
+        loginPage.login("login-test", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
 
@@ -488,10 +503,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginWithWhitespaceSuccess() {
         loginPage.open();
-        loginPage.login(" login-test \t ", "password");
+        loginPage.login(" login-test \t ", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
     }
@@ -499,10 +514,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginWithEmailWhitespaceSuccess() {
         loginPage.open();
-        loginPage.login("    login@test.com    ", "password");
+        loginPage.login("    login@test.com    ", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).assertEvent();
     }
@@ -524,11 +539,12 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
             loginPage.open();
 
-            loginPage.login("login-test", "password");
+            loginPage.login("login-test", getPassword("login-test"));
 
             updatePasswordPage.assertCurrent();
 
-            updatePasswordPage.changePassword("updatedPassword", "updatedPassword");
+            final String newPwd = generatePassword("login-test");
+            updatePasswordPage.changePassword(newPwd, newPwd);
 
             setTimeOffset(0);
 
@@ -543,8 +559,6 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
         } finally {
             setPasswordPolicy(null);
-            UserResource userRsc = adminClient.realm("test").users().get(userId);
-            ApiUtil.resetUserPassword(userRsc, "password", false);
         }
     }
 
@@ -559,10 +573,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
             loginPage.open();
 
-            loginPage.login("login-test", "password");
+            loginPage.login("login-test", getPassword("login-test"));
 
             Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-            Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+            Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
             setTimeOffset(0);
 
@@ -578,7 +592,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
         setTimeOffset(1700);
 
-        loginPage.login("login-test", "password");
+        loginPage.login("login-test", getPassword("login-test"));
 
         setTimeOffset(0);
 
@@ -587,14 +601,13 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
     @Test
     public void loginLoginHint() {
-        String loginFormUrl = oauth.getLoginFormUrl() + "&login_hint=login-test";
-        driver.navigate().to(loginFormUrl);
+        oauth.loginForm().param("login_hint", "login-test").open();
 
         Assert.assertEquals("login-test", loginPage.getUsername());
-        loginPage.login("password");
+        loginPage.login(getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).detail(Details.USERNAME, "login-test").assertEvent();
     }
@@ -602,10 +615,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void loginWithEmailSuccess() {
         loginPage.open();
-        loginPage.login("login@test.com", "password");
+        loginPage.login("login@test.com", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin().user(userId).assertEvent();
     }
@@ -631,10 +644,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
             assertFalse(loginPage.isRememberMeChecked());
             loginPage.setRememberMe(true);
             assertTrue(loginPage.isRememberMeChecked());
-            loginPage.login("login-test", "password");
+            loginPage.login("login-test", getPassword("login-test"));
 
             Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-            Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+            Assert.assertNotNull(oauth.parseLoginResponse().getCode());
             EventRepresentation loginEvent = events.expectLogin().user(userId)
                                                    .detail(Details.USERNAME, "login-test")
                                                    .detail(Details.REMEMBER_ME, "true")
@@ -669,15 +682,15 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
         assertTrue(loginPage.isRememberMeCheckboxPresent());
         loginPage.setRememberMe(true);
-        loginPage.login("login-test", "password");
+        loginPage.login("login-test", getPassword("login-test"));
 
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
         EventRepresentation loginEvent = events.expectLogin().user(userId)
                 .detail(Details.USERNAME, "login-test")
                 .assertEvent();
         // check remember me is not set although it was sent in the form data
-        Assert.assertNull(loginEvent.getDetails().get(Details.REMEMBER_ME));
+        assertNull(loginEvent.getDetails().get(Details.REMEMBER_ME));
     }
 
     //KEYCLOAK-2741
@@ -691,10 +704,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
             assertFalse(loginPage.isRememberMeChecked());
             loginPage.setRememberMe(true);
             assertTrue(loginPage.isRememberMeChecked());
-            loginPage.login("login-test", "password");
+            loginPage.login("login-test", getPassword("login-test"));
 
             Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-            Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+            Assert.assertNotNull(oauth.parseLoginResponse().getCode());
             EventRepresentation loginEvent = events.expectLogin().user(userId)
                                                    .detail(Details.USERNAME, "login-test")
                                                    .detail(Details.REMEMBER_ME, "true")
@@ -711,7 +724,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
             //login without remember me
             loginPage.setRememberMe(false);
-            loginPage.login("login-test", "password");
+            loginPage.login("login-test", getPassword("login-test"));
 
             // Expire session
             loginEvent = events.expectLogin().user(userId)
@@ -738,10 +751,10 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
             loginPage.open();
             loginPage.setRememberMe(true);
             assertTrue(loginPage.isRememberMeChecked());
-            loginPage.login("login@test.com", "password");
+            loginPage.login("login@test.com", getPassword("login-test"));
 
             Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-            Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+            Assert.assertNotNull(oauth.parseLoginResponse().getCode());
             EventRepresentation loginEvent = events.expectLogin().user(userId)
                                                    .detail(Details.USERNAME, "login@test.com")
                                                    .detail(Details.REMEMBER_ME, "true")
@@ -763,6 +776,43 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         }
     }
 
+    @Test
+    public void testLoginAfterDisablingRememberMeInRealmSettings() {
+        setRememberMe(true);
+
+        try {
+            //login with remember me
+            loginPage.open();
+            loginPage.setRememberMe(true);
+            assertTrue(loginPage.isRememberMeChecked());
+            loginPage.login("login@test.com", getPassword("login-test"));
+
+            Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+            Assert.assertNotNull(oauth.parseLoginResponse().getCode());
+            events.expectLogin().user(userId)
+                    .detail(Details.USERNAME, "login@test.com")
+                    .detail(Details.REMEMBER_ME, "true")
+                    .assertEvent();
+
+            AccessTokenResponse response = oauth.accessTokenRequest(oauth.parseLoginResponse().getCode()).send();
+
+            setRememberMe(false);
+
+            //refresh fail
+            response = oauth.refreshRequest(response.getRefreshToken()).send();
+            assertNull(response.getAccessToken());
+            assertNotNull(response.getError());
+            assertEquals("Session not active", response.getErrorDescription());
+
+            // Assert session removed
+            loginPage.open();
+            assertFalse(loginPage.isRememberMeCheckboxPresent());
+            assertNotEquals("login-test", loginPage.getUsername());
+        } finally {
+            setRememberMe(false);
+        }
+    }
+
     // Login timeout scenarios
     // KEYCLOAK-1037
     @Test
@@ -771,7 +821,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         // authSession expired and removed from the storage
         setTimeOffset(5000);
 
-        loginPage.login("login@test.com", "password");
+        loginPage.login("login@test.com", getPassword("login-test"));
         loginPage.assertCurrent();
 
         Assert.assertEquals("Your login attempt timed out. Login will start from the beginning.", loginPage.getError());
@@ -787,7 +837,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         loginPage.open();
         setTimeOffset(5000);
 
-        loginPage.login("login@test.com", "password");
+        loginPage.login("login@test.com", getPassword("login-test"));
 
         loginPage.assertCurrent();
 
@@ -809,7 +859,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
                 .update()) {
 
             loginPage.open();
-            loginPage.login("login@test.com", "password");
+            loginPage.login("login@test.com", getPassword("login-test"));
 
             events.expectLogin().user(userId).assertEvent();
 
@@ -817,7 +867,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
             setTimeOffset(6);
 
             loginPage.open();
-            loginPage.login("login@test.com", "password");
+            loginPage.login("login@test.com", getPassword("login-test"));
 
             events.expectLogin().user(userId).assertEvent();
         }
@@ -831,7 +881,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         driver.manage().deleteAllCookies();
 
         // Cookies are expired including KC_RESTART. No way to continue login. Error page must be shown with the "back to application" link
-        loginPage.login("login@test.com", "password");
+        loginPage.login("login@test.com", getPassword("login-test"));
         errorPage.assertCurrent();
         String link = errorPage.getBackToApplicationLink();
 
@@ -849,7 +899,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
 
         // Cookie has been deleted or disabled, the error shown in the UI should be Errors.COOKIE_NOT_FOUND
-        loginPage.login("login@test.com", "password");
+        loginPage.login("login@test.com", getPassword("login-test"));
 
         events.expect(EventType.LOGIN_ERROR)
                 .user(new UserRepresentation())
@@ -857,6 +907,36 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
                 .assertEvent();
 
         errorPage.assertCurrent();
+    }
+
+    @Test
+    public void loginWithClientDisabledInActiveAuthenticationSession() {
+        ClientResource clientResource = findClientByClientId(adminClient.realm("test"), "test-app");
+        ClientRepresentation clientRepresentation = clientResource.toRepresentation();
+        boolean wasEnabled = clientRepresentation.isEnabled();
+
+        try {
+            oauth.clientId("test-app");
+            oauth.openLoginForm();
+            loginPage.assertCurrent();
+
+            clientRepresentation.setEnabled(false);
+            clientResource.update(clientRepresentation);
+
+            loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
+
+            errorPage.assertCurrent();
+            assertEquals("Login requester not enabled", errorPage.getError());
+            events.expect(EventType.LOGIN)
+                    .client("test-app")
+                    .user((String) null)
+                    .session((String) null)
+                    .error(Errors.CLIENT_DISABLED)
+                    .assertEvent();
+        } finally {
+            clientRepresentation.setEnabled(wasEnabled);
+            clientResource.update(clientRepresentation);
+        }
     }
 
     @Test
@@ -871,7 +951,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         oauth.openLoginForm();
 
         assertTrue(loginPage.isCurrent());
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
         appPage.assertCurrent();
 
         events.expectLogin().detail(Details.USERNAME, "test-user@localhost").assertEvent();
@@ -886,9 +966,9 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         oauth.openLoginForm();
 
         loginPage.assertCurrent();
-        Assert.assertNull("Not expected to have error on loginForm.", loginPage.getError());
+        assertNull("Not expected to have error on loginForm.", loginPage.getError());
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
         appPage.assertCurrent();
 
         events.expectLogin().detail(Details.USERNAME, "test-user@localhost").assertEvent();
@@ -904,7 +984,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         String authSessionId = driver.manage().getCookieNamed(CookieType.AUTH_SESSION_ID.getName()).getValue();
         Assert.assertEquals((Integer) 2, getTestingClient().testing().getAuthenticationSessionTabsCount("test", authSessionId));
 
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
         appPage.assertCurrent();
 
         // authentication session should still exists with remaining browser tab
@@ -930,7 +1010,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
             assertTrue(loginPage.isCurrent());
             loginPage.setRememberMe(true);
-            loginPage.login("test-user@localhost", "password");
+            loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
             // sucessful login - app page should be on display.
             events.expectLogin().detail(Details.USERNAME, "test-user@localhost").assertEvent();
@@ -958,7 +1038,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
 
             assertTrue(loginPage.isCurrent());
             loginPage.setRememberMe(true);
-            loginPage.login("test-user@localhost", "password");
+            loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
 
             // sucessful login - app page should be on display.
             events.expectLogin().detail(Details.USERNAME, "test-user@localhost").assertEvent();
@@ -995,14 +1075,27 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         testApp.addOptionalClientScope(scopeId);
 
         oauth.scope("dynamic:scope");
-        oauth.doLogin("login@test.com", "password");
+        oauth.doLogin("login@test.com", getPassword("login-test"));
         events.expectLogin().user(userId).assertEvent();
+    }
+
+    @Test
+    public void loginSuccessfulWithoutWebAuthn() {
+        testingClient.disableFeature(Profile.Feature.WEB_AUTHN);
+        try {
+            loginPage.open();
+            loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
+            Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+            events.expectLogin().assertEvent();
+        } finally {
+            testingClient.enableFeature(Profile.Feature.WEB_AUTHN);
+        }
     }
 
     @Test
     public void testExecuteActionIfSessionExists() {
         loginPage.open();
-        loginPage.login("test-user@localhost", "password");
+        loginPage.login("test-user@localhost", getPassword("test-user@localhost"));
         Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
         events.expectLogin().assertEvent();
 
@@ -1014,7 +1107,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         try {
             users.get(user.getId()).update(user);
 
-            driver.navigate().to(oauth.getLoginFormUrl());
+            oauth.openLoginForm();
 
             // make sure the authentication session is no longer available
             for (Cookie cookie : driver.manage().getCookies()) {
@@ -1023,7 +1116,7 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
                 }
             }
 
-            driver.navigate().to(oauth.getLoginFormUrl());
+            oauth.openLoginForm();
             configTotpPage.assertCurrent();
         } finally {
             user.setRequiredActions(List.of());
@@ -1031,4 +1124,21 @@ public class LoginTest extends AbstractTestRealmKeycloakTest {
         }
 
     }
+
+    @Test
+    public void testAuthSessionIdCookieFormat(){
+        oauth.openLoginForm();
+        String encodedBase64AuthSessionId = driver.manage().getCookieNamed(CookieType.AUTH_SESSION_ID.getName()).getValue();
+        String decodedAuthSessionId = new String(Base64Url.decode(encodedBase64AuthSessionId), StandardCharsets.UTF_8);
+        Assert.assertTrue(decodedAuthSessionId.contains("."));
+        String authSessionId = decodedAuthSessionId.substring(0, decodedAuthSessionId.indexOf("."));
+        String signature = decodedAuthSessionId.substring(decodedAuthSessionId.indexOf(".") + 1);
+        Assert.assertNotNull(authSessionId);
+        MatcherAssert.assertThat(authSessionId, AssertEvents.isSessionId());
+        Assert.assertNotNull(signature);
+
+        testingClient.server().run(session-> {
+           Assert.assertNotNull(session.authenticationSessions().getRootAuthenticationSession(session.getContext().getRealm(), authSessionId));
+        });
+   }
 }

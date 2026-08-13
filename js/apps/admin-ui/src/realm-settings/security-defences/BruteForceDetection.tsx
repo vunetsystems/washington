@@ -4,6 +4,7 @@ import {
   KeycloakSelect,
   NumberControl,
   SelectVariant,
+  SelectControl,
 } from "@keycloak/keycloak-ui-shared";
 import {
   ActionGroup,
@@ -52,11 +53,13 @@ export const BruteForceDetection = ({
     BruteForceMode.PermanentAfterTemporaryLockout,
   ];
 
+  const bruteForceStrategyTypes = ["MULTIPLE", "LINEAR"];
+
   const setupForm = () => {
     convertToFormValues(realm, setValue);
     setIsBruteForceModeUpdated(false);
   };
-  useEffect(setupForm, []);
+  useEffect(setupForm, [realm]);
 
   const bruteForceMode = (() => {
     if (!form.getValues("bruteForceProtected")) {
@@ -137,7 +140,16 @@ export const BruteForceDetection = ({
               labelIcon={t("failureFactorHelp")}
               controller={{
                 defaultValue: 0,
-                rules: { required: t("required") },
+                rules: { required: t("required"), min: 0 },
+              }}
+            />
+            <NumberControl
+              name="maxSecondaryAuthFailures"
+              label={t("maxSecondaryAuthFailures")}
+              labelIcon={t("maxSecondaryAuthFailuresHelp")}
+              controller={{
+                defaultValue: 100,
+                rules: { required: t("required"), min: 0 },
               }}
             />
             {bruteForceMode ===
@@ -148,6 +160,7 @@ export const BruteForceDetection = ({
                 labelIcon={t("maxTemporaryLockoutsHelp")}
                 controller={{
                   defaultValue: 0,
+                  rules: { min: 0 },
                 }}
               />
             )}
@@ -155,9 +168,21 @@ export const BruteForceDetection = ({
               bruteForceMode ===
                 BruteForceMode.PermanentAfterTemporaryLockout) && (
               <>
-                <Time name="waitIncrementSeconds" />
-                <Time name="maxFailureWaitSeconds" />
-                <Time name="maxDeltaTimeSeconds" />
+                <SelectControl
+                  name="bruteForceStrategy"
+                  label={t("bruteForceStrategy")}
+                  labelIcon={t("bruteForceStrategyHelp", {
+                    failureFactor: form.getValues("failureFactor"),
+                  })}
+                  controller={{ defaultValue: "" }}
+                  options={bruteForceStrategyTypes.map((key) => ({
+                    key,
+                    value: t(`bruteForceStrategy.${key}`),
+                  }))}
+                />
+                <Time name="waitIncrementSeconds" min={0} />
+                <Time name="maxFailureWaitSeconds" min={0} />
+                <Time name="maxDeltaTimeSeconds" min={0} />
               </>
             )}
             <NumberControl
@@ -166,9 +191,10 @@ export const BruteForceDetection = ({
               labelIcon={t("quickLoginCheckMilliSecondsHelp")}
               controller={{
                 defaultValue: 0,
+                rules: { min: 0 },
               }}
             />
-            <Time name="minimumQuickLoginWaitSeconds" />
+            <Time name="minimumQuickLoginWaitSeconds" min={0} />
           </>
         )}
 

@@ -17,22 +17,32 @@
 
 package org.keycloak.testsuite.client;
 
-import org.apache.http.Header;
-import org.apache.http.HeaderElement;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.util.EntityUtils;
-import org.hamcrest.CoreMatchers;
-import org.hamcrest.Matchers;
-import org.junit.Assert;
-import org.junit.Test;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
+
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.client.registration.Auth;
 import org.keycloak.client.registration.ClientRegistration;
 import org.keycloak.client.registration.ClientRegistrationException;
 import org.keycloak.client.registration.HttpErrorException;
+import org.keycloak.common.constants.ServiceAccountConstants;
 import org.keycloak.common.util.CollectionUtil;
 import org.keycloak.events.Errors;
 import org.keycloak.models.Constants;
@@ -45,36 +55,33 @@ import org.keycloak.representations.idm.ClientInitialAccessPresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.OAuth2ErrorRepresentation;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
+import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
+import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.arquillian.annotation.UncaughtServerErrorExpected;
 import org.keycloak.util.JsonSerialization;
 
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.core.Response;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
+import org.apache.http.Header;
+import org.apache.http.HeaderElement;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.util.EntityUtils;
+import org.hamcrest.CoreMatchers;
+import org.hamcrest.Matchers;
+import org.junit.Test;
 
 import static java.util.Arrays.asList;
+
+import static org.keycloak.services.clientregistration.ErrorCodes.INVALID_CLIENT_METADATA;
+import static org.keycloak.services.clientregistration.ErrorCodes.INVALID_REDIRECT_URI;
+import static org.keycloak.utils.MediaType.APPLICATION_JSON;
+
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.notNullValue;
@@ -86,9 +93,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.keycloak.services.clientregistration.ErrorCodes.INVALID_CLIENT_METADATA;
-import static org.keycloak.services.clientregistration.ErrorCodes.INVALID_REDIRECT_URI;
-import static org.keycloak.utils.MediaType.APPLICATION_JSON;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -152,10 +156,30 @@ public class ClientRegistrationTest extends AbstractClientRegistrationTest {
     }
 
     @Test
+    public void updateServiceAccount() throws Exception {
+        authManageClients();
+        ClientRepresentation client = buildClient();
+        final ClientRepresentation createdClient = registerClient(client);
+
+        client = reg.get(CLIENT_ID);
+        assertFalse(client.isServiceAccountsEnabled());
+        assertTrue(adminClient.realm(REALM_NAME).users().search(ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + client.getClientId(), true).isEmpty());
+        client.setServiceAccountsEnabled(true);
+        client = reg.update(client);
+        assertTrue(client.isServiceAccountsEnabled());
+        assertFalse(adminClient.realm(REALM_NAME).users().search(ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + client.getClientId(), true).isEmpty());
+
+        client.setServiceAccountsEnabled(false);
+        client = reg.update(client);
+        assertFalse(client.isServiceAccountsEnabled());
+        assertTrue(adminClient.realm(REALM_NAME).users().search(ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + client.getClientId(), true).isEmpty());
+    }
+
+    @Test
     public void registerClientInMasterRealm() throws Exception {
         ClientRegistration masterReg = ClientRegistration.create().url(suiteContext.getAuthServerInfo().getContextRoot() + "/auth", "master").build();
 
-        String token = oauth.doGrantAccessTokenRequest("master", "admin", "admin", null, Constants.ADMIN_CLI_CLIENT_ID, null).getAccessToken();
+        String token = oauth.realm("master").client(Constants.ADMIN_CLI_CLIENT_ID).doPasswordGrantRequest( "admin", "admin").getAccessToken();
         masterReg.auth(Auth.token(token));
 
         ClientRepresentation client = new ClientRepresentation();
@@ -180,6 +204,22 @@ public class ClientRegistrationTest extends AbstractClientRegistrationTest {
     public void registerClientAsAdminWithCreateOnly() throws ClientRegistrationException {
         authCreateClients();
         registerClient();
+    }
+
+    /**
+     * OID4VC protocol is not valid for clients. It can only be used for ClientScopes.
+     * Attempting to create a client with protocol "oid4vc" should be rejected.
+     */
+    @Test
+    public void registerOid4vcClientShouldBeRejected() {
+        authManageClients();
+
+        ClientRepresentation client = buildClient();
+        client.setProtocol("oid4vc");
+
+        Response response = adminClient.realm(REALM_NAME).clients().create(client);
+        assertEquals("Creating a client with OID4VC protocol should be rejected as it is not a valid protocol for clients.",
+                400, response.getStatus());
     }
 
     @Test
@@ -208,9 +248,7 @@ public class ClientRegistrationTest extends AbstractClientRegistrationTest {
 
         oauth.clientId("myclient");
         String bearerToken = getToken("myclient", "password", "manage-clients", "password");
-        try (CloseableHttpResponse response = oauth.doTokenRevoke(bearerToken, "access_token", "password")) {
-            assertEquals(Response.Status.OK.getStatusCode(), response.getStatusLine().getStatusCode());
-        }
+        assertTrue(oauth.tokenRevocationRequest(bearerToken).accessToken().send().isSuccess());
 
         try {
             reg.auth(Auth.token(bearerToken));
@@ -850,5 +888,40 @@ public class ClientRegistrationTest extends AbstractClientRegistrationTest {
 
         //controls the number of uses of the initial access token
         assertEquals(initialTokenCounts, createdCount.get());
+    }
+
+    @Test
+    public void registerWithLightweightAccessTokenAndTransientSession() throws Exception {
+
+        String TEST_ADMIN_CLIENT = "test-admin-client";
+        ClientRepresentation testAdminClient = new ClientRepresentation();
+        testAdminClient.setClientId(TEST_ADMIN_CLIENT);
+        testAdminClient.setSecret(TEST_ADMIN_CLIENT);
+        testAdminClient.setServiceAccountsEnabled(true);
+        testAdminClient.setAttributes(new HashMap<>());
+        testAdminClient.getAttributes().put(Constants.USE_LIGHTWEIGHT_ACCESS_TOKEN_ENABLED, Boolean.TRUE.toString());
+
+        Response response = adminClient.realm("master").clients().create(testAdminClient);
+        testAdminClient = adminClient.realm("master").clients().get( ApiUtil.getCreatedId(response)).toRepresentation();
+
+        UserRepresentation serviceAccountUser = adminClient.realm("master").clients().get(testAdminClient.getId()).getServiceAccountUser();
+        RoleRepresentation adminRole =  adminClient.realm("master").roles().get("admin").toRepresentation();
+        adminClient.realm("master").users().get(serviceAccountUser.getId()).roles().realmLevel().add(List.of(adminRole));
+
+        oauth.client(TEST_ADMIN_CLIENT, TEST_ADMIN_CLIENT);
+        oauth.realm("master");
+        String token = oauth.doClientCredentialsGrantAccessTokenRequest().getAccessToken();
+        ClientRegistration masterReg = ClientRegistration.create().url(suiteContext.getAuthServerInfo().getContextRoot() + "/auth", "master").build();
+        masterReg.auth(Auth.token(token));
+
+        ClientRepresentation client = new ClientRepresentation();
+        client.setClientId(CLIENT_ID);
+        client.setSecret(CLIENT_SECRET);
+
+        ClientRepresentation createdClient = masterReg.create(client);
+        assertNotNull(createdClient);
+
+        adminClient.realm("master").clients().get(testAdminClient.getId()).remove();
+        adminClient.realm("master").clients().get(createdClient.getId()).remove();
     }
 }

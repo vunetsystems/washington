@@ -17,20 +17,10 @@
 
 package org.keycloak.testsuite.organization.cache;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.keycloak.models.cache.infinispan.idp.InfinispanIdentityProviderStorageProvider.cacheKeyForLogin;
-import static org.keycloak.models.cache.infinispan.idp.InfinispanIdentityProviderStorageProvider.cacheKeyOrgId;
-import static org.keycloak.models.cache.infinispan.organization.InfinispanOrganizationProvider.cacheKeyOrgMemberCount;
-
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Stream;
 
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
 import org.keycloak.models.IdentityProviderStorageProvider;
 import org.keycloak.models.IdentityProviderStorageProvider.FetchMode;
 import org.keycloak.models.OrganizationDomainModel;
@@ -38,8 +28,8 @@ import org.keycloak.models.OrganizationModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.cache.CacheRealmProvider;
-import org.keycloak.models.cache.infinispan.RealmCacheSession;
 import org.keycloak.models.cache.infinispan.CachedCount;
+import org.keycloak.models.cache.infinispan.RealmCacheSession;
 import org.keycloak.models.cache.infinispan.idp.IdentityProviderListQuery;
 import org.keycloak.organization.OrganizationProvider;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
@@ -48,6 +38,18 @@ import org.keycloak.representations.idm.OrganizationRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.organization.admin.AbstractOrganizationTest;
 import org.keycloak.testsuite.runonserver.RunOnServer;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import static org.keycloak.models.cache.infinispan.idp.InfinispanIdentityProviderStorageProvider.cacheKeyForLogin;
+import static org.keycloak.models.cache.infinispan.idp.InfinispanIdentityProviderStorageProvider.cacheKeyOrgId;
+import static org.keycloak.models.cache.infinispan.organization.InfinispanOrganizationProvider.cacheKeyOrgMemberCount;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 public class OrganizationCacheTest extends AbstractOrganizationTest {
 
@@ -290,18 +292,18 @@ public class OrganizationCacheTest extends AbstractOrganizationTest {
         IdentityProviderRepresentation idpRep = testRealm().identityProviders().get("orga-identity-provider").toRepresentation();
         idpRep.setInternalId(null);
         idpRep.setOrganizationId(null);
+        idpRep.setHideOnLogin(false);
         idpRep.getConfig().remove(OrganizationModel.ORGANIZATION_DOMAIN_ATTRIBUTE);
-        idpRep.getConfig().put(OrganizationModel.BROKER_PUBLIC, Boolean.TRUE.toString());
 
         for (int i = 0; i < 10; i++) {
             final String alias = "org-idp-" + i;
             idpRep.setAlias(alias);
             testRealm().identityProviders().create(idpRep).close();
-            getCleanup().addCleanup(testRealm().identityProviders().get("alias")::remove);
+            getCleanup().addCleanup(testRealm().identityProviders().get(alias)::remove);
         }
 
-        String orgaId = testRealm().organizations().getAll().get(0).getId();
-        String orgbId = testRealm().organizations().getAll().get(1).getId();
+        String orgaId = testRealm().organizations().list(-1, -1).get(0).getId();
+        String orgbId = testRealm().organizations().list(-1, -1).get(1).getId();
 
         for (int i = 0; i < 5; i++) {
             final String aliasA = "org-idp-" + i;
@@ -367,18 +369,17 @@ public class OrganizationCacheTest extends AbstractOrganizationTest {
     public void testCacheIDPForLogin() {
         // create 20 providers, and associate 10 of them with an organization.
         for (int i = 0; i < 20; i++) {
+            final String alias = "idp-alias-" + i;
             IdentityProviderRepresentation idpRep = new IdentityProviderRepresentation();
-            idpRep.setAlias("idp-alias-" + i);
+            idpRep.setAlias(alias);
             idpRep.setEnabled((i % 2) == 0); // half of the IDPs will be disabled and won't qualify for login.
             idpRep.setDisplayName("Broker " + i);
             idpRep.setProviderId("keycloak-oidc");
-            if (i >= 10)
-                idpRep.getConfig().put(OrganizationModel.BROKER_PUBLIC, Boolean.TRUE.toString());
             testRealm().identityProviders().create(idpRep).close();
-            getCleanup().addCleanup(testRealm().identityProviders().get("alias")::remove);
+            getCleanup().addCleanup(testRealm().identityProviders().get(alias)::remove);
         }
 
-        String orgaId = testRealm().organizations().getAll().get(0).getId();
+        String orgaId = testRealm().organizations().list(-1, -1).get(0).getId();
         for (int i = 10; i < 20; i++) {
             testRealm().organizations().get(orgaId).identityProviders().addIdentityProvider("idp-alias-" + i);
         }
@@ -497,7 +498,6 @@ public class OrganizationCacheTest extends AbstractOrganizationTest {
         // 4- finally, change one of the realm-level login IDPs, linking it to an org - although it still qualifies for login, it is now
         // linked to an org, which should invalidate all login caches.
         idpRep = testRealm().identityProviders().get("idp-alias-20").toRepresentation();
-        idpRep.getConfig().put(OrganizationModel.BROKER_PUBLIC, Boolean.TRUE.toString());
         testRealm().identityProviders().get("idp-alias-20").update(idpRep);
         testRealm().organizations().get(orgaId).identityProviders().addIdentityProvider("idp-alias-20");
 
@@ -528,6 +528,52 @@ public class OrganizationCacheTest extends AbstractOrganizationTest {
             assertNotNull(identityProviderListQuery);
             assertEquals(11, identityProviderListQuery.getIDPs(orgaId).size());
 
+        });
+    }
+
+    @Test
+    public void testGetByDomainCaseInsensitiveAndStaleCacheHandling() {
+        final String domainLower = "case.org";
+        final String domainMixed = "CaSe.Org";
+
+        // 1. Create org with lowercase domain
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel org = orgProvider.create(null, "case-org", "case-org");
+            org.setDomains(Set.of(new OrganizationDomainModel(domainLower)));
+        });
+
+        // 2. Look up by mixed-case domain (simulates login with user@CaSe.Org) to populate the cache
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel org = orgProvider.getByDomainName(domainMixed);
+            assertNotNull("Mixed-case domain lookup should find the organization", org);
+        });
+
+        // 3. Delete the org
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel org = orgProvider.getByDomainName(domainLower);
+            assertNotNull(org);
+            orgProvider.remove(org);
+        });
+
+        // 4. Recreate the org with the same domain
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel org = orgProvider.create(null, "case-org", "case-org");
+            org.setDomains(Set.of(new OrganizationDomainModel(domainLower)));
+        });
+
+        // 5. Look up by mixed-case again (simulates login with user@CaSe.Org after org recreation).
+        // Without the fix, the stale cache entry from step 2 (stored under the mixed-case key)
+        // was not invalidated in step 3 (invalidation only targets the lowercase key), so it
+        // still points to the old deleted org ID. getById returns null for that ID, and
+        // findAny() on a null element throws NPE.
+        getTestingClient().server(TEST_REALM_NAME).run((RunOnServer) session -> {
+            OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
+            OrganizationModel org = orgProvider.getByDomainName(domainMixed);
+            assertNotNull("Mixed-case domain lookup should find the recreated organization", org);
         });
     }
 }

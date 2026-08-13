@@ -175,8 +175,11 @@ export default function NewClientPolicy() {
 
   const save = async () => {
     const createdForm = form.getValues();
+    const existingPolicy = policies?.find((p) => p.name === policyName);
     const createdPolicy = {
       ...createdForm,
+      conditions: existingPolicy?.conditions ?? [],
+      profiles: existingPolicy?.profiles ?? [],
     };
 
     const getAllPolicies = () => {
@@ -188,17 +191,18 @@ export default function NewClientPolicy() {
         return policies?.map((policy) =>
           policy.name === createdPolicy.name ? createdPolicy : policy,
         );
-      } else if (createdForm.name !== policyName) {
+      } else if (createdPolicy.name !== policyName) {
         return policies
           ?.filter((item) => item.name !== policyName)
-          .concat(createdForm);
+          .concat(createdPolicy);
       }
-      return policies?.concat(createdForm);
+      return policies?.concat(createdPolicy);
     };
 
     try {
+      const updatedPolicies = getAllPolicies();
       await adminClient.clientPolicies.updatePolicy({
-        policies: getAllPolicies(),
+        policies: updatedPolicies,
       });
       addAlert(
         policyName
@@ -206,7 +210,10 @@ export default function NewClientPolicy() {
           : t("createClientPolicySuccess"),
         AlertVariant.success,
       );
-      navigate(toEditClientPolicy({ realm, policyName: createdForm.name! }));
+      setPolicies(updatedPolicies ?? []);
+      setAllPolicies([...(globalPolicies ?? []), ...(updatedPolicies ?? [])]);
+      setCurrentPolicy(createdPolicy);
+      navigate(toEditClientPolicy({ realm, policyName: createdPolicy.name! }));
       setShowAddConditionsAndProfilesForm(true);
     } catch (error) {
       addError("createClientPolicyError", error);
@@ -386,9 +393,9 @@ export default function NewClientPolicy() {
     titleKey: "disablePolicyConfirmTitle",
     messageKey: "disablePolicyConfirm",
     continueButtonLabel: "disable",
-    onConfirm: () => {
+    onConfirm: async () => {
       form.setValue("enabled", !form.getValues().enabled);
-      save();
+      await save();
     },
   });
 
@@ -401,8 +408,8 @@ export default function NewClientPolicy() {
       <DeleteConditionConfirm />
       <DeleteProfileConfirm />
       <AddClientProfileModal
-        onConfirm={(profiles: ClientProfileRepresentation[]) => {
-          addProfiles(profiles.map((item) => item.name!));
+        onConfirm={async (profiles: ClientProfileRepresentation[]) => {
+          await addProfiles(profiles.map((item) => item.name!));
         }}
         allProfiles={policyProfiles}
         open={profilesModalOpen}
@@ -452,12 +459,12 @@ export default function NewClientPolicy() {
               }
               isReadOnly={isGlobalPolicy}
               isEnabled={field.value}
-              onToggle={(value) => {
+              onToggle={async (value) => {
                 if (!value) {
                   toggleDisableDialog();
                 } else {
                   field.onChange(value);
-                  save();
+                  await save();
                 }
               }}
             />
@@ -476,10 +483,13 @@ export default function NewClientPolicy() {
               name="name"
               label={t("name")}
               rules={{
-                required: { value: true, message: t("required") },
+                required: t("required"),
                 validate: (value) =>
-                  policies.some((policy) => policy.name === value)
-                    ? t("createClientProfileNameHelperText").toString()
+                  policies.some(
+                    (policy) =>
+                      policy.name === value && policy.name !== policyName,
+                  )
+                    ? t("createClientProfileNameHelperText")
                     : true,
               }}
             />
@@ -632,6 +642,7 @@ export default function NewClientPolicy() {
                   <>
                     <Divider />
                     <Text
+                      data-testid="no-conditions"
                       className="kc-emptyConditions"
                       component={TextVariants.h2}
                     >

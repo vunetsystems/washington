@@ -17,6 +17,9 @@
 
 package org.keycloak.events.admin;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
@@ -25,7 +28,7 @@ public class AdminEvent {
     private String id;
 
     private long time;
-    
+
     private String realmId;
 
     private String realmName;
@@ -44,7 +47,9 @@ public class AdminEvent {
     private String representation;
 
     private String error;
-    
+
+    private Map<String, String> details;
+
     public AdminEvent() {}
     public AdminEvent(AdminEvent toCopy) {
         this.id = toCopy.getId();
@@ -57,6 +62,18 @@ public class AdminEvent {
         this.resourcePath = toCopy.getResourcePath();
         this.representation = toCopy.getRepresentation();
         this.error = toCopy.getError();
+        this.details = toCopy.getDetails() == null ? null : new HashMap<>(toCopy.getDetails());
+    }
+
+    public String getResourceId() {
+        if (this.resourcePath != null) {
+            int slashIndex = this.resourcePath.lastIndexOf("/");
+            if (slashIndex < this.resourcePath.length() - 1) {
+                // return the id that is found after the last slash
+                return this.resourcePath.substring(slashIndex + 1);
+            }
+        }
+        return null;
     }
 
     /**
@@ -84,7 +101,7 @@ public class AdminEvent {
     public void setTime(long time) {
         this.time = time;
     }
-    
+
     /**
      * Returns the id of the realm
      *
@@ -215,5 +232,13 @@ public class AdminEvent {
      */
     public void setResourceTypeAsString(String resourceType) {
         this.resourceType = resourceType;
+    }
+
+    public Map<String, String> getDetails() {
+        return details;
+    }
+
+    public void setDetails(Map<String, String> details) {
+        this.details = details;
     }
 }

@@ -16,14 +16,24 @@
  */
 package org.keycloak.protocol.oidc.grants.ciba.endpoints;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.NoCache;
-import org.keycloak.http.HttpRequest;
+import java.util.Collections;
+import java.util.Optional;
+import java.util.regex.Pattern;
+
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
+import org.keycloak.events.Details;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.models.CibaConfig;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
@@ -45,17 +55,9 @@ import org.keycloak.services.ErrorResponseException;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
 import org.keycloak.util.JsonSerialization;
 
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.MultivaluedMap;
-import jakarta.ws.rs.core.Response;
-
-import java.util.Collections;
-import java.util.Optional;
-import java.util.regex.Pattern;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.NoCache;
 
 import static org.keycloak.protocol.oidc.OIDCLoginProtocol.ID_TOKEN_HINT;
 import static org.keycloak.protocol.oidc.OIDCLoginProtocol.LOGIN_HINT_PARAM;
@@ -179,7 +181,7 @@ public class BackchannelAuthenticationEndpoint extends AbstractCibaEndpoint {
                     Response.Status.BAD_REQUEST);
         }
         if (!TokenManager.isValidScope(session, scope, client, user)) {
-            throw new ErrorResponseException(OAuthErrorException.INVALID_REQUEST, "Invalid scopes: " + scope,
+            throw new ErrorResponseException(OAuthErrorException.INVALID_SCOPE, "Invalid scopes: " + scope,
                     Response.Status.BAD_REQUEST);
         }
         request.setScope(scope);
@@ -232,6 +234,10 @@ public class BackchannelAuthenticationEndpoint extends AbstractCibaEndpoint {
         try {
             session.clientPolicy().triggerOnEvent(new BackchannelAuthenticationRequestContext(endpointRequest, request, params));
         } catch (ClientPolicyException cpe) {
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
+            event.error(cpe.getError());
             throw new ErrorResponseException(cpe.getError(), cpe.getErrorDetail(), Response.Status.BAD_REQUEST);
         }
 

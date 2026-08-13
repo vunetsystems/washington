@@ -20,6 +20,7 @@ package org.keycloak.it.junit5.extension;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+
 import org.keycloak.it.utils.KeycloakDistribution;
 
 public class KeycloakDistributionDecorator implements KeycloakDistribution {
@@ -40,9 +41,8 @@ public class KeycloakDistributionDecorator implements KeycloakDistribution {
     @Override
     public CLIResult run(List<String> rawArgs) {
         List<String> args = new ArrayList<>(rawArgs);
-
         args.addAll(List.of(config.defaultOptions()));
-
+        setEnvVar("KC_SHUTDOWN_DELAY", "0s");
         return delegate.run(new ServerOptions(storageConfig, databaseConfig, args));
     }
 
@@ -122,11 +122,6 @@ public class KeycloakDistributionDecorator implements KeycloakDistribution {
     }
 
     @Override
-    public void assertStopped() {
-        delegate.assertStopped();
-    }
-
-    @Override
     public void setRequestPort() {
         delegate.setRequestPort();
     }
@@ -143,9 +138,15 @@ public class KeycloakDistributionDecorator implements KeycloakDistribution {
         }
 
         if (type.isInstance(delegate)) {
+            //noinspection unchecked
             return (D) delegate;
         }
 
         throw new IllegalArgumentException("Not a " + type + " type");
+    }
+
+    @Override
+    public void clearEnv() {
+        delegate.clearEnv();
     }
 }

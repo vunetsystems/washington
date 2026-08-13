@@ -82,7 +82,7 @@ import io.quarkiverse.operatorsdk.annotations.SharedCSVMetadata;
             """
                 [
                   {
-                    "apiVersion": "k8s.keycloak.org/v2alpha1",
+                    "apiVersion": "k8s.keycloak.org/v2beta1",
                     "kind": "Keycloak",
                     "metadata": {
                       "name": "example-keycloak",
@@ -101,7 +101,7 @@ import io.quarkiverse.operatorsdk.annotations.SharedCSVMetadata;
                     }
                   },
                   {
-                    "apiVersion": "k8s.keycloak.org/v2alpha1",
+                    "apiVersion": "k8s.keycloak.org/v2beta1",
                     "kind": "KeycloakRealmImport",
                     "metadata": {
                       "name": "example-keycloak-realm-import",
@@ -141,7 +141,12 @@ import io.quarkiverse.operatorsdk.annotations.SharedCSVMetadata;
     icon = @CSVMetadata.Icon(
         fileName = "KeycloakController.icon.png",
         mediatype = "image/png"
-    )
+    ),
+    labels = {
+        @CSVMetadata.Label(name = "operatorframework.io/arch.amd64", value = "supported"),
+        @CSVMetadata.Label(name = "operatorframework.io/arch.arm64", value = "supported"),
+        @CSVMetadata.Label(name = "operatorframework.io/arch.ppc64le", value = "supported")
+    }
 )
 public class KeycloakSharedCsvMetadata implements SharedCSVMetadata {
 }

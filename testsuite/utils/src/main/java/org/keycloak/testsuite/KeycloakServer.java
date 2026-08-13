@@ -16,55 +16,6 @@
  */
 package org.keycloak.testsuite;
 
-import io.undertow.Undertow;
-import io.undertow.Undertow.Builder;
-import io.undertow.servlet.Servlets;
-import io.undertow.servlet.api.DefaultServletConfig;
-import io.undertow.servlet.api.DeploymentInfo;
-import io.undertow.servlet.api.FilterInfo;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.core.ResteasyDeploymentImpl;
-import org.jboss.resteasy.plugins.server.servlet.ResteasyContextParameters;
-import org.jboss.resteasy.plugins.server.undertow.UndertowJaxrsServer;
-import org.jboss.resteasy.spi.ResteasyDeployment;
-import org.keycloak.authentication.AuthenticatorSpi;
-import org.keycloak.authentication.authenticators.browser.DeployedScriptAuthenticatorFactory;
-import org.keycloak.authorization.policy.provider.PolicySpi;
-import org.keycloak.authorization.policy.provider.js.DeployedScriptPolicyFactory;
-import org.keycloak.common.Version;
-import org.keycloak.common.util.StreamUtil;
-import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.models.RealmModel;
-import org.keycloak.platform.Platform;
-import org.keycloak.protocol.ProtocolMapperSpi;
-import org.keycloak.protocol.oidc.mappers.DeployedScriptOIDCProtocolMapper;
-import org.keycloak.protocol.saml.mappers.DeployedScriptSAMLProtocolMapper;
-import org.keycloak.provider.KeycloakDeploymentInfo;
-import org.keycloak.provider.ProviderFactory;
-import org.keycloak.provider.ProviderManager;
-import org.keycloak.provider.Spi;
-import org.keycloak.representations.idm.RealmRepresentation;
-import org.keycloak.representations.provider.ScriptProviderDescriptor;
-import org.keycloak.representations.provider.ScriptProviderMetadata;
-import org.keycloak.services.DefaultKeycloakSessionFactory;
-import org.keycloak.services.managers.ApplianceBootstrap;
-import org.keycloak.services.managers.RealmManager;
-import org.keycloak.services.resources.KeycloakApplication;
-import org.keycloak.services.resteasy.ResteasyKeycloakApplication;
-import org.keycloak.testsuite.util.cli.TestsuiteCLI;
-import org.keycloak.util.JsonSerialization;
-import io.undertow.servlet.api.InstanceHandle;
-import org.xnio.Options;
-import org.xnio.SslClientAuthMode;
-
-import javax.net.ssl.KeyManager;
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
-import jakarta.servlet.DispatcherType;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -83,7 +34,57 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.stream.Stream;
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.Filter;
+
+import org.keycloak.authentication.AuthenticatorSpi;
+import org.keycloak.authentication.authenticators.browser.DeployedScriptAuthenticatorFactory;
+import org.keycloak.authorization.policy.provider.PolicySpi;
+import org.keycloak.authorization.policy.provider.js.DeployedScriptPolicyFactory;
+import org.keycloak.common.Version;
+import org.keycloak.common.util.StreamUtil;
+import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.RealmModel;
+import org.keycloak.protocol.ProtocolMapperSpi;
+import org.keycloak.protocol.oidc.mappers.DeployedScriptOIDCProtocolMapper;
+import org.keycloak.protocol.saml.mappers.DeployedScriptSAMLProtocolMapper;
+import org.keycloak.provider.KeycloakDeploymentInfo;
+import org.keycloak.provider.ProviderFactory;
+import org.keycloak.provider.ProviderManager;
+import org.keycloak.provider.Spi;
+import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.provider.ScriptProviderDescriptor;
+import org.keycloak.representations.provider.ScriptProviderMetadata;
+import org.keycloak.services.DefaultKeycloakSessionFactory;
+import org.keycloak.services.managers.ApplianceBootstrap;
+import org.keycloak.services.managers.RealmManager;
+import org.keycloak.services.resources.KeycloakApplication;
+import org.keycloak.services.resteasy.ResteasyKeycloakApplication;
+import org.keycloak.testsuite.util.cli.TestsuiteCLI;
+import org.keycloak.util.JsonSerialization;
+
+import io.undertow.Undertow;
+import io.undertow.Undertow.Builder;
+import io.undertow.servlet.Servlets;
+import io.undertow.servlet.api.DefaultServletConfig;
+import io.undertow.servlet.api.DeploymentInfo;
+import io.undertow.servlet.api.FilterInfo;
+import io.undertow.servlet.api.InstanceHandle;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.core.ResteasyDeploymentImpl;
+import org.jboss.resteasy.plugins.server.servlet.ResteasyContextParameters;
+import org.jboss.resteasy.plugins.server.undertow.UndertowJaxrsServer;
+import org.jboss.resteasy.spi.ResteasyDeployment;
+import org.xnio.Options;
+import org.xnio.SslClientAuthMode;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -321,7 +322,7 @@ public class KeycloakServer {
 
         // we generate a dynamic jboss.server.data.dir and remove it at the end.
         try {
-          File tempKeycloakFolder = Platform.getPlatform().getTmpDirectory();
+          String tempKeycloakFolder = KeycloakApplication.getTmpDirectory();
           File tmpDataDir = new File(tempKeycloakFolder, "/data");
 
           if (tmpDataDir.mkdirs()) {
@@ -397,7 +398,7 @@ public class KeycloakServer {
             try (KeycloakSession session = sessionFactory.create()) {
                 session.getTransactionManager().begin();
                 if (new ApplianceBootstrap(session).isNoMasterUser()) {
-                    new ApplianceBootstrap(session).createMasterRealmUser("admin", "admin");
+                    new ApplianceBootstrap(session).createMasterRealmUser("admin", "admin", true);
                     log.info("Created master user with credentials admin:admin");
                 }
             }

@@ -1,17 +1,5 @@
 package org.keycloak.common;
 
-import org.hamcrest.MatcherAssert;
-import org.hamcrest.Matchers;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.keycloak.common.profile.CommaSeparatedListProfileConfigResolver;
-import org.keycloak.common.profile.ProfileException;
-import org.keycloak.common.profile.PropertiesProfileConfigResolver;
-
 import java.security.Provider;
 import java.security.Security;
 import java.util.AbstractMap;
@@ -23,15 +11,28 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
+import org.keycloak.common.profile.CommaSeparatedListProfileConfigResolver;
+import org.keycloak.common.profile.ProfileException;
+import org.keycloak.common.profile.PropertiesProfileConfigResolver;
+
+import org.hamcrest.MatcherAssert;
+import org.hamcrest.Matchers;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.BeforeClass;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+
 import static org.junit.Assert.assertThrows;
 
 public class ProfileTest {
 
-    private static final Profile.Feature DEFAULT_FEATURE = Profile.Feature.AUTHORIZATION;
+    private static final Profile.Feature DEFAULT_FEATURE = Profile.Feature.CLIENT_POLICIES;
     private static final Profile.Feature DISABLED_BY_DEFAULT_FEATURE = Profile.Feature.DOCKER;
-    private static final Profile.Feature PREVIEW_FEATURE = Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ;
+    private static final Profile.Feature PREVIEW_FEATURE = Profile.Feature.TOKEN_EXCHANGE;
     private static final Profile.Feature EXPERIMENTAL_FEATURE = Profile.Feature.DYNAMIC_SCOPES;
-    private static Profile.Feature DEPRECATED_FEATURE = Profile.Feature.LOGIN1;
+    private static Profile.Feature DEPRECATED_FEATURE = Profile.Feature.LOGIN_V1;
 
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
@@ -65,11 +66,19 @@ public class ProfileTest {
         Profile profile = Profile.defaults();
 
         Assert.assertTrue(Profile.isFeatureEnabled(DEFAULT_FEATURE));
+        Assert.assertFalse(DEFAULT_FEATURE.isDeprecated());
+        MatcherAssert.assertThat(profile.getPreviewFeatures(), Matchers.not(Matchers.hasItem(DEFAULT_FEATURE)));
         Assert.assertFalse(Profile.isFeatureEnabled(DISABLED_BY_DEFAULT_FEATURE));
+        Assert.assertFalse(DISABLED_BY_DEFAULT_FEATURE.isDeprecated());
+        MatcherAssert.assertThat(profile.getPreviewFeatures(), Matchers.not(Matchers.hasItem(DISABLED_BY_DEFAULT_FEATURE)));
         Assert.assertFalse(Profile.isFeatureEnabled(PREVIEW_FEATURE));
         Assert.assertFalse(Profile.isFeatureEnabled(EXPERIMENTAL_FEATURE));
+        Assert.assertFalse(EXPERIMENTAL_FEATURE.isDeprecated());
+        MatcherAssert.assertThat(profile.getPreviewFeatures(), Matchers.not(Matchers.hasItem(EXPERIMENTAL_FEATURE)));
         if (DEPRECATED_FEATURE != null) {
             Assert.assertFalse(Profile.isFeatureEnabled(DEPRECATED_FEATURE));
+            MatcherAssert.assertThat(profile.getDeprecatedFeatures(), Matchers.hasItem(DEPRECATED_FEATURE));
+            Assert.assertTrue(DEPRECATED_FEATURE.isDeprecated());
         } else {
             MatcherAssert.assertThat(profile.getDeprecatedFeatures(), Matchers.empty());
         }
@@ -78,6 +87,8 @@ public class ProfileTest {
 
         MatcherAssert.assertThat(profile.getDisabledFeatures(), Matchers.hasItem(DISABLED_BY_DEFAULT_FEATURE));
         MatcherAssert.assertThat(profile.getPreviewFeatures(), Matchers.hasItem(PREVIEW_FEATURE));
+        Assert.assertTrue(Profile.Feature.TOKEN_EXCHANGE.isDeprecated());
+        Assert.assertEquals(Profile.Feature.Type.PREVIEW, Profile.Feature.TOKEN_EXCHANGE.getType());
     }
 
     @Test
@@ -85,7 +96,7 @@ public class ProfileTest {
         Properties properties = new Properties();
         properties.setProperty("keycloak.profile.feature.account_api", "disabled");
 
-        Assert.assertEquals("Feature account3 depends on disabled feature account-api",
+        Assert.assertEquals("Feature account-v3 depends on disabled feature account-api",
                 assertThrows(ProfileException.class,
                         () -> Profile.configure(new PropertiesProfileConfigResolver(properties))).getMessage());
     }
@@ -93,10 +104,10 @@ public class ProfileTest {
     @Test
     public void checkSuccessIfFeatureDisabledWithDisabledDependencies() {
         Properties properties = new Properties();
-        properties.setProperty("keycloak.profile.feature.account3", "disabled");
+        properties.setProperty("keycloak.profile.feature.account", "disabled");
         properties.setProperty("keycloak.profile.feature.account_api", "disabled");
         Profile.configure(new PropertiesProfileConfigResolver(properties));
-                Assert.assertFalse(Profile.isFeatureEnabled(Profile.Feature.ACCOUNT3));
+                Assert.assertFalse(Profile.isFeatureEnabled(Profile.Feature.ACCOUNT_V3));
         Assert.assertFalse(Profile.isFeatureEnabled(Profile.Feature.ACCOUNT_API));
     }
 
@@ -159,9 +170,9 @@ public class ProfileTest {
 
     @Test
     public void testKeys() {
-        Assert.assertEquals("account3", Profile.Feature.ACCOUNT3.getKey());
-        Assert.assertEquals("account3", Profile.Feature.ACCOUNT3.getUnversionedKey());
-        Assert.assertEquals("account3:v1", Profile.Feature.ACCOUNT3.getVersionedKey());
+        Assert.assertEquals("account-v3", Profile.Feature.ACCOUNT_V3.getKey());
+        Assert.assertEquals("account", Profile.Feature.ACCOUNT_V3.getUnversionedKey());
+        Assert.assertEquals("account:v3", Profile.Feature.ACCOUNT_V3.getVersionedKey());
     }
 
     @Test
@@ -213,7 +224,7 @@ public class ProfileTest {
         properties.setProperty(PropertiesProfileConfigResolver.getPropertyKey(PREVIEW_FEATURE), "enabled");
         properties.setProperty(PropertiesProfileConfigResolver.getPropertyKey(EXPERIMENTAL_FEATURE), "enabled");
         if (DEPRECATED_FEATURE != null) {
-            properties.setProperty(PropertiesProfileConfigResolver.getPropertyKey(DEPRECATED_FEATURE), "enabled");
+            properties.setProperty(PropertiesProfileConfigResolver.getPropertyKey(DEPRECATED_FEATURE.getVersionedKey()), "enabled");
         }
 
         Profile.configure(new PropertiesProfileConfigResolver(properties));

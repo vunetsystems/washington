@@ -19,18 +19,12 @@ package org.keycloak.testsuite.federation.ldap.noimport;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
-import java.util.Map;
 
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.FixMethodOrder;
-import org.junit.Ignore;
-import org.junit.Test;
-import org.junit.runners.MethodSorters;
 import org.keycloak.admin.client.resource.ComponentResource;
 import org.keycloak.admin.client.resource.UserProfileResource;
 import org.keycloak.admin.client.resource.UserResource;
@@ -38,9 +32,11 @@ import org.keycloak.component.ComponentModel;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserModel.RequiredAction;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.representations.idm.ComponentRepresentation;
+import org.keycloak.representations.idm.ErrorRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.StorageId;
 import org.keycloak.storage.UserStorageProvider;
@@ -53,8 +49,17 @@ import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.federation.ldap.LDAPProvidersIntegrationTest;
 import org.keycloak.testsuite.federation.ldap.LDAPTestAsserts;
 import org.keycloak.testsuite.federation.ldap.LDAPTestContext;
-import org.keycloak.testsuite.forms.VerifyProfileTest;
 import org.keycloak.testsuite.util.LDAPTestUtils;
+import org.keycloak.testsuite.util.userprofile.UserProfileUtil;
+
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.FixMethodOrder;
+import org.junit.Ignore;
+import org.junit.Test;
+import org.junit.runners.MethodSorters;
+
+import static org.junit.Assert.fail;
 
 
 /**
@@ -72,7 +77,7 @@ public class LDAPProvidersIntegrationNoImportTest extends LDAPProvidersIntegrati
     @Before
     public void enableUserProfileUnmanagedAttributes() {
         UserProfileResource userProfileRes = testRealm().users().userProfile();
-        VerifyProfileTest.enableUnmanagedAttributes(userProfileRes);
+        UserProfileUtil.enableUnmanagedAttributes(userProfileRes);
     }
 
 
@@ -350,6 +355,7 @@ public class LDAPProvidersIntegrationNoImportTest extends LDAPProvidersIntegrati
             Assert.assertEquals("654321", johnRep.getAttributes().get("postal_code").get(0));
         } finally {
             // Revert
+            johnRep = john.toRepresentation();
             johnRep.setFirstName(firstNameOrig);
             johnRep.setLastName(lastNameOrig);
             johnRep.singleAttribute("postal_code", postalCodeOrig);
@@ -358,6 +364,20 @@ public class LDAPProvidersIntegrationNoImportTest extends LDAPProvidersIntegrati
             Assert.assertEquals(lastNameOrig, johnRep.getLastName());
             Assert.assertEquals(emailOrig, johnRep.getEmail());
             Assert.assertEquals(postalCodeOrig, johnRep.getAttributes().get("postal_code").get(0));
+        }
+    }
+
+    @Test
+    public void testCannotUpdateReadOnlyUserImportDisabled() {
+        UserResource user = ApiUtil.findUserByUsernameId(testRealm(), "johnkeycloak");
+
+        try {
+            UserRepresentation rep = user.toRepresentation();
+            rep.setRequiredActions(List.of(RequiredAction.VERIFY_EMAIL.name()));
+            user.update(rep);
+            fail("Should fail as the user is read-only");
+        } catch (BadRequestException bde) {
+            Assert.assertEquals("The user is read-only. Not possible to write 'required action VERIFY_EMAIL' when updating user 'johnkeycloak'.", bde.getResponse().readEntity(ErrorRepresentation.class).getErrorMessage());
         }
     }
 

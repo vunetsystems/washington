@@ -17,15 +17,10 @@
 
 package org.keycloak.testsuite.organization.authz;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
-import static org.junit.Assert.fail;
-
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.Response.Status;
-import org.hamcrest.Matchers;
-import org.junit.Test;
+
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.models.AdminRoles;
@@ -38,6 +33,13 @@ import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.organization.admin.AbstractOrganizationTest;
 import org.keycloak.testsuite.util.AdminClientUtil;
 import org.keycloak.testsuite.util.UserBuilder;
+
+import org.hamcrest.Matchers;
+import org.junit.Test;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.fail;
 
 public class OrganizationAdminPermissionsTest extends AbstractOrganizationTest {
 
@@ -160,14 +162,14 @@ public class OrganizationAdminPermissionsTest extends AbstractOrganizationTest {
             //get members
             try {
                 //we should get 403, not 400 or 404 etc.
-                realmUserResource.organizations().get("non-existing").members().getAll();
+                realmUserResource.organizations().get("non-existing").members().list(-1, -1);
                 fail("Expected ForbiddenException");
             } catch (ForbiddenException expected) {}
             try {
-                realmUserResource.organizations().get(orgId).members().getAll();
+                realmUserResource.organizations().get(orgId).members().list(-1, -1);
                 fail("Expected ForbiddenException");
             } catch (ForbiddenException expected) {}
-            assertThat(realmAdminResource.organizations().get(orgId).members().getAll(), Matchers.notNullValue());
+            assertThat(realmAdminResource.organizations().get(orgId).members().list(-1, -1), Matchers.notNullValue());
 
             //get member
             try {

@@ -1,44 +1,100 @@
 package org.keycloak.quarkus.runtime.configuration.mappers;
 
-import io.smallrye.config.ConfigSourceInterceptorContext;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
+
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.List;
+import java.util.Optional;
+
+import org.keycloak.common.Profile;
 import org.keycloak.common.crypto.FipsMode;
 import org.keycloak.config.HttpOptions;
+import org.keycloak.config.OptionsUtil;
 import org.keycloak.config.SecurityOptions;
 import org.keycloak.quarkus.runtime.Environment;
 import org.keycloak.quarkus.runtime.Messages;
+import org.keycloak.quarkus.runtime.cli.ExecutionExceptionHandler;
+import org.keycloak.quarkus.runtime.cli.Picocli;
 import org.keycloak.quarkus.runtime.cli.PropertyException;
-import org.keycloak.quarkus.runtime.configuration.Configuration;
+import org.keycloak.quarkus.runtime.cli.command.AbstractCommand;
 
-import java.io.File;
-import java.nio.file.Paths;
-import java.util.Optional;
-import java.util.function.BiFunction;
+import io.quarkus.runtime.LaunchMode;
+import io.quarkus.runtime.configuration.DurationConverter;
+import io.quarkus.runtime.util.ClassPathUtils;
+import io.quarkus.vertx.http.runtime.options.TlsUtils;
+import io.smallrye.config.ConfigSourceInterceptorContext;
 
-import static java.util.Optional.empty;
-import static java.util.Optional.of;
+import static org.keycloak.quarkus.runtime.configuration.Configuration.getOptionalKcValue;
+import static org.keycloak.quarkus.runtime.configuration.Configuration.getOptionalValue;
+import static org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper.fromFeature;
 import static org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper.fromOption;
 
-public final class HttpPropertyMappers {
+public final class HttpPropertyMappers implements PropertyMapperGrouping {
     private static final int MIN_MAX_THREADS = 50;
     private static final String QUARKUS_HTTPS_CERT_FILES = "quarkus.http.ssl.certificate.files";
     private static final String QUARKUS_HTTPS_CERT_KEY_FILES = "quarkus.http.ssl.certificate.key-files";
+    private static final String QUARKUS_HTTPS_KEY_STORE_FILE = "quarkus.http.ssl.certificate.key-store-file";
+    private static final String QUARKUS_HTTPS_TRUST_STORE_FILE = "quarkus.http.ssl.certificate.trust-store-file";
+    public static final String QUARKUS_HTTPS_TRUST_STORE_FILE_TYPE = "quarkus.http.ssl.certificate.trust-store-file-type";
+    private static final String QUARKUS_HTTPS_KEY_STORE_FILE_TYPE = "quarkus.http.ssl.certificate.key-store-file-type";
 
-    private HttpPropertyMappers(){}
+    // Transform runtime exceptions obtained from Quarkus to ours with a relevant message
+    private static void setCustomExceptionTransformer() {
+        ExecutionExceptionHandler.addExceptionTransformer(TlsUtils.class, exception -> {
+            if (exception instanceof IOException ioe) {
+                return new PropertyException("Failed to load 'https-*' material: " + ioe.getClass().getSimpleName() + " " + ioe.getMessage(), ioe);
+            } else if (exception instanceof IllegalArgumentException iae) {
+                if (iae.getMessage().contains(QUARKUS_HTTPS_TRUST_STORE_FILE_TYPE)) {
+                    return new PropertyException("Unable to determine 'https-trust-store-type' automatically. " +
+                            "Adjust the file extension or specify the property.", iae);
+                } else if (iae.getMessage().contains(QUARKUS_HTTPS_KEY_STORE_FILE_TYPE)) {
+                    return new PropertyException("Unable to determine 'https-key-store-type' automatically. " +
+                            "Adjust the file extension or specify the property.", iae);
+                } else {
+                    return new PropertyException(iae.getMessage(), iae);
+                }
+            }
+            return exception;
+        });
+    }
 
-    public static PropertyMapper<?>[] getHttpPropertyMappers() {
-        return new PropertyMapper[] {
+    // taken from VertxConfigBuilder
+    private static boolean isWSL() {
+        var sysEnv = System.getenv();
+        return sysEnv.containsKey("IS_WSL") || sysEnv.containsKey("WSL_DISTRO_NAME");
+    }
+
+    String getHttpHost(String value) {
+        if (value != null) {
+            return value;
+        }
+        // account for modes that always need to be all interfaces
+        if (Boolean.parseBoolean(System.getenv("KC_RUN_IN_CONTAINER")) || LaunchMode.current().isRemoteDev()
+                || isWSL()) {
+            return "0.0.0.0";
+        }
+        // using start-dev from the cli, is not the same as LaunchMode dev or test, so we need a specific override
+        if (Environment.isDevMode()) {
+            return "localhost";
+        }
+        return null;
+    }
+
+    @Override
+    public List<PropertyMapper<?>> getPropertyMappers() {
+        setCustomExceptionTransformer();
+        return List.of(
                 fromOption(HttpOptions.HTTP_ENABLED)
                         .to("quarkus.http.insecure-requests")
                         .transformer(HttpPropertyMappers::getHttpEnabledTransformer)
-                        .paramLabel(Boolean.TRUE + "|" + Boolean.FALSE)
-                        .build(),
-                fromOption(HttpOptions.HTTP_SERVER_ENABLED)
-                        .to("quarkus.http.host-enabled")
-                        .paramLabel(Boolean.TRUE + "|" + Boolean.FALSE)
                         .build(),
                 fromOption(HttpOptions.HTTP_HOST)
                         .to("quarkus.http.host")
+                        .transformer((v, c) -> getHttpHost(v))
                         .paramLabel("host")
                         .build(),
                 fromOption(HttpOptions.HTTP_RELATIVE_PATH)
@@ -67,23 +123,23 @@ public final class HttpPropertyMappers {
                         .build(),
                 fromOption(HttpOptions.HTTPS_CERTIFICATES_RELOAD_PERIOD)
                         .to("quarkus.http.ssl.certificate.reload-period")
-                        // -1 means no reload
-                        .transformer((value, context) -> "-1".equals(value.get()) ? null : value)
+                        .transformer(HttpPropertyMappers::transformNegativeReloadPeriod)
                         .paramLabel("reload period")
                         .build(),
                 fromOption(HttpOptions.HTTPS_CERTIFICATE_FILE)
                         .to(QUARKUS_HTTPS_CERT_FILES)
-                        .transformer(HttpPropertyMappers.validatePath(QUARKUS_HTTPS_CERT_FILES))
+                        .transformer(HttpPropertyMappers::transformPath)
                         .paramLabel("file")
                         .build(),
                 fromOption(HttpOptions.HTTPS_CERTIFICATE_KEY_FILE)
                         .to(QUARKUS_HTTPS_CERT_KEY_FILES)
-                        .transformer(HttpPropertyMappers.validatePath(QUARKUS_HTTPS_CERT_KEY_FILES))
+                        .transformer(HttpPropertyMappers::transformPath)
                         .paramLabel("file")
                         .build(),
                 fromOption(HttpOptions.HTTPS_KEY_STORE_FILE
                         .withRuntimeSpecificDefault(getDefaultKeystorePathValue()))
-                        .to("quarkus.http.ssl.certificate.key-store-file")
+                        .to(QUARKUS_HTTPS_KEY_STORE_FILE)
+                        .transformer(HttpPropertyMappers::transformPath)
                         .paramLabel("file")
                         .build(),
                 fromOption(HttpOptions.HTTPS_KEY_STORE_PASSWORD)
@@ -92,13 +148,13 @@ public final class HttpPropertyMappers {
                         .isMasked(true)
                         .build(),
                 fromOption(HttpOptions.HTTPS_KEY_STORE_TYPE)
-                        .to("quarkus.http.ssl.certificate.key-store-file-type")
-                        .mapFrom(SecurityOptions.FIPS_MODE.getKey())
-                        .transformer(HttpPropertyMappers::resolveKeyStoreType)
+                        .mapFrom(SecurityOptions.FIPS_MODE, HttpPropertyMappers::resolveKeyStoreType)
+                        .to(QUARKUS_HTTPS_KEY_STORE_FILE_TYPE)
                         .paramLabel("type")
                         .build(),
                 fromOption(HttpOptions.HTTPS_TRUST_STORE_FILE)
-                        .to("quarkus.http.ssl.certificate.trust-store-file")
+                        .to(QUARKUS_HTTPS_TRUST_STORE_FILE)
+                        .transformer(HttpPropertyMappers::transformPath)
                         .paramLabel("file")
                         .build(),
                 fromOption(HttpOptions.HTTPS_TRUST_STORE_PASSWORD)
@@ -107,9 +163,8 @@ public final class HttpPropertyMappers {
                         .isMasked(true)
                         .build(),
                 fromOption(HttpOptions.HTTPS_TRUST_STORE_TYPE)
-                        .to("quarkus.http.ssl.certificate.trust-store-file-type")
-                        .mapFrom(SecurityOptions.FIPS_MODE.getKey())
-                        .transformer(HttpPropertyMappers::resolveKeyStoreType)
+                        .mapFrom(SecurityOptions.FIPS_MODE, HttpPropertyMappers::resolveKeyStoreType)
+                        .to(QUARKUS_HTTPS_TRUST_STORE_FILE_TYPE)
                         .paramLabel("type")
                         .build(),
                 fromOption(HttpOptions.HTTP_MAX_QUEUED_REQUESTS)
@@ -127,79 +182,92 @@ public final class HttpPropertyMappers {
                 fromOption(HttpOptions.HTTP_METRICS_SLOS)
                         .isEnabled(MetricsPropertyMappers::metricsEnabled, MetricsPropertyMappers.METRICS_ENABLED_MSG)
                         .paramLabel("list of buckets")
+                        .build(),
+                fromFeature(Profile.Feature.HTTP_OPTIMIZED_SERIALIZERS)
+                        .to("quarkus.rest.jackson.optimization.enable-reflection-free-serializers")
+                        .build(),
+                fromOption(HttpOptions.HTTP_ACCEPT_NON_NORMALIZED_PATHS)
+                        .build(),
+                fromOption(HttpOptions.SHUTDOWN_TIMEOUT)
+                        .to("quarkus.shutdown.timeout")
+                        .paramLabel("timeout")
+                        .validator(HttpPropertyMappers::validateShutdownDuration)
+                        .build(),
+                fromOption(HttpOptions.SHUTDOWN_DELAY)
+                        .to("quarkus.shutdown.delay")
+                        .paramLabel("delay")
+                        .validator(HttpPropertyMappers::validateShutdownDuration)
                         .build()
-        };
+        );
+
     }
 
-    public static void validateConfig() {
-        boolean enabled = isHttpEnabled(Configuration.getOptionalKcValue(HttpOptions.HTTP_ENABLED.getKey()));
 
-        if (!enabled) {
-            Optional<String> value = Configuration.getOptionalKcValue(HttpOptions.HTTPS_CERTIFICATE_FILE.getKey());
-
-            if (value.isEmpty()) {
-                value = Configuration.getOptionalValue("quarkus.http.ssl.certificate.key-store-file");
-            }
-
-            if (value.isEmpty()) {
+    @Override
+    public void validateConfig(Picocli picocli) {
+        if (picocli.getParsedCommand().filter(AbstractCommand::isServing).isPresent()) {
+            boolean enabled = isHttpEnabled(getOptionalKcValue(HttpOptions.HTTP_ENABLED.getKey()).orElse(null));
+            if (!enabled && !isHttpsEnabled()) {
                 throw new PropertyException(Messages.httpsConfigurationNotSet());
             }
         }
     }
 
-    private static BiFunction<Optional<String>, ConfigSourceInterceptorContext, Optional<String>> validatePath(String key) {
-        return (value, context) -> Environment.isWindows() ? value.filter(v -> v.equals(context.proceed(key).getValue())).map(p -> p.replace("\\", "/")) : value;
+    public static boolean isHttpsEnabled() {
+        Optional<String> certFile = getOptionalValue(QUARKUS_HTTPS_CERT_FILES);
+        Optional<String> keystoreFile = getOptionalValue(QUARKUS_HTTPS_KEY_STORE_FILE);
+        return certFile.isPresent() || keystoreFile.isPresent();
     }
 
-    private static Optional<String> getHttpEnabledTransformer(Optional<String> value, ConfigSourceInterceptorContext context) {
-        return of(isHttpEnabled(value) ? "enabled" : "disabled");
+    private static String transformPath(String value, ConfigSourceInterceptorContext context) {
+        return value == null ? value : ClassPathUtils.toResourceName(Path.of(value));
     }
 
-    private static boolean isHttpEnabled(Optional<String> value) {
-        boolean enabled = Boolean.parseBoolean(value.get());
-        Optional<String> proxy = Configuration.getOptionalKcValue("proxy");
+    private static String getHttpEnabledTransformer(String value, ConfigSourceInterceptorContext context) {
+        return isHttpEnabled(value) ? "enabled" : "disabled";
+    }
 
-        if (Environment.isDevMode() || Environment.isNonServerMode()
-                || ("edge".equalsIgnoreCase(proxy.orElse("")))) {
-            enabled = true;
+    static String transformNegativeReloadPeriod(String value, ConfigSourceInterceptorContext context) {
+        // -1 means no reload
+        return "-1".equals(value) ? null : value;
+    }
+
+    private static boolean isHttpEnabled(String value) {
+        if (Environment.isDevMode() || org.keycloak.common.util.Environment.isNonServerMode()) {
+            return true;
         }
-        return enabled;
+        return Boolean.parseBoolean(value);
     }
 
     private static File getDefaultKeystorePathValue() {
-        String homeDir = Environment.getHomeDir();
+        return Environment.getHomeDir().map(f -> Paths.get(f, "conf", "server.keystore").toFile()).filter(File::exists)
+                .orElse(null);
+    }
 
-        if (homeDir != null) {
-            File file = Paths.get(homeDir, "conf", "server.keystore").toFile();
-
-            if (file.exists()) {
-                return file;
-            }
+    private static String resolveKeyStoreType(String value,
+            ConfigSourceInterceptorContext configSourceInterceptorContext) {
+        if (FipsMode.STRICT.toString().equals(value)) {
+            return "BCFKS";
         }
-
         return null;
     }
 
-    private static Optional<String> resolveKeyStoreType(Optional<String> value,
+    private static String resolveMaxThreads(String value,
             ConfigSourceInterceptorContext configSourceInterceptorContext) {
-        if (value.isPresent()) {
-            try {
-                if (FipsMode.valueOfOption(value.get()).equals(FipsMode.STRICT)) {
-                    return of("BCFKS");
-                }
-                return empty();
-            } catch (IllegalArgumentException ignore) {
-            }
+        if (value == null) {
+            return String.valueOf(Math.max(MIN_MAX_THREADS, 4 * Runtime.getRuntime().availableProcessors()));
         }
         return value;
     }
 
-    private static Optional<String> resolveMaxThreads(Optional<String> value,
-            ConfigSourceInterceptorContext configSourceInterceptorContext) {
-        if (value.isEmpty()) {
-            return of(String.valueOf(Math.max(MIN_MAX_THREADS, 4 * Runtime.getRuntime().availableProcessors())));
+    private static void validateShutdownDuration(String value) {
+        try {
+            Duration duration = DurationConverter.parseDuration(value);
+            if (duration == null || duration.isNegative()) {
+                throw new PropertyException("Invalid duration '%s'. Duration must be zero or positive.".formatted(value));
+            }
+        } catch (IllegalArgumentException e) {
+            throw new PropertyException("Invalid duration format '%s'. %s".formatted(value, OptionsUtil.DURATION_DESCRIPTION));
         }
-        return value;
     }
 }
-

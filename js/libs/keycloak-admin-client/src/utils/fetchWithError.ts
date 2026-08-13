@@ -14,7 +14,7 @@ export class NetworkError extends Error {
 }
 
 export async function fetchWithError(
-  input: RequestInfo | URL,
+  input: Request | string | URL,
   init?: RequestInit,
 ) {
   const response = await fetch(input, init);
@@ -22,6 +22,7 @@ export async function fetchWithError(
   if (!response.ok) {
     const responseData = await parseResponse(response);
     const message = getErrorMessage(responseData);
+    console.error(message, response.status, responseData);
     throw new NetworkError(message, {
       response,
       responseData,

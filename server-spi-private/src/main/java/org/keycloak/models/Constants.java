@@ -17,12 +17,12 @@
 
 package org.keycloak.models;
 
-import org.keycloak.OAuth2Constants;
-import org.keycloak.crypto.Algorithm;
-
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.regex.Pattern;
+
+import org.keycloak.OAuth2Constants;
+import org.keycloak.crypto.Algorithm;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -43,8 +43,6 @@ public final class Constants {
     public static final Collection<String> defaultClients = Arrays.asList(ACCOUNT_MANAGEMENT_CLIENT_ID, ADMIN_CLI_CLIENT_ID, BROKER_SERVICE_CLIENT_ID, REALM_MANAGEMENT_CLIENT_ID, ADMIN_CONSOLE_CLIENT_ID);
 
     public static final String INSTALLED_APP_URN = "urn:ietf:wg:oauth:2.0:oob";
-    public static final String INSTALLED_APP_URL = "http://localhost";
-    public static final String INSTALLED_APP_LOOPBACK = "http://127.0.0.1";
 
     public static final String READ_TOKEN_ROLE = "read-token";
     public static final String[] BROKER_SERVICE_ROLES = {READ_TOKEN_ROLE};
@@ -72,6 +70,11 @@ public final class Constants {
     public static final String DEFAULT_WEBAUTHN_POLICY_RP_ENTITY_NAME = "keycloak";
     // it stands for optional parameter not specified in WebAuthn
     public static final String DEFAULT_WEBAUTHN_POLICY_NOT_SPECIFIED = "not specified";
+    public static final String WEBAUTHN_POLICY_OPTION_REQUIRED = "required";
+    public static final String WEBAUTHN_POLICY_OPTION_PREFERED = "preferred";
+    public static final String WEBAUTHN_POLICY_OPTION_DISCOURAGED = "discouraged";
+    public static final String WEBAUTHN_POLICY_OPTION_YES = "Yes";
+    public static final String WEBAUTHN_POLICY_OPTION_NO = "No";
 
     // Prefix used for the realm attributes and other places
     public static final String WEBAUTHN_PASSWORDLESS_PREFIX = "Passwordless";
@@ -89,6 +92,8 @@ public final class Constants {
     public static final String KC_ACTION = "kc_action";
 
     public static final String KC_ACTION_PARAMETER = "kc_action_parameter";
+    // parameter used by some actions to skip executing it if a credential for that type already exists for the user
+    public static final String KC_ACTION_PARAMETER_SKIP_IF_EXISTS = "skip_if_exists";
     public static final String KC_ACTION_STATUS = "kc_action_status";
     public static final String KC_ACTION_EXECUTING = "kc_action_executing";
     /**
@@ -97,6 +102,8 @@ public final class Constants {
      */
     public static final String KC_ACTION_ENFORCED = "kc_action_enforced";
     public static final int KC_ACTION_MAX_AGE = 300;
+    public static final String MAX_AUTH_AGE_KEY = "max_auth_age";
+
 
     public static final String IS_AIA_REQUEST = "IS_AIA_REQUEST";
     public static final String AIA_SILENT_CANCEL = "silent_cancel";
@@ -106,6 +113,7 @@ public final class Constants {
     public static final String SKIP_LINK = "skipLink";
     public static final String TEMPLATE_ATTR_ACTION_URI = "actionUri";
     public static final String TEMPLATE_ATTR_REQUIRED_ACTIONS = "requiredActions";
+    public static final String IGNORE_ACCEPT_LANGUAGE_HEADER = "IGNORE_ACCEPT_LANGUAGE_HEADER";
 
     // Prefix for user attributes used in various "context"data maps
     public static final String USER_ATTRIBUTES_PREFIX = "user.attributes.";
@@ -127,6 +135,8 @@ public final class Constants {
     // multiple values into single string
     public static final String CFG_DELIMITER = "##";
 
+    public static final String INCLUDE_REDIRECTS = "+";
+
     // Better performance to use this instead of String.split
     public static final Pattern CFG_DELIMITER_PATTERN = Pattern.compile("\\s*" + CFG_DELIMITER + "\\s*");
 
@@ -141,6 +151,8 @@ public final class Constants {
      * If {@code #STORAGE_BATCH_ENABLED} is set, indicates the batch size.
      */
     public static final String STORAGE_BATCH_SIZE = "org.keycloak.storage.batch_size";
+
+    public static final String SNAPSHOT_VERSION = "999.0.0-SNAPSHOT";
 
     // Client Polices Realm Attributes Keys
     public static final String CLIENT_PROFILES = "client-policies.profiles";
@@ -164,7 +176,9 @@ public final class Constants {
     public static final String REQUESTED_LEVEL_OF_AUTHENTICATION = "requested-level-of-authentication";
     public static final String FORCE_LEVEL_OF_AUTHENTICATION = "force-level-of-authentication";
     public static final String ACR_LOA_MAP = "acr.loa.map";
+    public static final String ACR_URI_MAP = "acr.uri.map";
     public static final String DEFAULT_ACR_VALUES = "default.acr.values";
+    public static final String MINIMUM_ACR_VALUE = "minimum.acr.value";
     public static final int MINIMUM_LOA = 0;
     public static final int NO_LOA = -1;
 
@@ -185,6 +199,37 @@ public final class Constants {
     //attribute name used to mark a client as realm client
     public static final String REALM_CLIENT = "realm_client";
 
-    //attribute name used to mark a temporary admin user/service account as temporary
-    public static final String IS_TEMP_ADMIN_ATTR_NAME = "is_temporary_admin";
+    public static final String ADMIN_PERMISSIONS_CLIENT_ID = "admin-permissions";
+
+    // Note used to store the authentication flow requested
+    public static final String REQUESTED_AUTHENTICATION_FLOW = "requested-authentication-flow";
+
+    public static final String AUTHENTICATION_FLOW_LEVEL_OF_AUTHENTICATION = "authentication-flow-level-of-authentication";
+
+    // Note used to store the acr values if it is matched by client policy condition
+    public static final String CLIENT_POLICY_REQUESTED_ACR = "client-policy-requested-acr";
+
+    //attribute name used to set clients from requested audience in standard token exchange
+    public static final String REQUESTED_AUDIENCE_CLIENTS = "req-aud-clients";
+    // claim used in refresh token to know the requested audience
+    public static final String REQUESTED_AUDIENCE = "req-aud";
+    // Note in clientSessionContext specifying token grant type used
+    public static final String GRANT_TYPE = OAuth2Constants.GRANT_TYPE;
+    // Note in client session to know the subject client
+    public static final String TOKEN_EXCHANGE_SUBJECT_CLIENT = "token_exchange_subject_client";
+
+    // Note in transient userSession specifying that it was created from "persistent" user session for the temporary purpose. The values of this note could be "online" and "offline"
+    public static final String CREATED_FROM_PERSISTENT = "created_from_persistent";
+    public static final String CREATED_FROM_PERSISTENT_ONLINE = "online";
+    public static final String CREATED_FROM_PERSISTENT_OFFLINE = "offline";
+
+    // Provider ID of the openid-connect protocol
+    public static final String OIDC_PROTOCOL = "openid-connect";
+
+    // Internal note for storing authorization details response in client session context
+    public static final String AUTHORIZATION_DETAILS_RESPONSE = "authorization_details_response";
+
+    // This attribute can be used in a realm import definition to signal that default client scopes should be created in addition to the client scopes defined by the realm import definition.
+    // When this attribute is omitted or set to false, the default client scopes are not created if at least one other client scope is defined by the realm import definition.
+    public static final String CREATE_DEFAULT_CLIENT_SCOPES = "CreateDefaultClientScopes";
 }

@@ -21,12 +21,11 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import org.jboss.logging.Logger;
+import jakarta.ws.rs.core.MultivaluedMap;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
-import org.keycloak.constants.AdapterConstants;
 import org.keycloak.models.ClientModel;
-import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.SingleUseObjectProvider;
@@ -43,7 +42,7 @@ import org.keycloak.services.clientpolicy.ClientPolicyContext;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
 import org.keycloak.services.clientpolicy.context.PreAuthorizationRequestContext;
 
-import jakarta.ws.rs.core.MultivaluedMap;
+import org.jboss.logging.Logger;
 
 /** 
  * @author <a href="mailto:takashi.norimatsu.ws@hitachi.com">Takashi Norimatsu</a>
@@ -86,7 +85,7 @@ public class SecureParContentsExecutor implements ClientPolicyExecutorProvider<C
 
         String key = requestUri.substring(ParEndpoint.REQUEST_URI_PREFIX_LENGTH);
         SingleUseObjectProvider singleUseStore = session.singleUseObjects();
-        Map<String, String> requestParametersFromPAR = singleUseStore.get(key);
+        Map<String, String> requestParametersFromPAR = singleUseStore.get(ParEndpoint.CACHE_KEY_PREFIX + key);
         if (requestParametersFromPAR == null) {
             throw new ClientPolicyException(OAuthErrorException.INVALID_REQUEST, "PAR not found. not issued or used multiple times.");
         }
@@ -101,7 +100,7 @@ public class SecureParContentsExecutor implements ClientPolicyExecutorProvider<C
 
         for (String queryParamName : requestParametersFromQuery.keySet()) {
             if (!requestParametersNameFromPAR.contains(queryParamName) && !OIDCLoginProtocol.REQUEST_URI_PARAM.equals(queryParamName)) {
-                singleUseStore.remove(key);
+                singleUseStore.remove(ParEndpoint.CACHE_KEY_PREFIX + key);
                 throw new ClientPolicyException(OAuthErrorException.INVALID_REQUEST, "PAR request did not include necessary parameters");
             }
         }

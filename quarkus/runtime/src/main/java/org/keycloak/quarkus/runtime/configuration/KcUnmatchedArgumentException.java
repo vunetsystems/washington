@@ -17,12 +17,11 @@
 
 package org.keycloak.quarkus.runtime.configuration;
 
-import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMappers;
-import picocli.CommandLine;
-
 import java.util.List;
 
-import static org.keycloak.quarkus.runtime.cli.OptionRenderer.DUPLICIT_OPTION_SUFFIX;
+import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMappers;
+
+import picocli.CommandLine;
 
 /**
  * Custom CommandLine.UnmatchedArgumentException with amended suggestions
@@ -40,6 +39,8 @@ public class KcUnmatchedArgumentException extends CommandLine.UnmatchedArgumentE
     @Override
     public List<String> getSuggestions() {
         // filter out disabled mappers
-        return super.getSuggestions().stream().filter(f -> !PropertyMappers.isDisabledMapper(f) && !f.endsWith(DUPLICIT_OPTION_SUFFIX)).toList();
+        return super.getSuggestions().stream()
+                .filter(f -> PropertyMappers.getKcKeyFromCliKey(f).filter(PropertyMappers::isDisabledMapper).isEmpty())
+                .toList();
     }
 }

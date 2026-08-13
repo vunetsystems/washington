@@ -16,6 +16,14 @@
  */
 package org.keycloak.saml.processing.core.parsers.util;
 
+import java.net.URI;
+import javax.xml.namespace.QName;
+import javax.xml.stream.XMLEventReader;
+import javax.xml.stream.events.Attribute;
+import javax.xml.stream.events.EndElement;
+import javax.xml.stream.events.StartElement;
+import javax.xml.stream.events.XMLEvent;
+
 import org.keycloak.dom.saml.v1.assertion.SAML11ActionType;
 import org.keycloak.dom.saml.v1.assertion.SAML11AttributeStatementType;
 import org.keycloak.dom.saml.v1.assertion.SAML11AttributeType;
@@ -52,14 +60,6 @@ import org.keycloak.saml.processing.core.saml.v1.SAML11Constants;
 import org.keycloak.saml.processing.core.saml.v2.util.XMLTimeUtil;
 
 import org.w3c.dom.Element;
-
-import javax.xml.namespace.QName;
-import javax.xml.stream.XMLEventReader;
-import javax.xml.stream.events.Attribute;
-import javax.xml.stream.events.EndElement;
-import javax.xml.stream.events.StartElement;
-import javax.xml.stream.events.XMLEvent;
-import java.net.URI;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
@@ -545,7 +545,7 @@ public class SAML11ParserUtil {
             if (xmlEvent instanceof EndElement) {
                 tag = StaxParserUtil.getElementName((EndElement) xmlEvent);
                 if (tag.equals(WSTrustConstants.XMLDSig.KEYINFO)) {
-                    xmlEvent = StaxParserUtil.getNextEndElement(xmlEventReader);
+                    StaxParserUtil.getNextEndElement(xmlEventReader);
                     break;
                 } else
                     throw logger.parserUnknownEndElement(tag, xmlEvent.getLocation());
@@ -606,7 +606,7 @@ public class SAML11ParserUtil {
             if (xmlEvent instanceof EndElement) {
                 tag = StaxParserUtil.getElementName((EndElement) xmlEvent);
                 if (tag.equals(WSTrustConstants.XMLDSig.RSA_KEYVALUE)) {
-                    xmlEvent = StaxParserUtil.getNextEndElement(xmlEventReader);
+                    StaxParserUtil.getNextEndElement(xmlEventReader);
                     break;
                 } else
                     throw logger.parserUnknownEndElement(tag, xmlEvent.getLocation());

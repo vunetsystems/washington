@@ -16,17 +16,13 @@
  */
 package org.keycloak.keys;
 
+
 import org.keycloak.component.ComponentModel;
 import org.keycloak.component.ComponentValidationException;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.provider.ConfigurationValidationHelper;
 import org.keycloak.provider.ProviderConfigurationBuilder;
-
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
-import java.security.SecureRandom;
-import java.security.spec.ECGenParameterSpec;
 
 public abstract class AbstractEcKeyProviderFactory<T extends KeyProvider> implements KeyProviderFactory<T> {
 
@@ -36,7 +32,8 @@ public abstract class AbstractEcKeyProviderFactory<T extends KeyProvider> implem
         return ProviderConfigurationBuilder.create()
                 .property(Attributes.PRIORITY_PROPERTY)
                 .property(Attributes.ENABLED_PROPERTY)
-                .property(Attributes.ACTIVE_PROPERTY);
+                .property(Attributes.ACTIVE_PROPERTY)
+                .property(Attributes.EC_GENERATE_CERTIFICATE_PROPERTY);
     }
 
     @Override
@@ -44,19 +41,8 @@ public abstract class AbstractEcKeyProviderFactory<T extends KeyProvider> implem
         ConfigurationValidationHelper.check(model)
                 .checkLong(Attributes.PRIORITY_PROPERTY, false)
                 .checkBoolean(Attributes.ENABLED_PROPERTY, false)
-                .checkBoolean(Attributes.ACTIVE_PROPERTY, false);
-    }
-
-    public static KeyPair generateEcKeyPair(String keySpecName) {
-        try {
-            KeyPairGenerator keyGen = KeyPairGenerator.getInstance("EC");
-            SecureRandom randomGen = SecureRandom.getInstance("SHA1PRNG");
-            ECGenParameterSpec ecSpec = new ECGenParameterSpec(keySpecName);
-            keyGen.initialize(ecSpec, randomGen);
-            return keyGen.generateKeyPair();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+                .checkBoolean(Attributes.ACTIVE_PROPERTY, false)
+                .checkBoolean(Attributes.EC_GENERATE_CERTIFICATE_PROPERTY, false);
     }
 
     public static String convertECDomainParmNistRepToSecRep(String ecInNistRep) {

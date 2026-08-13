@@ -20,18 +20,19 @@
     <parent>
         <artifactId>keycloak-distribution-parent</artifactId>
         <groupId>org.keycloak</groupId>
-        <version>999.0.0-SNAPSHOT</version>
+        <version>26.6.0</version>
     </parent>
 
     <artifactId>keycloak-distribution-maven-plugins-parent</artifactId>
     <packaging>pom</packaging>
     <name>Keycloak Distribution Maven Plugins Parent</name>
+    <description>Keycloak Distribution Maven Plugins Parent</description>
 
     <dependencies>
         <dependency>
             <groupId>org.codehaus.groovy</groupId>
             <artifactId>groovy-all</artifactId>
-            <version>3.0.21</version>
+            <version>3.0.25</version>
             <type>pom</type>
         </dependency>
         <dependency>
@@ -73,7 +74,6 @@
                                 <goal>addTestSources</goal>
                                 <goal>generateStubs</goal>
                                 <goal>compile</goal>
-                                <goal>removeStubs</goal>
                                 <goal>generateTestStubs</goal>
                                 <goal>compileTests</goal>
                                 <goal>removeTestStubs</goal>

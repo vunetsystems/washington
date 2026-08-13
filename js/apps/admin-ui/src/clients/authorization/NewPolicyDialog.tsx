@@ -62,9 +62,10 @@ export const NewPolicyDialog = ({
               isClickable
             >
               <Td>{provider.name}</Td>
-              <Td>
-                {isValidComponentType(provider.type!) &&
-                  t(`policyProvider.${provider.type}`)}
+              <Td style={{ textWrap: "wrap" }}>
+                {isValidComponentType(provider.type!)
+                  ? t(`policyProvider.${provider.type}`)
+                  : provider.description}
               </Td>
             </Tr>
           ))}

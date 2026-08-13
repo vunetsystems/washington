@@ -18,37 +18,37 @@
 
 package org.keycloak.testsuite.x509;
 
-import org.jboss.arquillian.drone.api.annotation.Drone;
-import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.util.HtmlUnitBrowser;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
-import org.keycloak.OAuth2Constants;
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel;
 import org.keycloak.events.Details;
 import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.pages.AppPage;
+import org.keycloak.testsuite.util.DroneUtils;
+import org.keycloak.testsuite.util.HtmlUnitBrowser;
 
-import jakarta.ws.rs.core.Response;
+import org.jboss.arquillian.drone.api.annotation.Drone;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+import org.openqa.selenium.WebDriver;
 
+import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.IdentityMapperType.USERNAME_EMAIL;
+import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.IdentityMapperType.USER_ATTRIBUTE;
+import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SERIALNUMBER;
+import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SERIALNUMBER_ISSUERDN;
+import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SHA256_THUMBPRINT;
+import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SUBJECTDN;
+import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SUBJECTDN_EMAIL;
+
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.Assert.assertEquals;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.IdentityMapperType.USERNAME_EMAIL;
-import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.IdentityMapperType.USER_ATTRIBUTE;
-import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SERIALNUMBER_ISSUERDN;
-import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SHA256_THUMBPRINT;
-import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SERIALNUMBER;
-import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SUBJECTDN;
-import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.SUBJECTDN_EMAIL;
-
-import org.keycloak.testsuite.util.DroneUtils;
-import org.openqa.selenium.WebDriver;
 
 /**
  * @author <a href="mailto:brat000012001@gmail.com">Peter Nalyvayko</a>
@@ -82,7 +82,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(browserExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
 
         events.expectLogin()
                 .user((String) null)
@@ -101,9 +101,9 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(browserExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
 
-        assertThat(loginPage.getError(), containsString("Certificate validation's failed.\n" +
+        assertThat(loginPage.getError(), containsString("Certificate validation's failed. " +
                 "Certificate revoked or incorrect."));
     }
 
@@ -127,7 +127,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
             String cfgId = createConfig(browserExecution.getId(), cfg);
             Assert.assertNotNull(cfgId);
 
-            loginConfirmationPage.open();
+            oauth.openLoginForm();
             loginPage.assertCurrent();
 
             // Verify there is an error message
@@ -146,7 +146,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(browserExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
 
         Assert.assertTrue(loginConfirmationPage.getSubjectDistinguishedNameText().startsWith("EMAILADDRESS=test-user@localhost"));
         Assert.assertEquals("test-user@localhost", loginConfirmationPage.getUsernameText());
@@ -155,7 +155,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         loginPage.login("test-user@localhost", "password");
 
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
          events.expectLogin()
                  .user(userId)
@@ -295,7 +295,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         loginPage.login("test-user@localhost", "password");
 
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         events.expectLogin()
                 .user(userId)
@@ -307,7 +307,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
     @Test
     public void loginAttemptedNoConfig() {
 
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
         loginPage.assertCurrent();
 
         assertThat(loginPage.getInfoMessage(), containsString("X509 client authentication has not been configured yet"));
@@ -315,7 +315,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         loginPage.login("test-user@localhost", "password");
 
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
         events.expectLogin()
                 .user(userId)
                 .detail(Details.USERNAME, "test-user@localhost")
@@ -336,7 +336,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(browserExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
         loginPage.assertCurrent();
 
         // Verify there is an error message
@@ -356,7 +356,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         loginPage.login("test-user@localhost", "password");
 
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
         events.expectLogin()
                 .user(userId)
                 .detail(Details.USERNAME, "test-user@localhost")
@@ -386,7 +386,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
 
         events.clear();
 
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
 
         Assert.assertTrue(loginConfirmationPage.getSubjectDistinguishedNameText().startsWith("EMAILADDRESS=test-user@localhost"));
         Assert.assertEquals("test-user@localhost", loginConfirmationPage.getUsernameText());
@@ -394,7 +394,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         loginConfirmationPage.confirm();
 
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
     }
 
     @Test
@@ -413,7 +413,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         // TODO causes the test to fail
         //assertAdminEvents.assertEvent(REALM_NAME, OperationType.DELETE, AdminEventPaths.userResourcePath(userId));
 
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
         loginPage.assertCurrent();
 
         // Verify there is an error message
@@ -451,12 +451,12 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
             String cfgId = createConfig(browserExecution.getId(), cfg);
             Assert.assertNotNull(cfgId);
 
-            loginConfirmationPage.open();
+            oauth.openLoginForm();
             loginPage.assertCurrent();
 
             Assert.assertNotNull(loginPage.getError());
 
-            assertThat(loginPage.getError(), containsString("X509 certificate authentication's failed.\nUser is disabled"));
+            assertThat(loginPage.getError(), containsString("X509 certificate authentication's failed. User is disabled"));
 
             events.expectLogin()
                     .user(userId)
@@ -507,7 +507,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         // user and automatically logs the user in without prompting to confirm
         // the identity.
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
 
         AssertEvents.ExpectedEvent expectedEvent = events.expectLogin()
                 .user(userId)
@@ -523,7 +523,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
     @Test
     public void loginWithCertificateAddedLater() throws Exception {
         // Start with normal login form
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
         loginPage.assertCurrent();
 
         assertThat(loginPage.getInfoMessage(), containsString("X509 client authentication has not been configured yet"));
@@ -541,7 +541,7 @@ public class X509BrowserLoginTest extends AbstractX509AuthenticationTest {
         Assert.assertNotNull(cfgId);
 
         log.debug("Open confirm page");
-        loginConfirmationPage.open();
+        oauth.openLoginForm();
 
         log.debug("check if on confirm page");
         assertThat(loginConfirmationPage.getSubjectDistinguishedNameText(), startsWith("EMAILADDRESS=test-user@localhost"));

@@ -4,6 +4,8 @@ metadata:
   name: example-count0-kc
 spec:
   keycloakCRName: example-kc
+  labels:
+    example: "test"
   realm:
     id: count0
     realm: count0
@@ -1193,7 +1195,6 @@ spec:
       xRobotsTag: none
       xFrameOptions: SAMEORIGIN
       contentSecurityPolicy: frame-src 'self'; frame-ancestors 'self'; object-src 'none';
-      xXSSProtection: 1; mode=block
       strictTransportSecurity: max-age=31536000; includeSubDomains
     smtpServer: {}
     eventsEnabled: false

@@ -16,16 +16,17 @@
  */
 package org.keycloak.testsuite.user.profile.config;
 
-import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_ADMIN;
-import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_USER;
-
 import java.util.HashSet;
 import java.util.Set;
 
-import org.junit.Assert;
-import org.junit.Test;
 import org.keycloak.userprofile.UserProfileContext;
 import org.keycloak.userprofile.config.UPConfigUtils;
+
+import org.junit.Assert;
+import org.junit.Test;
+
+import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_ADMIN;
+import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_USER;
 
 /**
  * Unit test for {@link UPConfigUtils}
@@ -37,9 +38,9 @@ public class UPConfigUtilsTest {
 
     @Test
     public void canBeAuthFlowContext() {
-        Assert.assertFalse(UserProfileContext.ACCOUNT.canBeAuthFlowContext());
         Assert.assertFalse(UserProfileContext.USER_API.canBeAuthFlowContext());
 
+        Assert.assertTrue(UserProfileContext.ACCOUNT.canBeAuthFlowContext());
         Assert.assertTrue(UserProfileContext.IDP_REVIEW.canBeAuthFlowContext());
         Assert.assertTrue(UserProfileContext.REGISTRATION.canBeAuthFlowContext());
         Assert.assertTrue(UserProfileContext.UPDATE_PROFILE.canBeAuthFlowContext());

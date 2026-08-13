@@ -1,17 +1,28 @@
 package org.keycloak.services.error;
 
-import static org.keycloak.services.resources.KeycloakApplication.getSessionFactory;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import com.fasterxml.jackson.core.JsonParseException;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import org.jboss.logging.Logger;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.ext.ExceptionMapper;
+import jakarta.ws.rs.ext.Provider;
+
 import org.keycloak.Config;
 import org.keycloak.OAuthErrorException;
+import org.keycloak.forms.login.MessageType;
 import org.keycloak.forms.login.freemarker.model.UrlBean;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionTaskWithResult;
 import org.keycloak.models.KeycloakTransaction;
 import org.keycloak.models.ModelDuplicateException;
+import org.keycloak.models.ModelException;
 import org.keycloak.models.ModelIllegalStateException;
 import org.keycloak.models.ModelValidationException;
 import org.keycloak.models.RealmModel;
@@ -20,28 +31,20 @@ import org.keycloak.representations.idm.OAuth2ErrorRepresentation;
 import org.keycloak.services.managers.RealmManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.theme.Theme;
+import org.keycloak.theme.beans.AdvancedMessageFormatterMethod;
 import org.keycloak.theme.beans.LocaleBean;
 import org.keycloak.theme.beans.MessageBean;
 import org.keycloak.theme.beans.MessageFormatterMethod;
-import org.keycloak.forms.login.MessageType;
 import org.keycloak.theme.freemarker.FreeMarkerProvider;
 import org.keycloak.utils.KeycloakSessionUtil;
 import org.keycloak.utils.MediaType;
 import org.keycloak.utils.MediaTypeMatcher;
 
-import jakarta.ws.rs.WebApplicationException;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.ext.ExceptionMapper;
-import jakarta.ws.rs.ext.Provider;
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import org.jboss.logging.Logger;
 
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Properties;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import static org.keycloak.services.resources.KeycloakApplication.getSessionFactory;
 
 @Provider
 public class KeycloakErrorHandler implements ExceptionMapper<Throwable> {
@@ -90,7 +93,9 @@ public class KeycloakErrorHandler implements ExceptionMapper<Throwable> {
             OAuth2ErrorRepresentation error = new OAuth2ErrorRepresentation();
 
             error.setError(getErrorCode(throwable));
-            if (throwable instanceof ModelDuplicateException || throwable instanceof ModelValidationException) {
+            if (throwable.getCause() instanceof ModelException) {
+                error.setErrorDescription(throwable.getMessage());
+            } if (throwable instanceof ModelDuplicateException) {
                 error.setErrorDescription(throwable.getMessage());
             } else if (throwable instanceof JsonProcessingException || throwable.getCause() instanceof JsonProcessingException) {
                 error.setErrorDescription("Cannot parse the JSON");
@@ -99,7 +104,7 @@ public class KeycloakErrorHandler implements ExceptionMapper<Throwable> {
             }
 
             return Response.status(responseStatus)
-                    .header(HttpHeaders.CONTENT_TYPE, jakarta.ws.rs.core.MediaType.APPLICATION_JSON_TYPE.toString())
+                    .type(MediaType.APPLICATION_JSON_TYPE)
                     .entity(error)
                     .build();
         }
@@ -151,6 +156,10 @@ public class KeycloakErrorHandler implements ExceptionMapper<Throwable> {
             return OAuthErrorException.INVALID_REQUEST;
         }
 
+        if (cause instanceof ModelDuplicateException || throwable instanceof ModelDuplicateException) {
+            return "conflict";
+        }
+
         if (throwable instanceof WebApplicationException && throwable.getMessage() != null) {
             return throwable.getMessage();
         }
@@ -181,28 +190,34 @@ public class KeycloakErrorHandler implements ExceptionMapper<Throwable> {
 
     private static Map<String, Object> initAttributes(KeycloakSession session, RealmModel realm, Theme theme, Locale locale, Response.Status responseStatus) throws IOException {
         Map<String, Object> attributes = new HashMap<>();
-        Properties messagesBundle = theme.getMessages(locale);
+        Properties messagesBundle = theme.getEnhancedMessages(realm, locale);
 
+        final var localeBean =  new LocaleBean(realm, locale, session.getContext().getUri().getRequestUriBuilder(), messagesBundle);
+        final var lang = realm.isInternationalizationEnabled() ? localeBean.getCurrentLanguageTag() : Locale.ENGLISH.toLanguageTag();
+
+        attributes.put("pageId", "error");
         attributes.put("statusCode", responseStatus.getStatusCode());
 
         attributes.put("realm", realm);
         attributes.put("url", new UrlBean(realm, theme, session.getContext().getUri().getBaseUri(), null));
-        attributes.put("locale", new LocaleBean(realm, locale, session.getContext().getUri().getRequestUriBuilder(), messagesBundle));
-
+        attributes.put("locale", localeBean);
+        attributes.put("lang", lang);
 
         String errorKey = responseStatus == Response.Status.NOT_FOUND ? Messages.PAGE_NOT_FOUND : Messages.INTERNAL_SERVER_ERROR;
         String errorMessage = messagesBundle.getProperty(errorKey);
 
         attributes.put("message", new MessageBean(errorMessage, MessageType.ERROR));
+        // Default fallback in case an error occurs determining the dark mode later on.
+        attributes.put("darkMode", true);
+
+        attributes.put("msg", new MessageFormatterMethod(locale, messagesBundle));
+        attributes.put("advancedMsg", new AdvancedMessageFormatterMethod(locale, messagesBundle));
 
         try {
-            attributes.put("msg", new MessageFormatterMethod(locale, theme.getMessages(locale)));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        try {
-            attributes.put("properties", theme.getProperties());
+            Properties properties = theme.getProperties();
+            attributes.put("properties", properties);
+            attributes.put("darkMode", "true".equals(properties.getProperty("darkMode"))
+                    && realm.getAttribute("darkMode", true));
         } catch (IOException e) {
             e.printStackTrace();
         }

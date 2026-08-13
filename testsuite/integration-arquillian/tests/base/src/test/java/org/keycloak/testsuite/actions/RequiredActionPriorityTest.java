@@ -16,18 +16,8 @@
  */
 package org.keycloak.testsuite.actions;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.not;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.keycloak.testsuite.actions.RequiredActionEmailVerificationTest.getEmailLink;
+import java.util.List;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
 import org.keycloak.authentication.requiredactions.TermsAndConditions;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
@@ -50,9 +40,20 @@ import org.keycloak.testsuite.pages.LoginUpdateProfilePage;
 import org.keycloak.testsuite.pages.TermsAndConditionsPage;
 import org.keycloak.testsuite.pages.VerifyProfilePage;
 import org.keycloak.testsuite.util.GreenMailRule;
-import org.keycloak.testsuite.util.OAuthClient;
 
-import java.util.List;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+
+import static org.keycloak.testsuite.actions.RequiredActionEmailVerificationTest.getEmailLink;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 /**
  * @author <a href="mailto:wadahiro@gmail.com">Hiroyuki Wada</a>
@@ -229,10 +230,7 @@ public class RequiredActionPriorityTest extends AbstractTestRealmKeycloakTest {
         enableRequiredActionForUser(RequiredAction.TERMS_AND_CONDITIONS);
 
         // Login with kc_action=UPDATE_PROFILE
-        final var kcActionOauth = new OAuthClient();
-        kcActionOauth.init(driver);
-        kcActionOauth.kcAction(RequiredAction.UPDATE_PROFILE.name());
-        kcActionOauth.openLoginForm();
+        oauth.loginForm().kcAction(RequiredAction.UPDATE_PROFILE.name()).open();
         loginPage.assertCurrent(TEST_REALM_NAME);
         loginPage.login(USERNAME, PASSWORD);
 
@@ -242,7 +240,13 @@ public class RequiredActionPriorityTest extends AbstractTestRealmKeycloakTest {
         events.expectRequiredAction(EventType.UPDATE_PASSWORD).assertEvent();
         events.expectRequiredAction(EventType.UPDATE_CREDENTIAL).assertEvent();
 
-        // Second, update profile
+        // Second, accept terms
+        termsPage.assertCurrent();
+        termsPage.acceptTerms();
+        events.expectRequiredAction(EventType.CUSTOM_REQUIRED_ACTION).removeDetail(Details.REDIRECT_URI)
+                .detail(Details.CUSTOM_REQUIRED_ACTION, TermsAndConditions.PROVIDER_ID).assertEvent();
+
+        // Finally, update profile. Action specified by "kc_action" should be always triggered last
         updateProfilePage.assertCurrent();
         updateProfilePage.prepareUpdate().firstName(NEW_FIRST_NAME).lastName(NEW_LAST_NAME)
                 .email(NEW_EMAIL).submit();
@@ -251,12 +255,6 @@ public class RequiredActionPriorityTest extends AbstractTestRealmKeycloakTest {
                 .detail(Details.PREVIOUS_EMAIL, EMAIL)
                 .detail(Details.UPDATED_EMAIL, NEW_EMAIL)
                 .assertEvent();
-
-        // Finally, accept terms
-        termsPage.assertCurrent();
-        termsPage.acceptTerms();
-        events.expectRequiredAction(EventType.CUSTOM_REQUIRED_ACTION).removeDetail(Details.REDIRECT_URI)
-                .detail(Details.CUSTOM_REQUIRED_ACTION, TermsAndConditions.PROVIDER_ID).assertEvent();
 
         // Logged in
         appPage.assertCurrent();

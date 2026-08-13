@@ -1,7 +1,10 @@
 package org.keycloak.testsuite.broker;
 
-import org.junit.Assert;
-import org.junit.Test;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
 import org.keycloak.admin.client.resource.IdentityProviderResource;
 import org.keycloak.broker.oidc.OIDCIdentityProvider;
 import org.keycloak.jose.jws.JWSInput;
@@ -15,12 +18,12 @@ import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.testsuite.util.ClientBuilder;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.broker.OIDCIdentityProviderConfigRep;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.AuthorizationEndpointResponse;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import org.junit.Assert;
+import org.junit.Test;
 
 import static org.keycloak.testsuite.broker.BrokerTestTools.getConsumerRoot;
 
@@ -61,12 +64,10 @@ public class KcOidcBrokerNonceParameterTest extends AbstractBrokerTest {
 
         oauth.realm(bc.consumerRealmName());
         oauth.clientId("consumer-client");
-        oauth.nonce("123456");
 
-        OAuthClient.AuthorizationEndpointResponse authzResponse = oauth
-                .doLoginSocial(bc.getIDPAlias(), bc.getUserLogin(), bc.getUserPassword());
+        AuthorizationEndpointResponse authzResponse = doLoginSocial(oauth, bc.getIDPAlias(), bc.getUserLogin(), bc.getUserPassword(), "123456");
         String code = authzResponse.getCode();
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, null);
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
         IDToken idToken = toIdToken(response.getIdToken());
         
         Assert.assertEquals("123456", idToken.getNonce());
@@ -89,12 +90,10 @@ public class KcOidcBrokerNonceParameterTest extends AbstractBrokerTest {
 
         oauth.realm(bc.consumerRealmName());
         oauth.clientId("consumer-client");
-        oauth.nonce(null);
 
-        OAuthClient.AuthorizationEndpointResponse authzResponse = oauth
-                .doLoginSocial(bc.getIDPAlias(), bc.getUserLogin(), bc.getUserPassword());
+        AuthorizationEndpointResponse authzResponse = doLoginSocial(oauth, bc.getIDPAlias(), bc.getUserLogin(), bc.getUserPassword(), null);
         String code = authzResponse.getCode();
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, null);
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
         IDToken idToken = toIdToken(response.getIdToken());
 
         Assert.assertNull(idToken.getNonce());

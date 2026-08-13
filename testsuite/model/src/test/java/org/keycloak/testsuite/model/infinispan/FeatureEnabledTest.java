@@ -19,8 +19,6 @@ package org.keycloak.testsuite.model.infinispan;
 
 import java.util.Arrays;
 
-import org.infinispan.commons.CacheConfigurationException;
-import org.junit.Test;
 import org.keycloak.common.Profile;
 import org.keycloak.common.util.MultiSiteUtils;
 import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
@@ -28,15 +26,18 @@ import org.keycloak.infinispan.util.InfinispanUtils;
 import org.keycloak.testsuite.model.KeycloakModelTest;
 import org.keycloak.testsuite.model.RequireProvider;
 
+import org.infinispan.commons.CacheConfigurationException;
+import org.junit.Test;
+
+import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.CLUSTERED_CACHE_NAMES;
+import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.LOCAL_CACHE_NAMES;
+
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeFalse;
 import static org.junit.Assume.assumeTrue;
-import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.CLUSTERED_CACHE_NAMES;
-import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.LOCAL_CACHE_NAMES;
 
 /**
  * Checks if the correct embedded or remote cache is started based on {@link org.keycloak.common.Profile.Feature}.
@@ -76,7 +77,7 @@ public class FeatureEnabledTest extends KeycloakModelTest {
         inComittedTransaction(session -> {
             var clusterProvider = session.getProvider(InfinispanConnectionProvider.class);
             Arrays.stream(CLUSTERED_CACHE_NAMES).forEach(s -> assertEmbeddedCacheExists(clusterProvider, s));
-            Arrays.stream(CLUSTERED_CACHE_NAMES).forEach(s -> assertRemoteCacheDoesNotExists(clusterProvider, s));
+            Arrays.stream(CLUSTERED_CACHE_NAMES).forEach(s -> assertRemoteCacheCallThrowsException(clusterProvider, s));
         });
     }
 
@@ -97,8 +98,11 @@ public class FeatureEnabledTest extends KeycloakModelTest {
         assertNotNull(String.format("Remote cache '%s' should exist", cacheName), provider.getRemoteCache(cacheName));
     }
 
-    private static void assertRemoteCacheDoesNotExists(InfinispanConnectionProvider provider, String cacheName) {
-        assertNull(String.format("Remote cache '%s' should not exist", cacheName), provider.getRemoteCache(cacheName));
+    private static void assertRemoteCacheCallThrowsException(InfinispanConnectionProvider provider, String cacheName) {
+        try {
+            provider.getRemoteCache(cacheName);
+            fail(String.format("Remote cache '%s' should not exist", cacheName));
+        } catch (IllegalStateException expected) {}
     }
 
 }

@@ -23,11 +23,8 @@ import java.util.Map;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriBuilder;
 
-import org.jboss.logging.Logger;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.authentication.AuthenticationProcessor;
-import org.keycloak.common.Profile;
 import org.keycloak.common.util.Time;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
@@ -35,7 +32,6 @@ import org.keycloak.events.EventType;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.ClientSessionContext;
-import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.OAuth2DeviceCodeModel;
 import org.keycloak.models.UserConsentModel;
 import org.keycloak.models.UserModel;
@@ -44,14 +40,12 @@ import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.OIDCLoginProtocolService;
 import org.keycloak.protocol.oidc.TokenManager;
-import org.keycloak.protocol.oidc.grants.OAuth2GrantType;
 import org.keycloak.protocol.oidc.grants.OAuth2GrantTypeBase;
 import org.keycloak.protocol.oidc.grants.ciba.channel.CIBAAuthenticationRequest;
 import org.keycloak.protocol.oidc.grants.ciba.clientpolicy.context.BackchannelTokenRequestContext;
 import org.keycloak.protocol.oidc.grants.ciba.clientpolicy.context.BackchannelTokenResponseContext;
 import org.keycloak.protocol.oidc.grants.ciba.endpoints.CibaRootEndpoint;
 import org.keycloak.protocol.oidc.grants.device.DeviceGrantType;
-import org.keycloak.provider.EnvironmentDependentProviderFactory;
 import org.keycloak.services.CorsErrorResponseException;
 import org.keycloak.services.ErrorResponseException;
 import org.keycloak.services.Urls;
@@ -61,6 +55,8 @@ import org.keycloak.services.managers.UserConsentManager;
 import org.keycloak.services.util.DefaultClientSessionContext;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
+
+import org.jboss.logging.Logger;
 
 /**
  * OpenID Connect Client-Initiated Backchannel Authentication Flow
@@ -145,6 +141,9 @@ public class CibaGrantType extends OAuth2GrantTypeBase {
         try {
             session.clientPolicy().triggerOnEvent(new BackchannelTokenRequestContext(request, formParams));
         } catch (ClientPolicyException cpe) {
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
             event.error(cpe.getError());
             throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT, cpe.getErrorDetail(), Response.Status.BAD_REQUEST);
         }
@@ -215,8 +214,8 @@ public class CibaGrantType extends OAuth2GrantTypeBase {
         authSession.setClientNote(OIDCLoginProtocol.ISSUER, Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realm.getName()));
         authSession.setClientNote(OIDCLoginProtocol.SCOPE_PARAM, request.getScope());
         if (additionalParams != null) {
-            for (String paramName : additionalParams.keySet()) {
-                authSession.setClientNote(ADDITIONAL_CALLBACK_PARAMS_PREFIX + paramName, additionalParams.get(paramName));
+            for (var entry : additionalParams.entrySet()) {
+                authSession.setClientNote(ADDITIONAL_CALLBACK_PARAMS_PREFIX + entry.getKey(), entry.getValue());
             }
         }
         if (request.getOtherClaims() != null) {

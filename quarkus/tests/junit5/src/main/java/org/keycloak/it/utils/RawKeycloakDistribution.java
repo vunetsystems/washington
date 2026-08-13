@@ -41,33 +41,23 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
-import io.quarkus.deployment.util.FileUtil;
-import io.quarkus.fs.util.ZipUtils;
-
-import io.restassured.RestAssured;
-import org.awaitility.Awaitility;
-import org.jboss.logging.Logger;
-import org.jboss.shrinkwrap.api.ShrinkWrap;
-import org.jboss.shrinkwrap.api.asset.EmptyAsset;
-import org.jboss.shrinkwrap.api.exporter.ZipExporter;
-import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.keycloak.common.Version;
 import org.keycloak.it.TestProvider;
 import org.keycloak.it.junit5.extension.CLIResult;
@@ -75,6 +65,16 @@ import org.keycloak.quarkus.runtime.Environment;
 import org.keycloak.quarkus.runtime.cli.command.Build;
 import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper;
 import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMappers;
+
+import io.quarkus.deployment.util.FileUtil;
+import io.quarkus.fs.util.ZipUtils;
+import io.restassured.RestAssured;
+import org.awaitility.Awaitility;
+import org.jboss.logging.Logger;
+import org.jboss.shrinkwrap.api.ShrinkWrap;
+import org.jboss.shrinkwrap.api.asset.EmptyAsset;
+import org.jboss.shrinkwrap.api.exporter.ZipExporter;
+import org.jboss.shrinkwrap.api.spec.JavaArchive;
 
 import static org.keycloak.quarkus.runtime.Environment.LAUNCH_MODE;
 import static org.keycloak.quarkus.runtime.Environment.isWindows;
@@ -87,8 +87,6 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     private Process keycloak;
     private int exitCode = -1;
     private final Path distPath;
-    private final List<String> outputStream = Collections.synchronizedList(new ArrayList<>());
-    private final List<String> errorStream = Collections.synchronizedList(new ArrayList<>());
     private boolean manualStop;
     private String relativePath;
     private int httpPort;
@@ -101,8 +99,16 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     private ExecutorService outputExecutor;
     private boolean inited = false;
     private final Map<String, String> envVars = new HashMap<>();
+    private final OutputConsumer outputConsumer;
+    private long startTimeout = TimeUnit.SECONDS.toMillis(Long.getLong("keycloak.distribution.start.timeout", 120L));
+    private boolean throwErrorIfFailedToStart = false;
+    private boolean threadDump = true;
 
     public RawKeycloakDistribution(boolean debug, boolean manualStop, boolean enableTls, boolean reCreate, boolean removeBuildOptionsAfterBuild, int requestPort) {
+        this(debug, manualStop, enableTls, reCreate, removeBuildOptionsAfterBuild, requestPort, new DefaultOutputConsumer());
+    }
+
+    public RawKeycloakDistribution(boolean debug, boolean manualStop, boolean enableTls, boolean reCreate, boolean removeBuildOptionsAfterBuild, int requestPort, OutputConsumer outputConsumer) {
         this.debug = debug;
         this.manualStop = manualStop;
         this.enableTls = enableTls;
@@ -110,16 +116,44 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
         this.removeBuildOptionsAfterBuild = removeBuildOptionsAfterBuild;
         this.requestPort = requestPort;
         this.distPath = prepareDistribution();
+        this.outputConsumer = outputConsumer;
     }
-    
+
+    public RawKeycloakDistribution withThrowErrorIfFailedToStart(boolean throwErrorIfFailedToStart) {
+        this.throwErrorIfFailedToStart = throwErrorIfFailedToStart;
+        return this;
+    }
+
+    public RawKeycloakDistribution withThreadDump(boolean threadDump) {
+        this.threadDump = threadDump;
+        return this;
+    }
+
+    public RawKeycloakDistribution withStartTimeout(long startTimeout) {
+        this.startTimeout = startTimeout;
+        return this;
+    }
+
+    public CLIResult kc(String... arguments) throws IOException {
+        return kc(Arrays.asList(arguments));
+    }
+
+    public CLIResult kc(List<String> arguments) throws IOException {
+        return invoke(SCRIPT_CMD, arguments);
+    }
+
     public CLIResult kcadm(String... arguments) throws IOException {
     	return kcadm(Arrays.asList(arguments));
     }
 
     public CLIResult kcadm(List<String> arguments) throws IOException {
+        return invoke(SCRIPT_KCADM_CMD, arguments);
+    }
+
+    private CLIResult invoke(String script, List<String> arguments) throws IOException {
         List<String> allArgs = new ArrayList<>();
 
-        invoke(allArgs, SCRIPT_KCADM_CMD);
+        invoke(allArgs, script);
 
         if (this.isDebug()) {
             allArgs.add("-x");
@@ -137,15 +171,14 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
 
         builder.environment().putAll(envVars);
 
-        Process kcadm = builder.start();
+        Process proc = builder.start();
 
-        List<String> outputStream = new ArrayList<>();
-        List<String> errorStream = new ArrayList<>();
-        readOutput(kcadm, outputStream, errorStream);
+        DefaultOutputConsumer outputConsumer = new DefaultOutputConsumer();
+        readOutput(proc, outputConsumer);
 
-        int exitValue = kcadm.exitValue();
+        int exitValue = proc.exitValue();
 
-        return CLIResult.create(outputStream, errorStream, exitValue);
+        return CLIResult.create(outputConsumer.getStdOut(), outputConsumer.getErrOut(), exitValue);
     }
 
 	private void invoke(List<String> allArgs, String cmd) {
@@ -189,7 +222,6 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
             }
             if (!manualStop) {
                 stop();
-                envVars.clear();
             }
         }
 
@@ -213,12 +245,16 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
 
                 keycloak.destroy();
                 keycloak.waitFor(DEFAULT_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                exitCode = keycloak.exitValue();
             } catch (Exception cause) {
                 destroyDescendantsOnWindows(keycloak, true);
                 keycloak.destroyForcibly();
+                threadDump();
                 throw new RuntimeException("Failed to stop the server", cause);
             }
+        }
+
+        if (keycloak != null) {
+            exitCode = keycloak.exitValue();
         }
 
         shutdownOutputExecutor();
@@ -229,10 +265,19 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
             return;
         }
 
+        List<ProcessHandle> descendants = parent.descendants().toList();
+        if (descendants.isEmpty()) {
+            return;
+        }
+
+        LOG.debugf("Found %d descendant processes to terminate", descendants.size());
         CompletableFuture<?> allProcesses = CompletableFuture.completedFuture(null);
 
-        for (ProcessHandle process : parent.descendants().toList()) {
+        // Terminate all processes
+        for (ProcessHandle process : descendants) {
             if (force) {
+                LOG.warn("Using forcible termination of descendant processes after normal termination failed");
+                LOG.debugf("Forcibly terminating process %s", process.pid());
                 process.destroyForcibly();
             } else {
                 process.destroy();
@@ -241,30 +286,29 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
             allProcesses = CompletableFuture.allOf(allProcesses, process.onExit());
         }
 
+        // Wait for all processes to exit according to Java
         try {
             allProcesses.get(DEFAULT_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            LOG.debugf("All descendant processes terminated according to Java");
         } catch (Exception cause) {
             throw new RuntimeException("Failed to terminate descendants processes", cause);
         }
 
         try {
-            // TODO: remove this. do not ask why, but on Windows we are here even though the process was previously terminated
-            // without this pause, tests re-installing dist before tests should fail
-            // looks like pausing the current thread let windows to cleanup processes?
-            // more likely it is env dependent
-            Thread.sleep(500);
+            Thread.sleep(2000);
         } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
     @Override
     public List<String> getOutputStream() {
-        return outputStream;
+        return outputConsumer.getStdOut();
     }
 
     @Override
     public List<String> getErrorStream() {
-        return errorStream;
+        return outputConsumer.getErrOut();
     }
 
     @Override
@@ -305,24 +349,6 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     }
 
     @Override
-    public void assertStopped() {
-        try {
-            if (keycloak != null) {
-                keycloak.onExit().get(DEFAULT_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e);
-        } catch (TimeoutException e) {
-            LOG.warn("Process did not exit as expected, will attempt a thread dump");
-            threadDump();
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
     public void setRequestPort() {
         setRequestPort(requestPort);
     }
@@ -341,7 +367,11 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     }
 
     private void waitForReadiness(String scheme, int port) throws MalformedURLException {
-        URL contextRoot = new URL(scheme + "://localhost:" + port + ("/" + relativePath + "/realms/master/").replace("//", "/"));
+        var myRelativePath = relativePath;
+        if (!myRelativePath.endsWith("/")) {
+            myRelativePath += "/";
+        }
+        URL contextRoot = new URL(scheme + "://localhost:" + port + myRelativePath + "realms/master/");
         HttpURLConnection connection = null;
         long startTime = System.currentTimeMillis();
         Exception ex = null;
@@ -354,7 +384,11 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
             }
 
             if (!keycloak.isAlive()) {
-                return;
+                if (throwErrorIfFailedToStart) {
+                    throw new RuntimeException("Keycloak failed to start: process terminated");
+                } else {
+                    return;
+                }
             }
 
             try {
@@ -389,6 +423,10 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     }
 
     private void threadDump() {
+        if (!threadDump) {
+            return;
+        }
+
         if (Environment.isWindows()) {
             return;
         }
@@ -405,16 +443,11 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     }
 
     private long getStartTimeout() {
-        return TimeUnit.SECONDS.toMillis(120);
+        return startTimeout;
     }
 
     private HostnameVerifier createInsecureHostnameVerifier() {
-        return new HostnameVerifier() {
-            @Override
-            public boolean verify(String s, SSLSession sslSession) {
-                return true;
-            }
-        };
+        return (s, sslSession) -> true;
     }
 
     private SSLSocketFactory createInsecureSslSocketFactory() throws IOException {
@@ -470,11 +503,25 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     }
 
     private void reset() {
-        outputStream.clear();
-        errorStream.clear();
+        outputConsumer.reset();
         exitCode = -1;
         shutdownOutputExecutor();
         keycloak = null;
+    }
+
+    private Path inDistZipDirectory(File distFile) throws Exception{
+
+        try (ZipFile zipFile = new ZipFile(distFile)) {
+            Optional<? extends ZipEntry> e = zipFile.stream().filter(ZipEntry::isDirectory).findFirst();
+            if (e.isPresent()) {
+                String dirName = e.get().getName();
+                if (dirName.contains("..")) {
+                    throw new RuntimeException("inside zip distribution directory cannot contain relative paths: " + dirName);
+                }
+                return Path.of(dirName);
+            }
+        };
+        throw new RuntimeException(String.format("ZIP file '%s' doesn't contain any directories", distPath));
     }
 
     private Path prepareDistribution() {
@@ -482,17 +529,18 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
             Path distRootPath = Paths.get(System.getProperty("java.io.tmpdir")).resolve("kc-tests");
             distRootPath.toFile().mkdirs();
 
-            File distFile = new File("../../dist/" + File.separator + "target" + File.separator + "keycloak-" + Version.VERSION + ".zip");
-            String distDirName;
-
-            if (distFile.exists()) {
-                distDirName = distFile.getName();
+            File distFile;
+            if (System.getProperty("product.dist.zip") != null) {
+                distFile = new File(System.getProperty("product.dist.zip"));
             } else {
-                distFile = Maven.resolveArtifact("org.keycloak", "keycloak-quarkus-dist").toFile();
-                distDirName = distFile.getName().replace("-quarkus-dist", "");
+                distFile = new File("../../dist/" + File.separator + "target" + File.separator + "keycloak-" + Version.VERSION + ".zip");
             }
-            distRootPath.toFile().mkdirs();
-            Path dPath = distRootPath.resolve(distDirName.substring(0, distDirName.lastIndexOf('.')));
+
+            if (!distFile.exists()) {
+                distFile = Maven.resolveArtifact("org.keycloak", "keycloak-quarkus-dist").toFile();
+            }
+
+            Path dPath = distRootPath.resolve(inDistZipDirectory(distFile));
 
             if (!inited || (reCreate || !dPath.toFile().exists())) {
                 FileUtil.deleteDirectory(dPath);
@@ -521,17 +569,17 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
     }
 
     private void readOutput() {
-        readOutput(keycloak, outputStream, errorStream);
+        readOutput(keycloak, outputConsumer);
     }
 
-    private static void readOutput(Process process, List<String> outputStream, List<String> errorStream) {
+    private void readOutput(Process process, OutputConsumer outputConsumer) {
         try (
                 BufferedReader outStream = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                BufferedReader errStream = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+                BufferedReader errStream = new BufferedReader(new InputStreamReader(process.getErrorStream()))
         ) {
             while (process.isAlive()) {
-                readStream(outStream, outputStream);
-                readStream(errStream, errorStream);
+                readStream(outStream, outputConsumer, false);
+                readStream(errStream, outputConsumer, true);
                 // a hint to temporarily disable the current thread in favor of the process where the distribution is running
                 // after some tests it shows effective to help starting the server faster
                 LockSupport.parkNanos(1L);
@@ -541,12 +589,15 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
         }
     }
 
-    private static void readStream(BufferedReader reader, List<String> stream) throws IOException {
+    private void readStream(BufferedReader reader, OutputConsumer outputConsumer, boolean error) throws IOException {
         String line;
 
         while (reader.ready() && (line = reader.readLine()) != null) {
-            stream.add(line);
-            System.out.println(line);
+            if (error) {
+                outputConsumer.onErrOut(line);
+            } else {
+                outputConsumer.onStdOut(line);
+            }
         }
     }
 
@@ -587,22 +638,12 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
 
     @Override
     public void removeProperty(String name) {
-        updateProperties(new Consumer<Properties>() {
-            @Override
-            public void accept(Properties properties) {
-                properties.remove(name);
-            }
-        }, distPath.resolve("conf").resolve("keycloak.conf").toFile());
+        updateProperties(properties -> properties.remove(name), distPath.resolve("conf").resolve("keycloak.conf").toFile());
     }
 
     @Override
     public void setQuarkusProperty(String key, String value) {
-        updateProperties(new Consumer<Properties>() {
-            @Override
-            public void accept(Properties properties) {
-                properties.put(key, value);
-            }
-        }, getQuarkusPropertiesFile());
+        updateProperties(properties -> properties.put(key, value), getQuarkusPropertiesFile());
     }
 
     @Override
@@ -650,9 +691,22 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
 
     private static void copyProvider(Path distPath, String groupId, String artifactId) {
         try {
-            Files.copy(Maven.resolveArtifact(groupId, artifactId), distPath.resolve("providers").resolve(artifactId + ".jar"));
+            Path providerPath = Maven.resolveArtifact(groupId, artifactId);
+            if (!Files.isRegularFile(providerPath)) {
+                throw new RuntimeException("Failed to copy JAR file to 'providers' directory; " + providerPath + " is not a file");
+            }
+
+            Files.copy(providerPath, distPath.resolve("providers").resolve(artifactId + ".jar"));
         } catch (IOException cause) {
             throw new RuntimeException("Failed to copy JAR file to 'providers' directory", cause);
+        }
+    }
+
+    public void copyConfigFile(Path configFilePath) {
+        try {
+            Files.copy(configFilePath, distPath.resolve("conf").resolve(configFilePath.getFileName()));
+        } catch (IOException cause) {
+            throw new RuntimeException("Failed to copy config file [" + configFilePath + "] to 'conf' directory", cause);
         }
     }
 
@@ -661,7 +715,7 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
 
         if (propertiesFile.exists()) {
             try (
-                FileInputStream in = new FileInputStream(propertiesFile);
+                FileInputStream in = new FileInputStream(propertiesFile)
             ) {
 
                 properties.load(in);
@@ -722,9 +776,48 @@ public final class RawKeycloakDistribution implements KeycloakDistribution {
         }
 
         if (type.isInstance(this)) {
-            return (D) this;
+            return type.cast(type);
         }
 
         throw new IllegalArgumentException("Not a " + type + " type");
+    }
+
+    @Override
+    public void clearEnv() {
+        this.envVars.clear();
+    }
+
+    private static final class DefaultOutputConsumer implements OutputConsumer {
+
+        private final List<String> stdOut = Collections.synchronizedList(new ArrayList<>());
+        private final List<String> errOut = Collections.synchronizedList(new ArrayList<>());
+
+        @Override
+        public void onStdOut(String line) {
+            System.out.println(line);
+            stdOut.add(line);
+        }
+
+        @Override
+        public void onErrOut(String line) {
+            System.err.println(line);
+            errOut.add(line);
+        }
+
+        @Override
+        public void reset() {
+            stdOut.clear();
+            errOut.clear();
+        }
+
+        @Override
+        public List<String> getErrOut() {
+            return errOut;
+        }
+
+        @Override
+        public List<String> getStdOut() {
+            return stdOut;
+        }
     }
 }

@@ -16,11 +16,16 @@
  */
 package org.keycloak.testsuite.oid4vc.issuance.signing;
 
+import java.io.IOException;
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+
 import jakarta.ws.rs.client.Client;
 import jakarta.ws.rs.client.WebTarget;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriBuilder;
-import org.junit.Test;
+
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.jose.jwk.JSONWebKeySet;
 import org.keycloak.protocol.oid4vc.issuance.JWTVCIssuerWellKnownProviderFactory;
@@ -28,17 +33,14 @@ import org.keycloak.protocol.oid4vc.model.JWTVCIssuerMetadata;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.testsuite.util.AdminClientUtil;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.keycloak.util.JsonSerialization;
 
-import java.io.IOException;
-import java.net.URI;
-import java.util.List;
-import java.util.Map;
+import org.junit.Test;
 
-import static junit.framework.Assert.assertTrue;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 
 /**
@@ -67,13 +69,13 @@ import static org.junit.Assert.assertNotNull;
 
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
+        testRealm.setVerifiableCredentialsEnabled(true);
+        
         if (testRealm.getComponents() != null) {
             testRealm.getComponents().add("org.keycloak.keys.KeyProvider", getRsaKeyProvider(RSA_KEY));
-            testRealm.getComponents().add("org.keycloak.protocol.oid4vc.issuance.signing.VerifiableCredentialsSigningService", getJwtSigningProvider(RSA_KEY));
         } else {
             testRealm.setComponents(new MultivaluedHashMap<>(
-                    Map.of("org.keycloak.keys.KeyProvider", List.of(getRsaKeyProvider(RSA_KEY)),
-                            "org.keycloak.protocol.oid4vc.issuance.signing.VerifiableCredentialsSigningService", List.of(getJwtSigningProvider(RSA_KEY))
+                    Map.of("org.keycloak.keys.KeyProvider", List.of(getRsaKeyProvider(RSA_KEY))
                     )));
         }
     }

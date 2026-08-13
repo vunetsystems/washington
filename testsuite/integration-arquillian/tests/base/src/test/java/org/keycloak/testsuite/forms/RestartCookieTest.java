@@ -17,18 +17,19 @@
 
 package org.keycloak.testsuite.forms;
 
-import jakarta.ws.rs.core.Response;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import javax.crypto.SecretKey;
 
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Rule;
-import org.junit.Test;
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.TokenCategory;
+import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.crypto.Algorithm;
 import org.keycloak.crypto.KeyUse;
@@ -52,11 +53,13 @@ import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.util.ClientBuilder;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.ParResponse;
 import org.keycloak.util.TokenUtil;
-import org.openqa.selenium.Cookie;
 
-import javax.crypto.SecretKey;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Rule;
+import org.junit.Test;
+import org.openqa.selenium.Cookie;
 
 import static org.junit.Assert.assertEquals;
 
@@ -129,8 +132,36 @@ public class RestartCookieTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void testRestartCookie() {
         loginPage.open();
-        String restartCookie = loginPage.getDriver().manage().getCookieNamed(RestartLoginCookie.KC_RESTART).getValue();
+        String restartCookie = driver.manage().getCookieNamed(RestartLoginCookie.KC_RESTART).getValue();
         assertRestartCookie(restartCookie);
+    }
+
+    @Test
+    public void testRestartCookieRotateAes() {
+        loginPage.open();
+        String restartCookie = driver.manage().getCookieNamed(RestartLoginCookie.KC_RESTART).getValue();
+        rotateAesKeys();
+        assertRestartCookie(restartCookie);
+    }
+
+    @Test
+    public void testRestartCookieParsedOldA128CBCHS256() throws IOException {
+        loginPage.open();
+        String restartCookie = driver.manage().getCookieNamed(RestartLoginCookie.KC_RESTART).getValue();
+        getTestingClient().server(TEST_REALM_NAME).run(session -> {
+            try {
+                RestartLoginCookie restartLoginCookie = RestartLoginCookie.decryptAndDecode(session, restartCookie);
+                String sigAlgorithm = session.tokens().signatureAlgorithm(TokenCategory.INTERNAL);
+                String algAlgorithm = session.tokens().cekManagementAlgorithm(TokenCategory.INTERNAL);
+                SecretKey encKey = session.keys().getActiveKey(session.getContext().getRealm(), KeyUse.ENC, algAlgorithm).getSecretKey();
+                SecretKey signKey = session.keys().getActiveKey(session.getContext().getRealm(), KeyUse.SIG, sigAlgorithm).getSecretKey();
+                String encodedJwt = session.tokens().encode(restartLoginCookie);
+                String oldRestartCookie = TokenUtil.jweDirectEncode(encKey, signKey, encodedJwt.getBytes(StandardCharsets.UTF_8));
+                Assert.assertNotNull(RestartLoginCookie.decryptAndDecode(session, oldRestartCookie));
+            } catch (Exception e) {
+                Assert.fail();
+            }
+        });
     }
 
     @Test
@@ -143,10 +174,10 @@ public class RestartCookieTest extends AbstractTestRealmKeycloakTest {
                 .attribute(ParConfig.REQUIRE_PUSHED_AUTHORIZATION_REQUESTS, "true")
                 .build());
 
-        oauth.clientId(clientId);
+        oauth.client(clientId, "secret");
         String requestUri = null;
         try {
-            OAuthClient.ParResponse pResp = oauth.doPushedAuthorizationRequest(clientId, "secret");
+            ParResponse pResp = oauth.doPushedAuthorizationRequest();
             assertEquals(201, pResp.getStatusCode());
             requestUri = pResp.getRequestUri();
         }
@@ -157,13 +188,39 @@ public class RestartCookieTest extends AbstractTestRealmKeycloakTest {
         oauth.redirectUri(null);
         oauth.scope(null);
         oauth.responseType(null);
-        oauth.requestUri(requestUri);
-        String state = oauth.stateParamRandom().getState();
-        oauth.stateParamHardcoded(state);
 
-        oauth.openLoginForm();
-        String restartCookie = loginPage.getDriver().manage().getCookieNamed(RestartLoginCookie.KC_RESTART).getValue();
+        oauth.loginForm().requestUri(requestUri).state("testRestartCookieWithPar").open();
+        String restartCookie = driver.manage().getCookieNamed(RestartLoginCookie.KC_RESTART).getValue();
         assertRestartCookie(restartCookie);
+    }
+
+    private void rotateAesKeys() {
+        RealmResource realm = adminClient.realm(TEST_REALM_NAME);
+        String activeKid = realm.keys().getKeyMetadata().getActive().get(Algorithm.AES);
+
+        // Rotate public keys on the parent broker
+        String realmId = realm.toRepresentation().getId();
+        ComponentRepresentation keys = createComponentRep(Algorithm.AES, "aes-generated", realmId,
+                new MultivaluedHashMap<>(Map.of("secretSize", List.of("16"))));
+        try (Response response = realm.components().add(keys)) {
+            assertEquals(201, response.getStatus());
+        }
+
+        String updatedActiveKid = realm.keys().getKeyMetadata().getActive().get(Algorithm.AES);
+        Assert.assertNotEquals(activeKid, updatedActiveKid);
+    }
+
+    private ComponentRepresentation createComponentRep(String algorithm, String providerId, String realmId, MultivaluedHashMap<String,String> extra) {
+        ComponentRepresentation keys = new ComponentRepresentation();
+        keys.setName("generated");
+        keys.setProviderType(KeyProvider.class.getName());
+        keys.setProviderId(providerId);
+        keys.setParentId(realmId);
+        MultivaluedHashMap<String, String> config = new MultivaluedHashMap<>(extra);
+        keys.setConfig(config);
+        config.putSingle("priority", Long.toString(System.currentTimeMillis()));
+        config.putSingle("algorithm", algorithm);
+        return keys;
     }
 
     private void assertRestartCookie(String restartCookie) {
@@ -172,14 +229,7 @@ public class RestartCookieTest extends AbstractTestRealmKeycloakTest {
                 .run(session ->
                 {
                     try {
-                        String sigAlgorithm = session.tokens().signatureAlgorithm(TokenCategory.INTERNAL);
-                        String encAlgorithm = session.tokens().cekManagementAlgorithm(TokenCategory.INTERNAL);
-                        SecretKey encKey = session.keys().getActiveKey(session.getContext().getRealm(), KeyUse.ENC, encAlgorithm).getSecretKey();
-                        SecretKey signKey = session.keys().getActiveKey(session.getContext().getRealm(), KeyUse.SIG, sigAlgorithm).getSecretKey();
-
-                        byte[] contentBytes = TokenUtil.jweDirectVerifyAndDecode(encKey, signKey, restartCookie);
-                        String jwt = new String(contentBytes, StandardCharsets.UTF_8);
-                        RestartLoginCookie restartLoginCookie = session.tokens().decode(jwt, RestartLoginCookie.class);
+                        RestartLoginCookie restartLoginCookie = RestartLoginCookie.decryptAndDecode(session, restartCookie);
                         Assert.assertFalse(restartLoginCookie.getNotes().keySet().stream().anyMatch(sensitiveNotes::contains));
                     } catch (Exception e) {
                         Assert.fail();
@@ -191,23 +241,17 @@ public class RestartCookieTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void testRestartCookieBackwardsCompatible_Keycloak25() throws IOException {
         String oldRestartCookie = testingClient.server().fetchString((KeycloakSession session) -> {
-            try {
-                String cookieVal = OLD_RESTART_COOKIE_JSON.replace("\n", "").replace(" ", "");
-                RealmModel realm = session.realms().getRealmByName("test");
+            String cookieVal = OLD_RESTART_COOKIE_JSON.replace("\n", "").replace(" ", "");
+            RealmModel realm = session.realms().getRealmByName("test");
 
-                KeyManager.ActiveHmacKey activeKey = session.keys().getActiveHmacKey(realm);
+            KeyManager.ActiveHmacKey activeKey = session.keys().getActiveHmacKey(realm);
 
-                String encodedToken = new JWSBuilder()
-                        .kid(activeKey.getKid())
-                        .content(cookieVal.getBytes("UTF-8"))
-                        .hmac256(activeKey.getSecretKey());
+            String encodedToken = new JWSBuilder()
+                    .kid(activeKey.getKid())
+                    .content(cookieVal.getBytes(StandardCharsets.UTF_8))
+                    .hmac256(activeKey.getSecretKey());
 
-                return encodedToken;
-
-
-            } catch (IOException ioe) {
-                throw new RuntimeException(ioe);
-            }
+            return encodedToken;
         });
 
         oauth.openLoginForm();
@@ -229,24 +273,18 @@ public class RestartCookieTest extends AbstractTestRealmKeycloakTest {
     @Test
     public void testRestartCookieBackwardsCompatible_Keycloak19() throws IOException {
         String oldRestartCookie = testingClient.server().fetchString((KeycloakSession session) -> {
-            try {
-                String cookieVal = OLD_RESTART_COOKIE_JSON.replace("\n", "").replace(" ", "");
-                RealmModel realm = session.realms().getRealmByName("test");
+            String cookieVal = OLD_RESTART_COOKIE_JSON.replace("\n", "").replace(" ", "");
+            RealmModel realm = session.realms().getRealmByName("test");
 
-                KeyManager.ActiveHmacKey activeKey = session.keys().getActiveHmacKey(realm);
+            KeyManager.ActiveHmacKey activeKey = session.keys().getActiveHmacKey(realm);
 
-                // There was no KID in the token in Keycloak 1.9.8
-                String encodedToken = new JWSBuilder()
-                        //.kid(activeKey.getKid())
-                        .content(cookieVal.getBytes("UTF-8"))
-                        .hmac256(activeKey.getSecretKey());
+            // There was no KID in the token in Keycloak 1.9.8
+            String encodedToken = new JWSBuilder()
+                    //.kid(activeKey.getKid())
+                    .content(cookieVal.getBytes(StandardCharsets.UTF_8))
+                    .hmac256(activeKey.getSecretKey());
 
-                return encodedToken;
-
-
-            } catch (IOException ioe) {
-                throw new RuntimeException(ioe);
-            }
+            return encodedToken;
         });
 
         oauth.openLoginForm();

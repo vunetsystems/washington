@@ -17,17 +17,9 @@
 
 package org.keycloak.testsuite.client.resources;
 
-import org.jboss.resteasy.reactive.NoCache;
-import org.keycloak.common.Profile;
-import org.keycloak.common.enums.HostnameVerificationPolicy;
-import org.keycloak.events.EventType;
-import org.keycloak.representations.idm.AdminEventRepresentation;
-import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
-import org.keycloak.representations.idm.EventRepresentation;
-import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.testsuite.components.TestProvider;
-import org.keycloak.testsuite.rest.representation.AuthenticatorState;
-import org.keycloak.utils.MediaType;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -39,13 +31,22 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Response;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import org.keycloak.common.Profile;
+import org.keycloak.common.enums.HostnameVerificationPolicy;
+import org.keycloak.events.EventType;
+import org.keycloak.protocol.oidc.encode.AccessTokenContext;
+import org.keycloak.representations.idm.AdminEventRepresentation;
+import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
+import org.keycloak.representations.idm.EventRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.testsuite.rest.representation.AuthenticatorState;
+import org.keycloak.utils.MediaType;
 
 import org.infinispan.commons.time.TimeService;
+import org.jboss.resteasy.reactive.NoCache;
 
 /**
+ * For an implementation see TestingResourceProvider
  * @author <a href="mailto:mstrukel@redhat.com">Marko Strukelj</a>
  */
 
@@ -260,11 +261,6 @@ public interface TestingResource {
     TestingExportImportResource exportImport();
 
     @GET
-    @Path("/test-component")
-    @Produces(MediaType.APPLICATION_JSON)
-    Map<String, TestProvider.DetailsRepresentation> getTestComponentDetails();
-
-    @GET
     @Path("/test-amphibian-component")
     @Produces(MediaType.APPLICATION_JSON)
     Map<String, Map<String, Object>> getTestAmphibianComponentDetails();
@@ -289,11 +285,6 @@ public interface TestingResource {
     @Path("/restore-periodic-tasks")
     @Produces(MediaType.APPLICATION_JSON)
     Response restorePeriodicTasks();
-
-    @Path("generate-audience-client-scope")
-    @POST
-    @NoCache
-    String generateAudienceClientScope(@QueryParam("realm") final String realmName, final @QueryParam("clientId") String clientId);
 
     @GET
     @Path("/uncaught-error")
@@ -322,16 +313,6 @@ public interface TestingResource {
     @Produces(MediaType.TEXT_PLAIN_UTF_8)
     String runModelTestOnServer(@QueryParam("testClassName") String testClassName,
                                 @QueryParam("testMethodName") String testMethodName);
-
-    @GET
-    @Path("js/keycloak.js")
-    @Produces(MediaType.TEXT_HTML_UTF_8)
-    String getJavascriptAdapter();
-
-    @GET
-    @Path("/get-javascript-testing-environment")
-    @Produces(MediaType.TEXT_HTML_UTF_8)
-    String getJavascriptTestingEnvironment();
 
     @GET
     @Path("/list-disabled-features")
@@ -473,11 +454,22 @@ public interface TestingResource {
     String getPreAuthorizedCode(@QueryParam("realm") final String realmName, @QueryParam("userSessionId") final String userSessionId, @QueryParam("clientId") final String clientId, @QueryParam("expiration") final int expiration);
 
     /**
+     * Return the tx-code that is associated with a pre-authorized_code grant credential offer.
+     *
+     * @param preAuthCode   The pre-authorized_code
+     * @return tx_code or null
+     */
+    @GET
+    @Path("/tx-code")
+    @NoCache
+    String getTxCode(@QueryParam("pre-auth-code") final String preAuthCode);
+
+    /**
      * Adds the following types to the email event listener included list.
      * @param events The events to be included
      */
     @POST
-    @Path("/email-event-litener-provide/add-events")
+    @Path("/email-event-listener-provide/add-events")
     @Consumes(MediaType.APPLICATION_JSON)
     public void addEventsToEmailEventListenerProvider(List<EventType> events);
 
@@ -486,7 +478,12 @@ public interface TestingResource {
      * @param events The events to be removed
      */
     @POST
-    @Path("/email-event-litener-provide/remove-events")
+    @Path("/email-event-listener-provide/remove-events")
     @Consumes(MediaType.APPLICATION_JSON)
     public void removeEventsToEmailEventListenerProvider(List<EventType> events);
+
+    @GET
+    @Path("/token-context")
+    @Produces(MediaType.APPLICATION_JSON)
+    AccessTokenContext getTokenContext(@QueryParam("tokenId") String tokenId);
 }

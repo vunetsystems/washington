@@ -16,13 +16,8 @@
  */
 package org.keycloak.testsuite.federation.storage;
 
-import org.jboss.arquillian.container.test.api.ContainerController;
-import org.jboss.arquillian.graphene.page.Page;
-import org.jboss.arquillian.test.api.ArquillianResource;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Test;
-import org.keycloak.OAuth2Constants;
+import java.util.List;
+
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.RealmModel;
@@ -35,7 +30,12 @@ import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.LoginPage;
 
-import java.util.List;
+import org.jboss.arquillian.container.test.api.ContainerController;
+import org.jboss.arquillian.graphene.page.Page;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Test;
 
 /**
  * KEYCLOAK-3903 and KEYCLOAK-3620
@@ -63,8 +63,8 @@ public class BrokenUserStorageTest extends AbstractTestRealmKeycloakTest {
         loginPage.open();
         loginPage.login(username, password);
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
-        oauth.openLogout();
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
+        oauth.openLogoutForm();
     }
 
     @Test

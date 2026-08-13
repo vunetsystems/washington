@@ -1,12 +1,20 @@
 package org.keycloak.testsuite.broker;
 
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
-import org.apache.http.conn.ssl.TrustAllStrategy;
-import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.ssl.SSLContextBuilder;
-import org.junit.Ignore;
-import org.junit.Rule;
-import org.junit.Test;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.dom.saml.v2.protocol.ResponseType;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
@@ -20,23 +28,14 @@ import org.keycloak.testsuite.util.ReverseProxy;
 import org.keycloak.testsuite.util.SamlClient;
 import org.keycloak.testsuite.util.SamlClientBuilder;
 
-import jakarta.ws.rs.core.Response;
-import java.io.UnsupportedEncodingException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URLEncoder;
-import java.security.KeyManagementException;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.TrustAllStrategy;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.ssl.SSLContextBuilder;
+import org.junit.Ignore;
+import org.junit.Rule;
+import org.junit.Test;
 
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.startsWith;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_SAML_ALIAS;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.REALM_CONS_NAME;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.USER_EMAIL;
@@ -44,6 +43,10 @@ import static org.keycloak.testsuite.broker.BrokerTestConstants.USER_LOGIN;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.USER_PASSWORD;
 import static org.keycloak.testsuite.broker.BrokerTestTools.getConsumerRoot;
 import static org.keycloak.testsuite.broker.BrokerTestTools.waitForPage;
+
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.startsWith;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 public final class KcSamlBrokerFrontendUrlTest extends AbstractBrokerTest {
 
@@ -133,11 +136,7 @@ public final class KcSamlBrokerFrontendUrlTest extends AbstractBrokerTest {
         log.debug("Logging in");
 
         // make sure the frontend url is used to build the redirect uri when redirecting to the broker
-        try {
-            assertThat(driver.getCurrentUrl(), containsString("client_id=" + URLEncoder.encode(proxy.getUrl(), "UTF-8")));
-        } catch (UnsupportedEncodingException e) {
-            throw new RuntimeException(e);
-        }
+        assertThat(driver.getCurrentUrl(), containsString("client_id=" + URLEncoder.encode(proxy.getUrl(), StandardCharsets.UTF_8)));
 
         loginPage.login(bc.getUserLogin(), bc.getUserPassword());
         waitForPage(driver, "AUTH_RESPONSE", true);

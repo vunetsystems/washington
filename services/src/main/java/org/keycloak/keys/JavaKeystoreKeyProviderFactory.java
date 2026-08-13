@@ -17,23 +17,36 @@
 
 package org.keycloak.keys;
 
-import org.jboss.logging.Logger;
+import java.security.GeneralSecurityException;
+import java.security.cert.CertPath;
+import java.security.cert.CertPathValidator;
+import java.security.cert.CertificateFactory;
+import java.security.cert.PKIXParameters;
+import java.security.cert.TrustAnchor;
+import java.security.cert.X509Certificate;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Stream;
+
 import org.keycloak.Config;
 import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.common.util.KeystoreUtil;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.component.ComponentValidationException;
 import org.keycloak.crypto.Algorithm;
+import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.provider.ConfigurationValidationHelper;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.stream.Stream;
+import org.jboss.logging.Logger;
 
+import static org.keycloak.keys.Attributes.KID_KEY;
 import static org.keycloak.provider.ProviderConfigProperty.LIST_TYPE;
 import static org.keycloak.provider.ProviderConfigProperty.STRING_TYPE;
 
@@ -97,6 +110,12 @@ public class JavaKeystoreKeyProviderFactory implements KeyProviderFactory {
 
     @Override
     public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel model) throws ComponentValidationException {
+        String kid = model.get(KID_KEY);
+
+        if (kid == null) {
+            kid = KeycloakModelUtils.generateId();
+            model.put(KID_KEY, kid);
+        }
 
         ConfigurationValidationHelper.check(model)
                 .checkLong(Attributes.PRIORITY_PROPERTY, false)
@@ -109,11 +128,41 @@ public class JavaKeystoreKeyProviderFactory implements KeyProviderFactory {
                 .checkSingle(KEY_PASSWORD_PROPERTY, true);
 
         try {
-            new JavaKeystoreKeyProvider(realm, model, session.vault()).loadKey(realm, model);
+            KeyWrapper key = new JavaKeystoreKeyProvider(realm, model, session.vault()).loadKey(realm, model);
+            validateCertificateChain(key.getCertificateChain());
+        } catch(GeneralSecurityException e) {
+            logger.error("Failed to load keys.", e);
+            throw new ComponentValidationException("Certificate error on server. " + e.getMessage(), e);
         } catch (Throwable t) {
             logger.error("Failed to load keys.", t);
             throw new ComponentValidationException("Failed to load keys. " + t.getMessage(), t);
         }
+    }
+
+    /**
+     * <p>Validates the certificate chain in the store entry if it exists.</p>
+     *
+     * @param certificates
+     * @throws GeneralSecurityException
+     */
+    private static void validateCertificateChain(List<X509Certificate> certificates) throws GeneralSecurityException {
+        if (certificates == null || certificates.isEmpty()) {
+            return;
+        }
+
+        Set<TrustAnchor> anchors = new HashSet<>();
+
+        // consider the last certificate in the chain as the most trusted cert
+        anchors.add(new TrustAnchor(certificates.get(certificates.size() - 1), null));
+
+        PKIXParameters params = new PKIXParameters(anchors);
+
+        params.setRevocationEnabled(false);
+
+        CertPath certPath = CertificateFactory.getInstance("X.509").generateCertPath(certificates);
+        CertPathValidator validator = CertPathValidator.getInstance(CertPathValidator.getDefaultType());
+
+        validator.validate(certPath, params);
     }
 
     // merge the algorithms supported for RSA and EC keys and provide them as one configuration property

@@ -17,16 +17,17 @@
 
 package org.keycloak.testsuite.pages;
 
-import static org.keycloak.testsuite.util.UIUtils.clickLink;
+import org.keycloak.testsuite.util.DroneUtils;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
 import org.jboss.arquillian.test.api.ArquillianResource;
 import org.junit.Assert;
-import org.keycloak.testsuite.util.DroneUtils;
-import org.keycloak.testsuite.util.OAuthClient;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
+
+import static org.keycloak.testsuite.util.UIUtils.clickLink;
 
 public class SelectOrganizationPage extends LanguageComboboxAwarePage {
 
@@ -43,11 +44,6 @@ public class SelectOrganizationPage extends LanguageComboboxAwarePage {
         } catch (NoSuchElementException ignore) {}
 
         return false;
-    }
-
-    @Override
-    public void open() {
-        throw new UnsupportedOperationException();
     }
 
     public void assertCurrent(String realm) {

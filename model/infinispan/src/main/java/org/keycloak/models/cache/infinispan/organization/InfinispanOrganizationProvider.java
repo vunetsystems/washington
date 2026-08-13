@@ -18,7 +18,11 @@ package org.keycloak.models.cache.infinispan.organization;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
+
+import org.keycloak.models.GroupModel;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.OrganizationDomainModel;
@@ -26,8 +30,11 @@ import org.keycloak.models.OrganizationModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.cache.CacheRealmProvider;
+import org.keycloak.models.cache.UserCache;
 import org.keycloak.models.cache.infinispan.CachedCount;
 import org.keycloak.models.cache.infinispan.RealmCacheSession;
+import org.keycloak.models.cache.infinispan.UserCacheSession;
+import org.keycloak.organization.InvitationManager;
 import org.keycloak.organization.OrganizationProvider;
 
 import static org.keycloak.models.cache.infinispan.idp.InfinispanIdentityProviderStorageProvider.cacheKeyOrgId;
@@ -38,14 +45,17 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     private static final String ORG_MEMBERS_COUNT_KEY_SUFFIX = ".members.count";
 
     private final KeycloakSession session;
-    private final OrganizationProvider orgDelegate;
+    private final UserCacheSession userCache;
+    private final InfinispanInvitationManager invitationManager;
+    private OrganizationProvider orgDelegate;
     private final RealmCacheSession realmCache;
     private final Map<String, OrganizationAdapter> managedOrganizations = new HashMap<>();
 
     public InfinispanOrganizationProvider(KeycloakSession session) {
         this.session = session;
-        this.orgDelegate = session.getProvider(OrganizationProvider.class, "jpa");
         this.realmCache = (RealmCacheSession) session.getProvider(CacheRealmProvider.class);
+        this.userCache = (UserCacheSession) session.getProvider(UserCache.class);
+        this.invitationManager = new InfinispanInvitationManager(getDelegate().getInvitationManager());
     }
 
     private static String cacheKeyOrgCount(RealmModel realm) {
@@ -57,20 +67,32 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     }
 
     @Override
-    public OrganizationModel create(String name, String alias) {
+    public OrganizationModel create(String id, String name, String alias) {
         registerCountInvalidation();
-        return orgDelegate.create(name, alias);
+        return getDelegate().create(id, name, alias);
+    }
+
+    OrganizationProvider getDelegate() {
+        if (orgDelegate == null) {
+            // use lazy initialization to avoid touching the entity manager
+            orgDelegate = session.getProvider(OrganizationProvider.class, "jpa");
+        }
+        return orgDelegate;
     }
 
     @Override
     public boolean remove(OrganizationModel organization) {
         registerOrganizationInvalidation(organization);
         registerCountInvalidation();
-        return orgDelegate.remove(organization);
+        return getDelegate().remove(organization);
     }
 
     @Override
     public OrganizationModel getById(String id) {
+        if (realmCache == null) {
+            return getDelegate().getById(id);
+        }
+
         CachedOrganization cached = realmCache.getCache().get(id, CachedOrganization.class);
         String realmId = getRealm().getId();
         if (cached != null && !cached.getRealm().equals(realmId)) {
@@ -79,56 +101,69 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
         if (cached == null) {
             Long loaded = realmCache.getCache().getCurrentRevision(id);
-            OrganizationModel model = orgDelegate.getById(id);
+            OrganizationModel model = getDelegate().getById(id);
             if (model == null) return null;
-            if (isInvalid(id)) return model;
+            if (isRealmCacheKeyInvalid(id)) return model;
             cached = new CachedOrganization(loaded, getRealm(), model);
             realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
 
         // no need to check for realm invalidation as IdP changes are handled by events within InfinispanOrganizationProviderFactory
-        } else if (isInvalid(id)) {
-            return orgDelegate.getById(id);
+        } else if (isRealmCacheKeyInvalid(id)) {
+            return getDelegate().getById(id);
         } else if (managedOrganizations.containsKey(id)) {
             return managedOrganizations.get(id);
         }
-        OrganizationAdapter adapter = new OrganizationAdapter(cached, realmCache, orgDelegate, this);
+        OrganizationAdapter adapter = new OrganizationAdapter(session, cached, this::getDelegate, this);
         managedOrganizations.put(id, adapter);
         return adapter;
     }
 
     @Override
     public OrganizationModel getByDomainName(String domainName) {
-        String cacheKey = cacheKeyByDomain(domainName);
+        if (realmCache == null) {
+            return getDelegate().getByDomainName(domainName);
+        }
 
-        if (isInvalid(cacheKey)) {
-            return orgDelegate.getByDomainName(domainName);
+        String cacheKey = cacheKeyByDomain(domainName);
+        if (isRealmCacheKeyInvalid(cacheKey)) {
+            return getDelegate().getByDomainName(domainName);
         }
 
         CachedOrganizationIds cached = realmCache.getCache().get(cacheKey, CachedOrganizationIds.class);
 
         if (cached == null) {
             Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
-            OrganizationModel model = orgDelegate.getByDomainName(domainName);
+            OrganizationModel model = getDelegate().getByDomainName(domainName);
             if (model == null) {
                 return null;
             }
-            cached = new CachedOrganizationIds(loaded, cacheKey, getRealm(), Stream.of(model));
+            cached = new CachedOrganizationIds(loaded, cacheKey, getRealm(), Stream.ofNullable(model));
             realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
         }
 
-        return cached.getOrgIds().stream().map(this::getById).findAny().orElse(null);
+        return cached.getOrgIds().stream().map(this::getById).filter(Objects::nonNull).findAny().orElse(null);
     }
 
     @Override
     public Stream<OrganizationModel> getAllStream(String search, Boolean exact, Integer first, Integer max) {
         // Return cache delegates to ensure cache invalidation during write operations
-        return getCacheDelegates(orgDelegate.getAllStream(search, exact, first, max));
+        return getCacheDelegates(getDelegate().getAllStream(search, exact, first, max));
     }
 
     @Override
     public Stream<OrganizationModel> getAllStream(Map<String, String> attributes, Integer first, Integer max) {
         // Return cache delegates to ensure cache invalidation during write operations
-        return getCacheDelegates(orgDelegate.getAllStream(attributes, first, max));
+        return getCacheDelegates(getDelegate().getAllStream(attributes, first, max));
+    }
+
+    @Override
+    public long count(String search, Boolean exact) {
+        return getDelegate().count(search, exact);
+    }
+
+    @Override
+    public long count(Map<String, String> attributes) {
+        return getDelegate().count(attributes);
     }
 
     @Override
@@ -141,38 +176,50 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     @Override
     public boolean addManagedMember(OrganizationModel organization, UserModel user) {
         registerMemberInvalidation(organization, user);
-        return orgDelegate.addManagedMember(organization, user);
+        return getDelegate().addManagedMember(organization, user);
     }
 
     @Override
     public boolean addMember(OrganizationModel organization, UserModel user) {
         registerMemberInvalidation(organization, user);
-        return orgDelegate.addMember(organization, user);
+        return getDelegate().addMember(organization, user);
     }
 
     @Override
     public boolean removeMember(OrganizationModel organization, UserModel member) {
         registerMemberInvalidation(organization, member);
-        return orgDelegate.removeMember(organization, member);
+        return getDelegate().removeMember(organization, member);
     }
 
     @Override
     public Stream<UserModel> getMembersStream(OrganizationModel organization, String search, Boolean exact, Integer first, Integer max) {
-        return orgDelegate.getMembersStream(organization, search, exact, first, max);
+        Map<String, String> filters = Optional.ofNullable(search)
+                .map(value -> Map.of(UserModel.SEARCH, value))
+                .orElse(Map.of());
+        return getMembersStream(organization, filters, exact, first, max);
+    }
+
+    @Override
+    public Stream<UserModel> getMembersStream(OrganizationModel organization, Map<String, String> filters, Boolean exact, Integer first, Integer max) {
+        return getDelegate().getMembersStream(organization, filters, exact, first, max);
     }
 
     @Override
     public long getMembersCount(OrganizationModel organization) {
+        if (realmCache == null) {
+            return getDelegate().getMembersCount(organization);
+        }
+
         String cacheKey = cacheKeyOrgMemberCount(getRealm(), organization);
         CachedCount cached = realmCache.getCache().get(cacheKey, CachedCount.class);
 
         // cached and not invalidated
-        if (cached != null && !isInvalid(cacheKey)) {
+        if (cached != null && !isRealmCacheKeyInvalid(cacheKey)) {
             return cached.getCount();
         }
 
         Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
-        long membersCount = orgDelegate.getMembersCount(organization);
+        long membersCount = getDelegate().getMembersCount(organization);
         cached = new CachedCount(loaded, getRealm(), cacheKey, membersCount);
         realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
 
@@ -181,6 +228,10 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
     @Override
     public UserModel getMemberById(OrganizationModel organization, String id) {
+        if (userCache == null) {
+            return getDelegate().getMemberById(organization, id);
+        }
+
         RealmModel realm = getRealm();
         UserModel user = session.users().getUserById(realm, id);
 
@@ -190,18 +241,18 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
         String cacheKey = cacheKeyMembership(realm, organization, user);
 
-        if (isInvalid(cacheKey)) {
-            return orgDelegate.getMemberById(organization, user.getId());
+        if (isUserCacheKeyInvalid(cacheKey)) {
+            return getDelegate().getMemberById(organization, user.getId());
         }
 
-        CachedMembership cached = realmCache.getCache().get(cacheKey, CachedMembership.class);
+        CachedMembership cached = userCache.getCache().get(cacheKey, CachedMembership.class);
 
         if (cached == null) {
-            boolean isManaged = orgDelegate.isManagedMember(organization, user);
-            Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
-            UserModel member = orgDelegate.getMemberById(organization, user.getId());
-            cached = new CachedMembership(loaded, cacheKeyMembership(realm, organization, user), realm, isManaged, member != null);
-            realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
+            boolean isManaged = getDelegate().isManagedMember(organization, user);
+            Long loaded = userCache.getCache().getCurrentRevision(cacheKey);
+            UserModel member = getDelegate().getMemberById(organization, user.getId());
+            cached = new CachedMembership(loaded, cacheKey, realm, isManaged, member != null);
+            userCache.getCache().addRevisioned(cached, userCache.getStartupRevision());
         }
 
         return cached.isMember() ? user : null;
@@ -209,19 +260,23 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
     @Override
     public Stream<OrganizationModel> getByMember(UserModel member) {
-        String cacheKey = cacheKeyByMember(member);
-
-        if (isInvalid(cacheKey)) {
-            return orgDelegate.getByMember(member);
+        if (userCache == null) {
+            return getDelegate().getByMember(member);
         }
 
-        CachedOrganizationIds cached = realmCache.getCache().get(cacheKey, CachedOrganizationIds.class);
+        String cacheKey = cacheKeyByMember(member);
+
+        if (isUserCacheKeyInvalid(cacheKey)) {
+            return getDelegate().getByMember(member);
+        }
+
+        CachedOrganizationIds cached = userCache.getCache().get(cacheKey, CachedOrganizationIds.class);
 
         if (cached == null) {
-            Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
-            Stream<OrganizationModel> model = orgDelegate.getByMember(member);
+            Long loaded = userCache.getCache().getCurrentRevision(cacheKey);
+            Stream<OrganizationModel> model = getDelegate().getByMember(member);
             cached = new CachedOrganizationIds(loaded, cacheKey, getRealm(), model);
-            realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
+            userCache.getCache().addRevisioned(cached, userCache.getStartupRevision());
         }
 
         return cached.getOrgIds().stream().map(this::getById);
@@ -229,17 +284,20 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
     @Override
     public boolean isManagedMember(OrganizationModel organization, UserModel user) {
-        UserModel member = getMemberById(organization, user.getId());
+        if (userCache == null) {
+            return getDelegate().isManagedMember(organization, user);
+        }
 
-        if (member == null) {
+        if (user == null) {
             return false;
         }
 
-        String cacheKey = cacheKeyMembership(getRealm(), organization, member);
-        CachedMembership cached = realmCache.getCache().get(cacheKey, CachedMembership.class);
+        String cacheKey = cacheKeyMembership(getRealm(), organization, user);
+        CachedMembership cached = userCache.getCache().get(cacheKey, CachedMembership.class);
 
-        if (cached == null) {
-            return orgDelegate.isManagedMember(organization, user);
+        if (cached == null || isUserCacheKeyInvalid(cacheKey)) {
+            // this will not cache the result as calling getMemberById() to have a full caching entry would lead to a recursion
+            return getDelegate().isManagedMember(organization, user);
         }
 
         return cached.isManaged();
@@ -247,8 +305,73 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     }
 
     @Override
+    public GroupModel createGroup(OrganizationModel organization, String id, String name, GroupModel toParent) {
+        return getDelegate().createGroup(organization, id, name, toParent);
+    }
+
+    @Override
+    public Stream<GroupModel> getTopLevelGroups(OrganizationModel organization, Integer firstResult, Integer maxResults) {
+        // Don't cache top-level groups - delegate directly to DB
+        // This follows the same pattern as search queries to avoid unbounded cache growth
+        return getDelegate().getTopLevelGroups(organization, firstResult, maxResults);
+    }
+
+    @Override
+    public Stream<GroupModel> searchGroupsByName(OrganizationModel organization, String search, Boolean exact, Integer firstResult, Integer maxResults) {
+        // Don't cache search queries with pagination - delegate directly to DB
+        // This follows the same pattern as RealmCacheSession.searchForGroupByNameStream
+        return getDelegate().searchGroupsByName(organization, search, exact, firstResult, maxResults);
+    }
+
+    @Override
+    public Stream<GroupModel> searchGroupsByAttributes(OrganizationModel organization, Map<String, String> attributes, Integer firstResult, Integer maxResults) {
+        // Don't cache search queries with pagination - delegate directly to DB
+        // This follows the same pattern as RealmCacheSession.searchGroupsByAttributes
+        return getDelegate().searchGroupsByAttributes(organization, attributes, firstResult, maxResults);
+    }
+
+    @Override
+    public Stream<GroupModel> getOrganizationGroupsByMember(OrganizationModel organization, UserModel member, String search, Integer first, Integer max) {
+        // Don't cache paginated queries - delegate directly to DB
+        // This follows the same pattern as searchGroupsByName to avoid caching partial results
+        return getDelegate().getOrganizationGroupsByMember(organization, member, search, first, max);
+    }
+
+    @Override
+    public Stream<GroupModel> getOrganizationGroupsByMember(OrganizationModel organization, UserModel member) {
+        if (userCache == null) {
+            return getDelegate().getOrganizationGroupsByMember(organization, member);
+        }
+
+        String cacheKey = cacheKeyOrgGroupsByMember(organization, member);
+
+        if (isUserCacheKeyInvalid(cacheKey)) {
+            return getDelegate().getOrganizationGroupsByMember(organization, member);
+        }
+
+        CachedOrgGroupIds cached = userCache.getCache().get(cacheKey, CachedOrgGroupIds.class);
+
+        if (cached == null) {
+            Long loaded = userCache.getCache().getCurrentRevision(cacheKey);
+            Stream<GroupModel> groups = getDelegate().getOrganizationGroupsByMember(organization, member);
+            cached = new CachedOrgGroupIds(loaded, cacheKey, getRealm(), groups);
+            userCache.getCache().addRevisioned(cached, userCache.getStartupRevision());
+        }
+
+        RealmModel realm = getRealm();
+        return cached.getGroupIds().stream()
+                .map(realm::getGroupById)
+                .filter(Objects::nonNull);
+    }
+
+    @Override
+    public GroupModel getOrganizationGroup(OrganizationModel organization) {
+        return getDelegate().getOrganizationGroup(organization);
+    }
+
+    @Override
     public boolean addIdentityProvider(OrganizationModel organization, IdentityProviderModel identityProvider) {
-        boolean added = orgDelegate.addIdentityProvider(organization, identityProvider);
+        boolean added = getDelegate().addIdentityProvider(organization, identityProvider);
         if (added) {
             registerOrganizationInvalidation(organization);
         }
@@ -257,12 +380,12 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
     @Override
     public Stream<IdentityProviderModel> getIdentityProviders(OrganizationModel organization) {
-        return orgDelegate.getIdentityProviders(organization);
+        return getDelegate().getIdentityProviders(organization);
     }
 
     @Override
     public boolean removeIdentityProvider(OrganizationModel organization, IdentityProviderModel identityProvider) {
-        boolean removed = orgDelegate.removeIdentityProvider(organization, identityProvider);
+        boolean removed = getDelegate().removeIdentityProvider(organization, identityProvider);
         if (removed) {
             registerOrganizationInvalidation(organization);
         }
@@ -276,16 +399,20 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
 
     @Override
     public long count() {
+        if (realmCache == null) {
+            return getDelegate().count();
+        }
+
         String cacheKey = cacheKeyOrgCount(getRealm());
         CachedCount cached = realmCache.getCache().get(cacheKey, CachedCount.class);
 
         // cached and not invalidated
-        if (cached != null && !isInvalid(cacheKey)) {
+        if (cached != null && !isRealmCacheKeyInvalid(cacheKey)) {
             return cached.getCount();
         }
 
         Long loaded = realmCache.getCache().getCurrentRevision(cacheKey);
-        long count = orgDelegate.count();
+        long count = getDelegate().count();
         cached = new CachedCount(loaded, getRealm(), cacheKey, count);
         realmCache.getCache().addRevisioned(cached, realmCache.getStartupRevision());
 
@@ -293,19 +420,28 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     }
 
     @Override
+    public InvitationManager getInvitationManager() {
+        return invitationManager;
+    }
+
+    @Override
     public void close() {
-        orgDelegate.close();
+        if (orgDelegate != null) {
+            getDelegate().close();
+        }
     }
 
     void registerOrganizationInvalidation(OrganizationModel organization) {
         String id = organization.getId();
 
-        realmCache.registerInvalidation(cacheKeyOrgId(getRealm(), id));
-        realmCache.registerInvalidation(id);
-        organization.getDomains()
-                .map(OrganizationDomainModel::getName)
-                .map(this::cacheKeyByDomain)
-                .forEach(realmCache::registerInvalidation);
+        if (realmCache != null) {
+            realmCache.registerInvalidation(cacheKeyOrgId(getRealm(), id));
+            realmCache.registerInvalidation(id);
+            organization.getDomains()
+                    .map(OrganizationDomainModel::getName)
+                    .map(this::cacheKeyByDomain)
+                    .forEach(realmCache::registerInvalidation);
+        }
 
         OrganizationAdapter adapter = managedOrganizations.get(id);
 
@@ -315,7 +451,9 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     }
 
     private void registerCountInvalidation() {
-        realmCache.registerInvalidation(cacheKeyOrgCount(getRealm()));
+        if (realmCache != null) {
+            realmCache.registerInvalidation(cacheKeyOrgCount(getRealm()));
+        }
     }
 
     private RealmModel getRealm() {
@@ -331,7 +469,10 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
     }
 
     private String cacheKeyByDomain(String domainName) {
-        return getRealm().getId() + ".org.domain.name." + domainName;
+        if (domainName == null) {
+            throw new IllegalArgumentException("domainName must not be null");
+        }
+        return getRealm().getId() + ".org.domain.name." + domainName.toLowerCase();
     }
 
     private String cacheKeyByMember(UserModel user) {
@@ -342,13 +483,30 @@ public class InfinispanOrganizationProvider implements OrganizationProvider {
         return realm.getId() + ".org." + organization.getId() + ".member." + user.getId() + ".membership";
     }
 
-    void registerMemberInvalidation(OrganizationModel organization, UserModel member) {
-        realmCache.registerInvalidation(cacheKeyByMember(member));
-        realmCache.registerInvalidation(cacheKeyMembership(getRealm(), organization, member));
-        realmCache.registerInvalidation(cacheKeyOrgMemberCount(getRealm(), organization));
+    private String cacheKeyOrgGroupsByMember(OrganizationModel organization, UserModel member) {
+        return getRealm().getId() + ".org." + organization.getId() + ".member." + member.getId() + ".groups";
     }
 
-    private boolean isInvalid(String cacheKey) {
-        return realmCache.getInvalidations().contains(cacheKey);
+    void registerMemberInvalidation(OrganizationModel organization, UserModel member) {
+        if (userCache != null) {
+            userCache.registerInvalidation(cacheKeyByMember(member));
+            userCache.registerInvalidation(cacheKeyMembership(getRealm(), organization, member));
+            registerOrgGroupsMembershipInvalidation(organization, member);
+        }
+        if (realmCache != null) {
+            realmCache.registerInvalidation(cacheKeyOrgMemberCount(getRealm(), organization));
+        }
+    }
+
+    void registerOrgGroupsMembershipInvalidation(OrganizationModel organization, UserModel member) {
+        userCache.registerInvalidation(cacheKeyOrgGroupsByMember(organization, member));
+    }
+
+    private boolean isRealmCacheKeyInvalid(String cacheKey) {
+        return realmCache.isInvalid(cacheKey);
+    }
+
+    private boolean isUserCacheKeyInvalid(String cacheKey) {
+        return userCache.isInvalid(cacheKey);
     }
 }

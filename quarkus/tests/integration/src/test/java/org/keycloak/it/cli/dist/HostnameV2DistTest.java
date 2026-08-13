@@ -17,12 +17,13 @@
 
 package org.keycloak.it.cli.dist;
 
-import io.quarkus.test.junit.main.Launch;
-import io.quarkus.test.junit.main.LaunchResult;
-import org.junit.jupiter.api.Test;
 import org.keycloak.it.junit5.extension.CLIResult;
 import org.keycloak.it.junit5.extension.DistributionTest;
 import org.keycloak.it.junit5.extension.RawDistOnly;
+
+import io.quarkus.test.junit.main.Launch;
+import io.quarkus.test.junit.main.LaunchResult;
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -31,7 +32,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 @RawDistOnly(reason = "Containers are immutable")
 public class HostnameV2DistTest {
     @Test
-    @Launch({"start", "--http-enabled=true"})
+    @Launch({"start", "--db=dev-file", "--http-enabled=true"})
     public void testServerFailsToStartWithoutHostnameSpecified(LaunchResult result) {
         assertThat(result.getErrorOutput(), containsString("ERROR: hostname is not configured; either configure hostname, or set hostname-strict to false"));
     }

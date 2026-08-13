@@ -22,16 +22,22 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
-import static java.util.Arrays.asList;
-
 import org.keycloak.Config;
 import org.keycloak.authentication.AuthenticatorFactory;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.provider.ProviderConfigProperty;
 
-import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.*;
+import static java.util.Arrays.asList;
+
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CANONICAL_DN;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CERTIFICATE_EXTENDED_KEY_USAGE;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CERTIFICATE_KEY_USAGE;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CERTIFICATE_POLICY;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CERTIFICATE_POLICY_MODE;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CERTIFICATE_POLICY_MODE_ALL;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CERTIFICATE_POLICY_MODE_ANY;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CONFIRMATION_PAGE_DISALLOWED;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CRL_ABORT_IF_NON_UPDATED;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CRL_RELATIVE_PATH;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.CUSTOM_ATTRIBUTE_NAME;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.DEFAULT_ATTRIBUTE_NAME;
@@ -39,8 +45,11 @@ import static org.keycloak.authentication.authenticators.x509.AbstractX509Client
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.ENABLE_CRL;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.ENABLE_CRLDP;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.ENABLE_OCSP;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_CERTIFICATE_PEM;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_ISSUERDN;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_SERIALNUMBER;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_SERIALNUMBER_ISSUERDN;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_SHA256_THUMBPRINT;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_SUBJECTALTNAME_EMAIL;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_SUBJECTALTNAME_OTHERNAME;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_CERT_SUBJECTDN;
@@ -49,7 +58,11 @@ import static org.keycloak.authentication.authenticators.x509.AbstractX509Client
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.MAPPING_SOURCE_SELECTION;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.OCSPRESPONDER_CERTIFICATE;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.OCSPRESPONDER_URI;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.OCSP_FAIL_OPEN;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.REGULAR_EXPRESSION;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.REVALIDATE_CERTIFICATE;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.SERIALNUMBER_HEX;
+import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.TIMESTAMP_VALIDATION;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.USERNAME_EMAIL_MAPPER;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.USER_ATTRIBUTE_MAPPER;
 import static org.keycloak.authentication.authenticators.x509.AbstractX509ClientCertificateAuthenticator.USER_MAPPER_SELECTION;
@@ -173,6 +186,16 @@ public abstract class AbstractX509ClientCertificateAuthenticatorFactory implemen
                 "Multiple CRLs can be included, however it can affect performance as the certificate will be checked against all listed CRLs."
         );
 
+        ProviderConfigProperty cRLAbortIfNonUpdated = new ProviderConfigProperty();
+        cRLAbortIfNonUpdated.setType(BOOLEAN_TYPE);
+        cRLAbortIfNonUpdated.setName(CRL_ABORT_IF_NON_UPDATED);
+        cRLAbortIfNonUpdated.setDefaultValue(Boolean.TRUE.toString());
+        cRLAbortIfNonUpdated.setLabel("CRL abort if non updated");
+        cRLAbortIfNonUpdated.setHelpText("A CRL conforming RFC 5280 must include a next update time that marks when the CRL will be updated. " +
+                "If this option is true, the authentication fails when the CRL is outdated and cannot be updated. " +
+                "If false, the authentication continues when the CRL cannot be updated after the next update time."
+        );
+
         ProviderConfigProperty oCspCheckingEnabled = new ProviderConfigProperty();
         oCspCheckingEnabled.setType(BOOLEAN_TYPE);
         oCspCheckingEnabled.setName(ENABLE_OCSP);
@@ -248,6 +271,7 @@ public abstract class AbstractX509ClientCertificateAuthenticatorFactory implemen
                 crlCheckingEnabled,
                 crlDPEnabled,
                 cRLRelativePath,
+                cRLAbortIfNonUpdated,
                 oCspCheckingEnabled,
                 ocspFailOpen,
                 ocspResponderUri,
