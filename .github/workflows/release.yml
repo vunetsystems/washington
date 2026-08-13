@@ -65,12 +65,19 @@ jobs:
 
       - name: Compute branch context
         id: ctx
+        # Free-text / attacker-controllable fields (commit message, PR base ref)
+        # are passed via env and referenced as quoted shell vars — never inlined
+        # as ${{ ... }} in the script body. Inlining lets a crafted commit message
+        # or PR title break out of the string and execute as shell (a real RCE, and
+        # the cause of the develop build failure when a commit message contained
+        # workflow YAML). REF/EVENT/sha are constrained values and stay inline.
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           REF="${{ github.ref_name }}"
           EVENT="${{ github.event_name }}"
           PR_MERGED="${{ github.event.pull_request.merged }}"
-          BASE_REF="${{ github.event.pull_request.base.ref }}"
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
           DEFAULT_CHECKOUT_REF="${{ github.sha }}"
 
           # Default outputs
@@ -342,6 +349,9 @@ jobs:
 
       - name: Extract Jira Ticket
         id: extract-jira
+        # PR title / commit message are free text — pass via env, never inline.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title || github.event.head_commit.message }}
         run: |
           TICKET=""
           if [[ "${{ github.event_name }}" == "push" && "${{ github.ref_name }}" == feature/* ]]; then
@@ -350,7 +360,6 @@ jobs:
             TICKET=$(echo "$SUFFIX" | grep -oP '^[A-Z]+-[0-9]+' || true)
           fi
           if [ -z "$TICKET" ]; then
-            PR_TITLE="${{ github.event.pull_request.title || github.event.head_commit.message }}"
             TICKET=$(echo "$PR_TITLE" | grep -oP '[A-Z]+-\d+' || true)
           fi
           echo "ticket=${TICKET:-}" >> $GITHUB_OUTPUT
