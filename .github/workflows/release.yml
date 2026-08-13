@@ -1,14 +1,16 @@
 name: Build Washington Images
 
 on:
-  pull_request:
-    types:
-      - closed
-    branches:
-      - develop
-
+  # Build on PUSH to develop (i.e. after a PR merges), NOT on pull_request:closed.
+  # A pull_request event whose head is a FORK runs without repo secrets, so the
+  # "Generate GitHub App Token" step got an empty app-id and failed with
+  # "[@octokit/auth-app] appId option is required". A merge always produces a
+  # push to develop in THIS repo, which runs with full secret access regardless
+  # of whether the PR came from a fork — matching how release/** and feature/**
+  # already trigger below.
   push:
     branches:
+      - develop
       - 'release/**'
       - 'feature/**'
 
@@ -131,7 +133,7 @@ jobs:
             exit 0
           fi
 
-          if [[ "$EVENT" == "pull_request" && "$PR_MERGED" == "true" && "$BASE_REF" == "develop" ]]; then
+          if [[ "$EVENT" == "push" && "$REF" == "develop" ]]; then
             echo "branch-type=develop"                              >> $GITHUB_OUTPUT
             echo "image-tag-prefix=main-b${{ github.run_number }}" >> $GITHUB_OUTPUT
             echo "hanoi-target=develop"                            >> $GITHUB_OUTPUT
@@ -141,7 +143,7 @@ jobs:
             echo "run-release=true"                                >> $GITHUB_OUTPUT
             echo "concurrency-group=washington-develop"            >> $GITHUB_OUTPUT
             echo "ref-name=develop"                                >> $GITHUB_OUTPUT
-            echo "checkout-ref=${{ github.event.pull_request.merge_commit_sha || github.sha }}" >> $GITHUB_OUTPUT
+            echo "checkout-ref=$DEFAULT_CHECKOUT_REF"              >> $GITHUB_OUTPUT
             exit 0
           fi
 
