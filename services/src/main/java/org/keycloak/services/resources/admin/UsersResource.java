@@ -329,7 +329,7 @@ public class UsersResource {
                     attributes.putAll(searchAttributes);
 
                     return searchForUser(attributes, realm, userPermissionEvaluator, briefRepresentation, firstResult,
-                            maxResults, true);
+                            maxResults, false);
                 } else {
                     return searchForUser(new HashMap<>(), realm, userPermissionEvaluator, briefRepresentation,
                             firstResult, maxResults, false);
