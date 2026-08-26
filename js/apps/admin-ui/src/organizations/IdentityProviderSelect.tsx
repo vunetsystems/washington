@@ -25,10 +25,9 @@ import { Controller, useFormContext } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useAdminClient } from "../admin-client";
 import { ComponentProps } from "../components/dynamic/components";
-import { KeycloakSpinner } from "@keycloak/keycloak-ui-shared";
 import useToggle from "../utils/useToggle";
 
-type IdentityProviderSelectProps = ComponentProps & {
+type IdentityProviderSelectProps = Omit<ComponentProps, "convertToName"> & {
   variant?: "typeaheadMulti" | "typeahead";
   isRequired?: boolean;
 };
@@ -72,8 +71,7 @@ export const IdentityProviderSelect = ({
         params.search = search;
       }
 
-      const idps = await adminClient.identityProviders.find(params);
-      return idps;
+      return await adminClient.identityProviders.find(params);
     },
     setIdps,
     [search],
@@ -85,7 +83,7 @@ export const IdentityProviderSelect = ({
     const options = identityProviders.map((option) => (
       <SelectOption
         key={option!.alias}
-        value={option!.alias}
+        value={option}
         selected={values?.includes(option!.alias!)}
       >
         {option!.alias}
@@ -97,9 +95,6 @@ export const IdentityProviderSelect = ({
     return options;
   };
 
-  if (!idps) {
-    return <KeycloakSpinner />;
-  }
   return (
     <FormGroup
       label={t(label!)}
@@ -117,9 +112,7 @@ export const IdentityProviderSelect = ({
         control={control}
         rules={{
           validate: (value: string[]) =>
-            isRequired && value.filter((i) => i !== undefined).length === 0
-              ? t("required")
-              : undefined,
+            isRequired && value.length === 0 ? t("required") : undefined,
         }}
         render={({ field }) => (
           <Select
@@ -186,7 +179,7 @@ export const IdentityProviderSelect = ({
                           setInputValue("");
                           setSearch("");
                           field.onChange([]);
-                          textInputRef?.current?.focus();
+                          textInputRef.current?.focus();
                         }}
                         aria-label={t("clear")}
                       >
@@ -200,7 +193,8 @@ export const IdentityProviderSelect = ({
             isOpen={open}
             selected={field.value}
             onSelect={(_, v) => {
-              const option = v?.toString();
+              const idp = v as IdentityProviderRepresentation;
+              const option = idp.alias!;
               if (variant !== "typeaheadMulti") {
                 const removed = field.value.includes(option);
 

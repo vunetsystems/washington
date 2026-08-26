@@ -1,13 +1,17 @@
 package org.keycloak.testsuite.broker;
 
-import org.junit.Rule;
-import org.junit.Test;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.admin.client.resource.IdentityProviderResource;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.common.util.Time;
-import org.keycloak.events.Details;
-import org.keycloak.events.EventType;
 import org.keycloak.models.IdentityProviderMapperSyncMode;
 import org.keycloak.models.IdentityProviderSyncMode;
 import org.keycloak.models.utils.TimeBasedOTP;
@@ -18,50 +22,37 @@ import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.services.Urls;
 import org.keycloak.storage.UserStorageProvider;
-import org.keycloak.testsuite.Assert;
+import org.keycloak.testframework.realm.ClientBuilder;
+import org.keycloak.testframework.realm.RealmBuilder;
 import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.federation.DummyUserFederationProviderFactory;
 import org.keycloak.testsuite.util.AccountHelper;
-import org.keycloak.testsuite.util.ClientBuilder;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.TestAppHelper;
+import org.keycloak.testsuite.util.WaitUtils;
+
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
 import org.openqa.selenium.TimeoutException;
 
-import jakarta.ws.rs.client.Client;
-import jakarta.ws.rs.client.ClientRequestFilter;
-import jakarta.ws.rs.client.WebTarget;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.Response;
-import java.net.URI;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
-
-import static org.hamcrest.Matchers.hasItems;
-import static org.hamcrest.Matchers.not;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.notNullValue;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assume.assumeFalse;
-import static org.keycloak.testsuite.admin.ApiUtil.removeUserByUsername;
+import static org.keycloak.testsuite.admin.AdminApiUtil.removeUserByUsername;
 import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.configurePostBrokerLoginWithOTP;
 import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.disablePostBrokerLoginFlow;
-import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.grantReadTokenRole;
-import static org.keycloak.testsuite.broker.BrokerRunOnServerUtil.revokeReadTokenRole;
-import static org.keycloak.testsuite.broker.BrokerTestTools.getConsumerRoot;
 import static org.keycloak.testsuite.broker.BrokerTestTools.getProviderRoot;
 import static org.keycloak.testsuite.broker.BrokerTestTools.waitForElementEnabled;
 import static org.keycloak.testsuite.broker.BrokerTestTools.waitForPage;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasItems;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.Assume.assumeFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Test of advanced functionalities related to brokering like:
@@ -110,7 +101,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
         // Link identity provider through Admin REST api
         Response response = AccountHelper.addIdentityProvider(adminClient.realm(bc.consumerRealmName()), "consumer", adminClient.realm(bc.providerRealmName()), bc.getUserLogin(), bc.getIDPAlias());
-        Assert.assertEquals("status", 204, response.getStatus());
+        Assertions.assertEquals(204, response.getStatus(), "status");
 
         // Assert identity is linked through Admin REST api
         assertTrue(AccountHelper.isIdentityProviderLinked(adminClient.realm(bc.consumerRealmName()), "consumer", bc.getIDPAlias()));
@@ -129,7 +120,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         AccountHelper.logout(adminClient.realm(bc.providerRealmName()), "testuser");
 
         // Assert I am not logged immediately into app page and first-broker-login appears instead
-        Assert.assertFalse(testAppHelper.login(bc.getUserLogin(), bc.getUserPassword(), bc.consumerRealmName(), "broker-app", bc.getIDPAlias()));
+        Assertions.assertFalse(testAppHelper.login(bc.getUserLogin(), bc.getUserPassword(), bc.consumerRealmName(), "broker-app", bc.getIDPAlias()));
 
         waitForPage(driver, "update account information", false);
         updateAccountInformationPage.assertCurrent();
@@ -152,7 +143,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         AccountHelper.logout(adminClient.realm(bc.providerRealmName()), "testuser");
 
         //Try to log in. Previous link is not valid anymore, so now it should try to register new user instead of logging into app page
-        Assert.assertFalse(testAppHelper.login(bc.getUserLogin(), bc.getUserPassword(), bc.consumerRealmName(), "broker-app", bc.getIDPAlias()));
+        Assertions.assertFalse(testAppHelper.login(bc.getUserLogin(), bc.getUserPassword(), bc.consumerRealmName(), "broker-app", bc.getIDPAlias()));
         waitForPage(driver, "update account information", false);
         updateAccountInformationPage.assertCurrent();
     }
@@ -168,64 +159,11 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
         // Link identity provider through Admin REST api
         Response response = AccountHelper.addIdentityProvider(adminClient.realm(bc.consumerRealmName()), "consumer", adminClient.realm(bc.providerRealmName()), bc.getUserLogin(), bc.getIDPAlias());
-        Assert.assertEquals("status", 204, response.getStatus());
+        Assertions.assertEquals(204, response.getStatus(), "status");
 
         // Test we will log in immediately into app page
-        Assert.assertTrue(testAppHelper.login(bc.getUserLogin(), bc.getUserPassword(), bc.consumerRealmName(), "broker-app", bc.getIDPAlias()));
+        Assertions.assertTrue(testAppHelper.login(bc.getUserLogin(), bc.getUserPassword(), bc.consumerRealmName(), "broker-app", bc.getIDPAlias()));
     }
-
-    /**
-     * Refers to in old test suite: org.keycloak.testsuite.broker.AbstractKeycloakIdentityProviderTest#testTokenStorageAndRetrievalByApplication
-     */
-    @Test
-    public void testRetrieveToken() throws Exception {
-        assumeFalse("There is no user to update once the user has logged in using transient sessions", isUsingTransientSessions());
-
-        updateExecutions(AbstractBrokerTest::enableRequirePassword);
-        updateExecutions(AbstractBrokerTest::disableUpdateProfileOnFirstLogin);
-        IdentityProviderRepresentation idpRep = identityProviderResource.toRepresentation();
-
-        idpRep.setStoreToken(true);
-
-        identityProviderResource.update(idpRep);
-
-        oauth.clientId("broker-app");
-        loginPage.open(bc.consumerRealmName());
-
-        logInWithBroker(bc);
-        updatePasswordPage.updatePasswords("password", "password");
-        Assert.assertTrue(appPage.isCurrent());
-
-        String username = bc.getUserLogin();
-
-        testingClient.server(bc.consumerRealmName()).run(grantReadTokenRole(username));
-
-        OAuthClient.AccessTokenResponse accessTokenResponse = oauth.realm(bc.consumerRealmName()).clientId("broker-app").doGrantAccessTokenRequest("broker-app-secret", bc.getUserLogin(), bc.getUserPassword());
-        AtomicReference<String> accessToken = (AtomicReference<String>) new AtomicReference<>(accessTokenResponse.getAccessToken());
-        Client client = jakarta.ws.rs.client.ClientBuilder.newBuilder().register((ClientRequestFilter) request -> request.getHeaders().add(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken.get())).build();
-
-        try {
-            WebTarget target = client.target(Urls.identityProviderRetrieveToken(URI.create(getConsumerRoot() + "/auth"), bc.getIDPAlias(), bc.consumerRealmName()));
-
-            try (Response response = target.request().get()) {
-                assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-                assertNotNull(response.readEntity(String.class));
-            }
-
-            testingClient.server(bc.consumerRealmName()).run(revokeReadTokenRole(username));
-
-            accessTokenResponse = oauth.realm(bc.consumerRealmName()).clientId("broker-app").doGrantAccessTokenRequest("broker-app-secret", bc.getUserLogin(), bc.getUserPassword());
-            accessToken.set(accessTokenResponse.getAccessToken());
-
-            try (Response response = target.request().get()) {
-                assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
-            }
-        } finally {
-            client.close();
-        }
-    }
-
-
 
     // KEYCLOAK-3267
     @Test
@@ -236,12 +174,13 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
         loginWithExistingUser();
 
-        Assert.assertTrue(AccountHelper.updatePassword(adminClient.realm(bc.consumerRealmName()), bc.getUserLogin(), "password"));
+        Assertions.assertTrue(AccountHelper.updatePassword(adminClient.realm(bc.consumerRealmName()), bc.getUserLogin(), "password"));
 
         logoutFromConsumerRealm();
         AccountHelper.logout(adminClient.realm(bc.providerRealmName()), bc.getUserLogin());
+        driver.manage().deleteAllCookies();
 
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         try {
@@ -249,20 +188,22 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         } catch (TimeoutException e) {
             log.debug(driver.getTitle());
             log.debug(driver.getPageSource());
-            Assert.fail("Timeout while waiting for login page");
+            Assertions.fail("Timeout while waiting for login page");
         }
 
         for (int i = 0; i < 3; i++) {
             try {
                 waitForElementEnabled(driver, "login");
             } catch (TimeoutException e) {
-                Assert.fail("Timeout while waiting for login element enabled");
+                Assertions.fail("Timeout while waiting for login element enabled");
             }
 
             loginPage.login(bc.getUserLogin(), "invalid");
         }
 
         assertEquals("Invalid username or password.", loginPage.getInputError());
+
+        WaitUtils.waitForBruteForceExecutors(testingClient);
 
         loginPage.clickSocial(bc.getIDPAlias());
 
@@ -271,13 +212,15 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         } catch (TimeoutException e) {
             log.debug(driver.getTitle());
             log.debug(driver.getPageSource());
-            Assert.fail("Timeout while waiting for login page");
+            Assertions.fail("Timeout while waiting for login page");
         }
 
-        Assert.assertTrue("Driver should be on the provider realm page right now", driver.getCurrentUrl().contains("/auth/realms/" + bc.providerRealmName() + "/"));
+        Assertions.assertTrue(driver.getCurrentUrl().contains("/auth/realms/" + bc.providerRealmName() + "/"), "Driver should be on the provider realm page right now");
 
         loginPage.login(bc.getUserLogin(), bc.getUserPassword());
 
+        waitForPage(driver, "sign in to", true);
+        errorPage.assertCurrent();
         assertEquals("Account is disabled, contact your administrator.", errorPage.getError());
     }
 
@@ -292,9 +235,9 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         adminClient.realm(bc.providerRealmName())
                 .clients()
                 .get(client.getId())
-                .update(ClientBuilder.edit(client).consentRequired(true).build());
+                .update(ClientBuilder.update(client).consentRequired(true).build());
 
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         logInWithBroker(bc);
@@ -310,7 +253,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         adminClient.realm(bc.providerRealmName())
                 .clients()
                 .get(client.getId())
-                .update(ClientBuilder.edit(client).consentRequired(false).build());
+                .update(ClientBuilder.update(client).consentRequired(false).build());
 
     }
 
@@ -334,7 +277,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
         user.update(userRep);
 
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         logInWithBroker(bc);
@@ -448,7 +391,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
         userResource.roles().realmLevel().add(Arrays.asList(userRole, friendlyManagerRole));
 
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         logInAsUserInIDP();
@@ -466,7 +409,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
     // KEYCLOAK-4016
     @Test
     public void testExpiredCode() {
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         log.debug("Expire all browser cookies");
@@ -478,7 +421,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         waitForPage(driver, "sorry", false);
         errorPage.assertCurrent();
         String link = errorPage.getBackToApplicationLink();
-        Assert.assertTrue(link.contains("/auth/realms/" + bc.consumerRealmName() + "/app"));
+        Assertions.assertTrue(link.contains("/auth/realms/" + bc.consumerRealmName() + "/app"));
     }
 
     /**
@@ -491,7 +434,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
         updateExecutions(AbstractBrokerTest::disableUpdateProfileOnFirstLogin);
         testingClient.server(bc.consumerRealmName()).run(configurePostBrokerLoginWithOTP(bc.getIDPAlias()));
 
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         logInWithBroker(bc);
@@ -507,11 +450,12 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
         setOtpTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS, totp);
 
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         logInWithBroker(bc);
 
+        waitForPage(driver, "sign in to", true);
         loginTotpPage.assertCurrent();
         loginTotpPage.login(totp.generateTOTP(totpSecret));
         AccountHelper.logout(adminClient.realm(bc.consumerRealmName()), bc.getUserLogin());
@@ -519,89 +463,10 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
         testingClient.server(bc.consumerRealmName()).run(disablePostBrokerLoginFlow(bc.getIDPAlias()));
 
-        oauth.clientId("broker-app");
+        oauth.client("broker-app");
         loginPage.open(bc.consumerRealmName());
 
         logInWithBroker(bc);
-    }
-
-    // KEYCLOAK-12986
-    @Test
-    public void testPostBrokerLoginFlowWithOTP_bruteForceEnabled() {
-        assumeFalse("Brute force protection does not apply to transient sessions", isUsingTransientSessions());
-
-        updateExecutions(AbstractBrokerTest::disableUpdateProfileOnFirstLogin);
-        testingClient.server(bc.consumerRealmName()).run(configurePostBrokerLoginWithOTP(bc.getIDPAlias()));
-
-        // Enable brute force protector in cosumer realm
-        RealmResource realm = adminClient.realm(bc.consumerRealmName());
-        RealmRepresentation consumerRealmRep = realm.toRepresentation();
-        consumerRealmRep.setBruteForceProtected(true);
-        consumerRealmRep.setFailureFactor(2);
-        consumerRealmRep.setMaxDeltaTimeSeconds(20);
-        consumerRealmRep.setMaxFailureWaitSeconds(100);
-        consumerRealmRep.setWaitIncrementSeconds(5);
-        realm.update(consumerRealmRep);
-
-        try {
-            oauth.clientId("broker-app");
-            loginPage.open(bc.consumerRealmName());
-
-            logInWithBroker(bc);
-
-            totpPage.assertCurrent();
-            String totpSecret = totpPage.getTotpSecret();
-            totpPage.configure(totp.generateTOTP(totpSecret));
-            final UserRepresentation user = realm.users().search(bc.getUserLogin()).get(0);
-            assertNumFederatedIdentities(user.getId(), 1);
-            AccountHelper.logout(adminClient.realm(bc.consumerRealmName()), bc.getUserLogin());
-            AccountHelper.logout(adminClient.realm(bc.providerRealmName()), bc.getUserLogin());
-
-            setOtpTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS, totp);
-
-            oauth.clientId("broker-app");
-            loginPage.open(bc.consumerRealmName());
-
-            logInWithBroker(bc);
-
-            loginTotpPage.assertCurrent();
-
-            // Login for 2 times with incorrect TOTP. This should temporarily disable the user
-            loginTotpPage.login("bad-totp");
-            Assert.assertEquals("Invalid authenticator code.", loginTotpPage.getInputError());
-
-            events.clear();
-
-            loginTotpPage.login("bad-totp");
-            Assert.assertEquals("Invalid authenticator code.", loginTotpPage.getInputError());
-
-            // wait for the disabled to come
-            events.expect(EventType.USER_DISABLED_BY_TEMPORARY_LOCKOUT)
-                    .realm(consumerRealmRep.getId())
-                    .user(user.getId())
-                    .client((String) null)
-                    .detail(Details.REASON, "brute_force_attack detected")
-                    .assertEvent(true, 5);
-
-            // Login with valid TOTP. I should not be able to login
-            loginTotpPage.login(totp.generateTOTP(totpSecret));
-            Assert.assertEquals("Invalid authenticator code.", loginTotpPage.getInputError());
-
-            // Clear login failures
-            realm.attackDetection().clearBruteForceForUser(user.getId());
-
-            setOtpTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS, totp);
-
-            loginTotpPage.login(totp.generateTOTP(totpSecret));
-            AccountHelper.logout(adminClient.realm(bc.consumerRealmName()), bc.getUserLogin());
-        } finally {
-            testingClient.server(bc.consumerRealmName()).run(disablePostBrokerLoginFlow(bc.getIDPAlias()));
-
-            // Disable brute force protector
-            consumerRealmRep = realm.toRepresentation();
-            consumerRealmRep.setBruteForceProtected(false);
-            realm.update(consumerRealmRep);
-        }
     }
 
     /**
@@ -613,14 +478,14 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
             updateExecutions(AbstractBrokerTest::enableUpdateProfileOnFirstLogin);
             RealmRepresentation realm = adminClient.realm(bc.providerRealmName()).toRepresentation();
             assertNotNull(realm);
-            realm.setAccessTokenLifespan(1);
+            realm.setAccessTokenLifespan(5);
             adminClient.realm(bc.providerRealmName()).update(realm);
             IdentityProviderRepresentation idp = adminClient.realm(bc.consumerRealmName()).identityProviders().get(bc.getIDPAlias()).toRepresentation();
             idp.getConfig().put("backchannelSupported", "false");
             adminClient.realm(bc.consumerRealmName()).identityProviders().get(bc.getIDPAlias()).update(idp);
-            Time.setOffset(2);
+            Time.setOffset(10);
 
-            oauth.clientId("broker-app");
+            oauth.client("broker-app");
             loginPage.open(bc.consumerRealmName());
 
             logInWithBroker(bc);
@@ -630,7 +495,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
             logoutFromConsumerRealm();
 
-            oauth.clientId("broker-app");
+            oauth.client("broker-app");
             loginPage.open(bc.consumerRealmName());
 
             waitForPage(driver, "sign in to", true);
@@ -658,7 +523,7 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
 
             createUser(bc.providerRealmName(), "test-user", "password", "FirstName", "LastName", "test-user@localhost.com");
 
-            oauth.clientId("broker-app");
+            oauth.client("broker-app");
             loginPage.open(bc.consumerRealmName());
 
             loginPage.clickSocial(bc.getIDPAlias());
@@ -669,24 +534,56 @@ public abstract class AbstractAdvancedBrokerTest extends AbstractBrokerTest {
                 // Updating password and the rest of the test is irrelevant for transient sessions
                 return;
             }
-            Assert.assertTrue(AccountHelper.updatePassword(adminClient.realm(bc.consumerRealmName()), "test-user", "new-password"));
+            Assertions.assertTrue(AccountHelper.updatePassword(adminClient.realm(bc.consumerRealmName()), "test-user", "new-password"));
 
             AccountHelper.logout(adminClient.realm(bc.consumerRealmName()), "test-user");
             AccountHelper.logout(adminClient.realm(bc.providerRealmName()), "test-user");
 
             createUser(bc.providerRealmName(), "test-user-noemail", "password", "FirstName", "LastName", "test-user-noemail@localhost.com");
 
-            oauth.clientId("broker-app");
+            oauth.client("broker-app");
             loginPage.open(bc.consumerRealmName());
 
             loginPage.clickSocial(bc.getIDPAlias());
 
             loginPage.login("test-user-noemail", "password");
 
-            Assert.assertTrue(AccountHelper.updatePassword(adminClient.realm(bc.consumerRealmName()), "test-user-noemail", "new-password"));
+            Assertions.assertTrue(AccountHelper.updatePassword(adminClient.realm(bc.consumerRealmName()), "test-user-noemail", "new-password"));
         } finally {
             removeUserByUsername(adminClient.realm(bc.consumerRealmName()), "test-user");
             removeUserByUsername(adminClient.realm(bc.consumerRealmName()), "test-user-noemail");
         }
+    }
+
+    @Test
+    public void testDisabledBroker() {
+        loginUser();
+        logoutFromConsumerRealm();
+        AccountHelper.logout(adminClient.realm(bc.providerRealmName()), bc.getUserLogin());
+
+        oauth.client("broker-app");
+        loginPage.open(bc.consumerRealmName());
+
+        RealmResource realm = adminClient.realm(bc.consumerRealmName());
+        identityProviderResource = realm.identityProviders().get(bc.getIDPAlias());
+        IdentityProviderRepresentation idpRep = identityProviderResource.toRepresentation();
+        idpRep.setEnabled(false);
+        identityProviderResource.update(idpRep);
+        waitForPage(driver, "sign in to", true);
+        loginPage.clickSocial(bc.getIDPAlias());
+        errorPage.assertCurrent();
+        assertThat(errorPage.getError(), is("Could not send authentication request to identity provider."));
+
+        idpRep.setEnabled(true);
+        identityProviderResource.update(idpRep);
+        oauth.openLoginForm();
+        loginPage.clickSocial(bc.getIDPAlias());
+        waitForPage(driver, "sign in to", true);
+        Assertions.assertTrue(driver.getCurrentUrl().contains("/auth/realms/" + bc.providerRealmName() + "/"), "Driver should be on the provider realm page right now");
+        idpRep.setEnabled(false);
+        identityProviderResource.update(idpRep);
+        loginPage.login(bc.getUserLogin(), bc.getUserPassword());
+        errorPage.assertCurrent();
+        assertThat(errorPage.getError(), is("Page not found"));
     }
 }

@@ -60,16 +60,16 @@
                     </label>
                 </div>
                 <div class="${properties.kcInputClass!} <#if messagesPerField.existsError('totp')>pf-m-error</#if>">
-                    <input type="text" required id="totp" name="totp" autocomplete="off"
+                    <input type="text" required id="totp" name="totp" autocomplete="one-time-code"
                            aria-invalid="<#if messagesPerField.existsError('totp')>true</#if>"
-                           dir="ltr"
+                           inputmode="numeric"
                     />
 
-                    <@field.errorIcon error=kcSanitize(messagesPerField.get('totp'))?no_esc/>
+                    <@field.errorIcon error=messagesPerField.get('totp')/>
                 </div>
                 <#if messagesPerField.existsError('totp')>
                     <span id="input-error-otp-code" class="${properties.kcInputErrorMessageClass!}" aria-live="polite">
-                        ${kcSanitize(messagesPerField.get('totp'))?no_esc}
+                        ${messagesPerField.get('totp')}
                     </span>
                 </#if>
                 <input type="hidden" id="totpSecret" name="totpSecret" value="${totp.totpSecret}" />
@@ -82,17 +82,16 @@
                     </label>
                 </div>
 
-                <div class="${properties.kcInputClass!}">
+                <div class="${properties.kcInputClass!} <#if messagesPerField.existsError('userLabel')>pf-m-error</#if>">
                     <input type="text" id="userLabel" name="userLabel" autocomplete="off"
                            aria-invalid="<#if messagesPerField.existsError('userLabel')>true</#if>"
-                           dir="ltr"
                     />
 
-                    <@field.errorIcon error=kcSanitize(messagesPerField.get('userLabel'))?no_esc/>
+                    <@field.errorIcon error=messagesPerField.get('userLabel')/>
                 </div>
                 <#if messagesPerField.existsError('userLabel')>
                     <span id="input-error-otp-label" class="${properties.kcInputErrorMessageClass!}" aria-live="polite">
-                        ${kcSanitize(messagesPerField.get('userLabel'))?no_esc}
+                        ${messagesPerField.get('userLabel')}
                     </span>
                 </#if>
             </div>
@@ -110,7 +109,7 @@
                         />
                         <button type="submit"
                                 class="${properties.kcButtonClass!} ${properties.kcButtonDefaultClass!} ${properties.kcButtonLargeClass!} ${properties.kcButtonLargeClass!}"
-                                id="cancelTOTPBtn" name="cancel-aia" value="true" />${msg("doCancel")}
+                                id="cancelTOTPBtn" name="cancel-aia" value="true">${msg("doCancel")}
                         </button>
                     <#else>
                         <input type="submit"

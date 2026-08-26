@@ -1,20 +1,21 @@
 package org.keycloak.social.openshift;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.commons.io.Charsets;
-import org.apache.commons.io.IOUtils;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
+
 import org.keycloak.broker.provider.IdentityBrokerException;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
-import java.net.URL;
-import java.util.HashMap;
-import java.util.Map;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.io.IOUtils;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
 
 public class OpenshiftV4IdentityProviderTest {
 
@@ -27,7 +28,7 @@ public class OpenshiftV4IdentityProviderTest {
     @Before
     public void before() throws Exception {
         oauthMetadataFile = OpenshiftV4IdentityProviderTest.class.getResource(TEST_OAUTH_METADATA_FILE);
-        authMetadata = IOUtils.toString(oauthMetadataFile, Charsets.toCharset("UTF-8"));
+        authMetadata = IOUtils.toString(oauthMetadataFile, StandardCharsets.UTF_8);
 
         ObjectMapper objectMapper = new ObjectMapper();
         oauthMetadataMap = objectMapper.readValue(authMetadata, HashMap.class);

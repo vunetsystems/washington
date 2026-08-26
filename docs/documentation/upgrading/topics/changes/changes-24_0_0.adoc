@@ -105,7 +105,7 @@ See the link:{adminguide_link}#user-profile[User Profile Documentation] for the 
 Default user profile configuration comes with a set of default validations for the basic predefined fields. Those validations were not present in previous versions when the `declarative-user-profile` feature was disabled by default.
 If you have issues due to backward compatibility, you can change the default validators according to your needs. The default validators are as follows:
 
-* The`username`, `email`, `firstName` and `lastName` attributes have a maximum length of 255 characters. These validations were indirectly present in previous versions as well
+* The `username`, `email`, `firstName` and `lastName` attributes have a maximum length of 255 characters. These validations were indirectly present in previous versions as well
 because of the database constraint on the table `USER_ENTITY` for those fields with a maximum length of 255 characters. However, when using user storage providers, it might be possible before to use longer values.
 
 * The `username` attribute has a minimum length of three characters. Username has also `username-prohibited-characters` and `up-username-not-idn-homograph` validator by default, which were not present in previous versions.
@@ -155,7 +155,7 @@ If you use a custom theme to change these templates, they will function as expec
 However, we recommend you to take a look at how to configure a link:{adminguide_link}#user-profile[{declarative user profile}] and possibly avoid
 changing the built-in templates by using all the capabilities provided by this feature.
 
-Also, the templates used by the `declarative-user-profile` feature to render the pages for the same flows are longer necessary and removed in this release:
+Also, the templates used by the `declarative-user-profile` feature to render the pages for the same flows are no longer necessary and removed in this release:
 
 * `update-user-profile.ftl`
 * `register-user-profile.ftl`
@@ -346,7 +346,7 @@ To be able to enable changing those attributes via UI and REST APIs,  perform th
 = The Admin send-verify-email API now uses the same email verification template
 
 ----
-PUT /admin/realms/{realm}/users/{id}/send-verify-email
+PUT /admin/realms/{realm-name}/users/{id}/send-verify-email
 ----
 
 In this release, the API will use the `email-verification.ftl` template instead of `executeActions.ftl`.
@@ -368,7 +368,7 @@ A new parameter called `lifespan` will be introduced to allow overriding of the 
 If you prefer the previous behavior, use the `execute-actions-email` API as follows.
 
 ----
-PUT /admin/realms/{realm}/users/{id}/execute-actions-email
+PUT /admin/realms/{realm-name}/users/{id}/execute-actions-email
 
 ["VERIFY_EMAIL"]
 ----

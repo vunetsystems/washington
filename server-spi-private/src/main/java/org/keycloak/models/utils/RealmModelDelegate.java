@@ -17,6 +17,10 @@
 
 package org.keycloak.models.utils;
 
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Stream;
+
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.AuthenticationExecutionModel;
@@ -33,17 +37,14 @@ import org.keycloak.models.OAuth2DeviceConfig;
 import org.keycloak.models.OTPPolicy;
 import org.keycloak.models.ParConfig;
 import org.keycloak.models.PasswordPolicy;
-import org.keycloak.models.RequiredActionConfigModel;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.RequiredActionConfigModel;
 import org.keycloak.models.RequiredActionProviderModel;
 import org.keycloak.models.RequiredCredentialModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.WebAuthnPolicy;
 import org.keycloak.provider.Provider;
-
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Stream;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 /**
  * @author Alexander Schwartz
@@ -187,6 +188,10 @@ public class RealmModelDelegate implements RealmModel {
         delegate.setBruteForceProtected(value);
     }
 
+    public RealmRepresentation.BruteForceStrategy getBruteForceStrategy() { return delegate.getBruteForceStrategy(); }
+
+    public void setBruteForceStrategy(RealmRepresentation.BruteForceStrategy value) { delegate.setBruteForceStrategy(value); }
+
     public boolean isPermanentLockout() {
         return delegate.isPermanentLockout();
     }
@@ -249,6 +254,14 @@ public class RealmModelDelegate implements RealmModel {
 
     public void setFailureFactor(int failureFactor) {
         delegate.setFailureFactor(failureFactor);
+    }
+
+    public int getMaxSecondaryAuthFailures() {
+        return delegate.getMaxSecondaryAuthFailures();
+    }
+
+    public void setMaxSecondaryAuthFailures(int maxSecondaryAuthFailures) {
+        delegate.setMaxSecondaryAuthFailures(maxSecondaryAuthFailures);
     }
 
     public boolean isVerifyEmail() {
@@ -968,6 +981,16 @@ public class RealmModelDelegate implements RealmModel {
         delegate.setDefaultRole(role);
     }
 
+    @Override
+    public ClientModel getAdminPermissionsClient() {
+        return delegate.getAdminPermissionsClient();
+    }
+
+    @Override
+    public void setAdminPermissionsClient(ClientModel client) {
+        delegate.setAdminPermissionsClient(client);
+    }
+
     public boolean isIdentityFederationEnabled() {
         return delegate.isIdentityFederationEnabled();
     }
@@ -1154,5 +1177,35 @@ public class RealmModelDelegate implements RealmModel {
     @Override
     public void setOrganizationsEnabled(boolean organizationsEnabled) {
         delegate.setOrganizationsEnabled(organizationsEnabled);
+    }
+
+    @Override
+    public boolean isAdminPermissionsEnabled() {
+        return delegate.isAdminPermissionsEnabled();
+    }
+
+    @Override
+    public void setAdminPermissionsEnabled(boolean adminPermissionsEnabled) {
+        delegate.setAdminPermissionsEnabled(adminPermissionsEnabled);
+    }
+
+    @Override
+    public boolean isVerifiableCredentialsEnabled() {
+        return delegate.isVerifiableCredentialsEnabled();
+    }
+
+    @Override
+    public void setVerifiableCredentialsEnabled(boolean verifiableCredentialsEnabled) {
+        delegate.setVerifiableCredentialsEnabled(verifiableCredentialsEnabled);
+    }
+
+    @Override
+    public void setScimApiEnabled(boolean enabled) {
+        delegate.setScimApiEnabled(enabled);
+    }
+
+    @Override
+    public boolean isScimApiEnabled() {
+        return delegate.isScimApiEnabled();
     }
 }

@@ -17,18 +17,17 @@
 
 package org.keycloak.organization.protocol.mappers.oidc;
 
-import static org.keycloak.organization.utils.Organizations.getProvider;
-
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
-import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+
+import jakarta.ws.rs.BadRequestException;
 
 import org.keycloak.common.util.TriFunction;
 import org.keycloak.models.AuthenticatedClientSessionModel;
@@ -36,19 +35,25 @@ import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientScopeDecorator;
 import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.ClientSessionContext;
-import org.keycloak.models.KeycloakContext;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.OrganizationModel;
+import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.organization.utils.Organizations;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.OIDCLoginProtocolFactory;
 import org.keycloak.protocol.oidc.TokenManager;
+import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.utils.StringUtil;
+
+import static org.keycloak.models.ClientScopeModel.VALUE_SEPARATOR;
+import static org.keycloak.organization.utils.Organizations.getProvider;
+import static org.keycloak.utils.StringUtil.isBlank;
 
 /**
  * <p>An enum with utility methods to process the {@link OIDCLoginProtocolFactory#ORGANIZATION} scope.
  *
- * <p>The {@link OrganizationScope} behaves like a dynamic scopes so that access to organizations is granted depending
+ * <p>The {@link OrganizationScope} behaves like a parameterized scope so that access to organizations is granted depending
  * on how the client requests the {@link OIDCLoginProtocolFactory#ORGANIZATION} scope.
  */
 public enum OrganizationScope {
@@ -65,38 +70,56 @@ public enum OrganizationScope {
                 return getProvider(session).getByMember(user);
             },
             (organizations) -> true,
-            (current, previous) -> valueOfScope(current) == null ? previous : current),
+            (session, current, previous) -> {
+                OrganizationScope currentScope = valueOfScope(session, current);
+                
+                // Only handle organization scopes, ignore non-organization scopes
+                if (currentScope == null) {
+                    return null;
+                }
+                
+                // Reject ANY scope requests - they require user selection which isn't available during refresh
+                if (isAnyScope(currentScope)) {
+                    throw new BadRequestException("ANY organization scope is not allowed in this context");
+                }
+                
+                // Allow SINGLE (narrowing) or ALL (maintaining) scopes
+                return current;
+            }),
 
     /**
-     * Maps to a specific organization the user is a member. When this scope is requested by clients, only the
-     * organization specified in the scope is granted.
+     * Maps to one or more specific organizations the user is a member of. When this scope is requested by clients,
+     * only the organizations whose aliases are specified in the scope are granted. Multiple organizations can be
+     * requested using separate scopes, for example {@code organization:org-a organization:org-b}.
+     * If any of the aliases does not match an existing organization or the user is not a member, the request will be rejected.
      */
-    SINGLE(StringUtil::isNotBlank,
+    SPECIFIC(StringUtil::isNotBlank,
             (user, scopes, session) -> {
-                OrganizationModel organization = parseScopeParameter(scopes)
-                        .map(OrganizationScope::parseScopeValue)
+                List<OrganizationModel> organizations = parseScopeParameter(session, scopes)
+                        .map((String scope) -> parseScopeValue(session, scope))
                         .map(alias -> getProvider(session).getByAlias(alias))
                         .filter(Objects::nonNull)
-                        .findAny()
-                        .orElse(null);
+                        .filter(org -> user == null || org.isMember(user))
+                        .toList();
 
-                if (organization == null) {
-                    return Stream.empty();
-                }
-
-                if (user == null || organization.isMember(user)) {
-                    return Stream.of(organization);
-                }
-
-                return Stream.empty();
+                return organizations.stream();
             },
             (organizations) -> organizations.findAny().isPresent(),
-            (current, previous) -> {
+            (session, current, previous) -> {
                 if (current.equals(previous)) {
                     return current;
                 }
 
-                if (OrganizationScope.ALL.equals(valueOfScope(current))) {
+                OrganizationScope currentScope = valueOfScope(session, current);
+                
+                if (OrganizationScope.ALL.equals(currentScope)) {
+                    return previous;
+                }
+
+                // Handle the case where current is ANY scope ("organization") and previous is a SINGLE scope ("organization:foo")
+                // When the current scope is just "organization" and the previous scope has a specific org like "organization:foo",
+                // we should preserve the specific organization from the previous scope
+                if (isAnyScope(currentScope)) {
                     return previous;
                 }
 
@@ -114,7 +137,7 @@ public enum OrganizationScope {
                     return Stream.empty();
                 }
 
-                List<OrganizationModel> organizations = getProvider(session).getByMember(user).toList();
+                List<OrganizationModel> organizations = getProvider(session).getByMember(user).filter(OrganizationModel::isEnabled).toList();
 
                 if (organizations.size() == 1) {
                     return organizations.stream();
@@ -136,19 +159,37 @@ public enum OrganizationScope {
                 return organizations.stream().filter(o -> o.getId().equals(orgId));
             },
             (organizations) -> true,
-            (current, previous) -> {
+            (session, current, previous) -> {
                 if (current.equals(previous)) {
                     return current;
                 }
 
-                if (OrganizationScope.ALL.equals(valueOfScope(current))) {
+                OrganizationScope currentScope = valueOfScope(session, current);
+                
+                if (OrganizationScope.ALL.equals(currentScope)) {
                     return previous;
                 }
 
                 return null;
             });
 
-    private static final Pattern SCOPE_PATTERN = Pattern.compile(OIDCLoginProtocolFactory.ORGANIZATION + ":*".replace("*", "(.*)"));
+    private static final String ORGANIZATION_SCOPES_SESSION_ATTRIBUTE = "kc.org.client.scope";
+    private static final String UNSUPPORTED_ORGANIZATION_SCOPES_ATTRIBUTE = "kc.org.client.scope.unsupported";
+    private static final Pattern SCOPE_PATTERN = Pattern.compile("(.*)" + VALUE_SEPARATOR + "(.*)");
+    private static final String EMPTY_SCOPE = "";
+
+    /**
+     * Checks if the given scope is {@link OrganizationScope#ANY}.
+     *
+     * <p>This method exists because {@code ALL} and {@code SINGLE} are declared before {@code ANY} in this enum.
+     * Referencing {@code OrganizationScope.ANY} directly inside their initializer lambdas causes a
+     * "Cannot refer to enum constant before its definition" compile error. Routing through this static method
+     * (defined after all constants) avoids the forward-reference restriction.
+     */
+    private static boolean isAnyScope(OrganizationScope scope) {
+        return OrganizationScope.ANY.equals(scope);
+    }
+
 
     /**
      * <p>Resolves the value of the scope from its raw format. For instance, {@code organization:<value>} will resolve to {@code <value>}.
@@ -158,7 +199,7 @@ public enum OrganizationScope {
     private final Predicate<String> valueMatcher;
 
     /**
-     * Resolves the organizations based on the values of the scope.
+     * Resolves the organizations of the user based on the values of the scope.
      */
     private final TriFunction<UserModel, String, KeycloakSession, Stream<OrganizationModel>> valueResolver;
 
@@ -170,9 +211,9 @@ public enum OrganizationScope {
     /**
      * Resolves the name of the scope when requesting a scope using a different format.
      */
-    private final BiFunction<String, String, String> nameResolver;
+    private final TriFunction<KeycloakSession, String, String, String> nameResolver;
 
-    OrganizationScope(Predicate<String> valueMatcher, TriFunction<UserModel, String, KeycloakSession, Stream<OrganizationModel>> valueResolver, Predicate<Stream<OrganizationModel>> valueValidator, BiFunction<String, String, String> nameResolver) {
+    OrganizationScope(Predicate<String> valueMatcher, TriFunction<UserModel, String, KeycloakSession, Stream<OrganizationModel>> valueResolver, Predicate<Stream<OrganizationModel>> valueValidator, TriFunction<KeycloakSession, String, String, String> nameResolver) {
         this.valueMatcher = valueMatcher;
         this.valueResolver = valueResolver;
         this.valueValidator = valueValidator;
@@ -185,13 +226,36 @@ public enum OrganizationScope {
      * @param user the user. Can be {@code null} depending on how the scope resolves its value.
      * @param scope the string referencing the scope
      * @param session the session
-     * @return the organizations mapped to the given {@code user}. Or an empty stream if no organizations were mapped from the {@code scope} parameter.
+     * @return the organizations mapped from the {@code scope} parameter. Or an empty stream if no organizations were mapped from the parameter.
      */
     public Stream<OrganizationModel> resolveOrganizations(UserModel user, String scope, KeycloakSession session) {
-        if (scope == null) {
+        if (!Organizations.isEnabled(session)) {
             return Stream.empty();
         }
-        return valueResolver.apply(user, scope, session).filter(OrganizationModel::isEnabled);
+        return valueResolver.apply(user, Optional.ofNullable(scope).orElse(EMPTY_SCOPE), session).filter(OrganizationModel::isEnabled);
+    }
+
+    /**
+     * Returns a stream of {@link OrganizationScope} instances based on the scopes from the {@code AuthenticationSessionModel} associated
+     * with the given {@code session} and where the given {@code user} is a member.
+     *
+     * @param user the user. Can be {@code null} depending on how the scope resolves its value.
+     * @param session the session
+     * @return the organizations mapped from the {@code scope} parameter. Or an empty stream if no organizations were mapped from the parameter.
+     */
+    public Stream<OrganizationModel> resolveOrganizations(UserModel user, KeycloakSession session) {
+        return resolveOrganizations(user, getRequestedScopes(session), session);
+    }
+
+    /**
+     * Returns a stream of {@link OrganizationScope} instances based on the scopes from the {@code AuthenticationSessionModel} associated
+     * with the given {@code session}.
+     *
+     * @param session the session
+     * @return the organizations mapped from the {@code scope} parameter. Or an empty stream if no organizations were mapped from the parameter.
+     */
+    public Stream<OrganizationModel> resolveOrganizations(KeycloakSession session) {
+        return resolveOrganizations(null, session);
     }
 
     /**
@@ -203,24 +267,16 @@ public enum OrganizationScope {
      * @return the {@link ClientScopeModel}
      */
     public ClientScopeModel toClientScope(String name, UserModel user, KeycloakSession session) {
-        OrganizationScope scope = valueOfScope(name);
+        OrganizationScope scope = valueOfScope(session, name);
 
         if (scope == null) {
-            return null;
-        }
-
-        KeycloakContext context = session.getContext();
-        ClientModel client = context.getClient();
-        ClientScopeModel orgScope = getOrganizationClientScope(client, session);
-
-        if (orgScope == null) {
             return null;
         }
 
         Stream<OrganizationModel> organizations = scope.resolveOrganizations(user, name, session);
 
         if (valueValidator.test(organizations)) {
-            return new ClientScopeDecorator(orgScope, name);
+            return new ClientScopeDecorator(resolveClientScope(session, name), name);
         }
 
         return null;
@@ -237,9 +293,9 @@ public enum OrganizationScope {
      * @param previous the previous name of this scope
      * @return the name of the scope
      */
-    public String resolveName(Set<String> scopes, String previous) {
+    public String resolveName(KeycloakSession session, Set<String> scopes, String previous) {
         for (String scope : scopes) {
-            String resolved = nameResolver.apply(scope, previous);
+            String resolved = nameResolver.apply(session, scope, previous);
 
             if (resolved == null) {
                 continue;
@@ -257,14 +313,11 @@ public enum OrganizationScope {
      * @param rawScope the string referencing the scope
      * @return the organization scope that maps the given {@code rawScope}
      */
-    public static OrganizationScope valueOfScope(String rawScope) {
-        if (rawScope == null) {
-            return null;
-        }
-        return parseScopeParameter(rawScope)
+    public static OrganizationScope valueOfScope(KeycloakSession session, String rawScope) {
+        return parseScopeParameter(session, Optional.ofNullable(rawScope).orElse(EMPTY_SCOPE))
                 .map(s -> {
                     for (OrganizationScope scope : values()) {
-                        if (scope.valueMatcher.test(parseScopeValue(s))) {
+                        if (scope.valueMatcher.test(parseScopeValue(session, s))) {
                             return scope;
                         }
                     }
@@ -274,41 +327,135 @@ public enum OrganizationScope {
                 .orElse(null);
     }
 
-    private static String parseScopeValue(String scope) {
-        if (!hasOrganizationScope(scope)) {
-            return null;
+    /**
+     * Returns a {@link OrganizationScope} instance based on the scopes from the {@code AuthenticationSessionModel} associated
+     * with the given {@code session}.
+     *
+     * @param session the session
+     * @return the organization scope that maps the given {@code rawScope}
+     */
+    public static OrganizationScope valueOfScope(KeycloakSession session) {
+        OrganizationScope value = session.getAttribute(OrganizationScope.class.getName(), OrganizationScope.class);
+
+        if (value != null) {
+            return value;
         }
 
-        if (scope.equals(OIDCLoginProtocolFactory.ORGANIZATION)) {
-            return "";
+        value = valueOfScope(session, getRequestedScopes(session));
+
+        if (value != null) {
+            session.setAttribute(OrganizationScope.class.getName(), value);
+        }
+
+        return value;
+    }
+
+    private static String getRequestedScopes(KeycloakSession session) {
+        AuthenticationSessionModel authSession = session.getContext().getAuthenticationSession();
+
+        if (authSession == null) {
+            return EMPTY_SCOPE;
+        }
+
+        String requestedScopes = authSession.getClientNote(OIDCLoginProtocol.SCOPE_PARAM);
+
+        return Optional.ofNullable(requestedScopes).orElse(EMPTY_SCOPE);
+    }
+
+    private static String parseScopeValue(KeycloakSession session, String scope) {
+        ClientScopeModel clientScope = resolveClientScope(session, scope);
+
+        if (clientScope != null) {
+            if (scope.equals(clientScope.getName())) {
+                return "";
+            }
         }
 
         Matcher matcher = SCOPE_PATTERN.matcher(scope);
 
         if (matcher.matches()) {
-            return matcher.group(1);
+            return matcher.group(2);
         }
 
         return null;
     }
 
-    private ClientScopeModel getOrganizationClientScope(ClientModel client, KeycloakSession session) {
-        if (!Organizations.isEnabledAndOrganizationsPresent(session)) {
+    private static Stream<String> parseScopeParameter(KeycloakSession session, String rawScope) {
+        return TokenManager.parseScopeParameter(rawScope)
+                .filter(scope -> resolveClientScope(session, scope) != null);
+    }
+
+    private static ClientScopeModel resolveClientScope(KeycloakSession session, String scope) {
+        if (isBlank(scope)) {
             return null;
         }
 
-        Map<String, ClientScopeModel> scopes = new HashMap<>(client.getClientScopes(true));
-        scopes.putAll(client.getClientScopes(false));
+        ClientModel client = session.getContext().getClient();
 
-        return scopes.get(OIDCLoginProtocolFactory.ORGANIZATION);
+        if (client == null) {
+            return null;
+        }
+
+        if (session.getAttributeOrDefault(UNSUPPORTED_ORGANIZATION_SCOPES_ATTRIBUTE, Set.of()).contains(scope)) {
+            // scope already processed and does not support mapping organizations
+            return null;
+        }
+
+        Set<ClientScopeModel> organizationScopes = session.getAttributeOrDefault(ORGANIZATION_SCOPES_SESSION_ATTRIBUTE, Set.of());
+
+        for (ClientScopeModel clientScope : organizationScopes) {
+            if (scope.equals(clientScope.getName()) || scope.startsWith(clientScope.getName() + VALUE_SEPARATOR)) {
+                // scope already processed and supports organizations
+                return clientScope;
+            }
+        }
+
+        Matcher matcher = SCOPE_PATTERN.matcher(scope);
+
+        if (matcher.matches()) {
+            scope = matcher.group(1);
+        }
+
+        ClientScopeModel clientScope = getClientScope(client, scope);
+
+        if (clientScope != null) {
+            Stream<String> mappers = clientScope.getProtocolMappersStream().map(ProtocolMapperModel::getProtocolMapper);
+
+            if (mappers.noneMatch(OrganizationMembershipMapper.PROVIDER_ID::equals)) {
+                Set<String> nonOrganizationScopes = session.getAttributeOrDefault(UNSUPPORTED_ORGANIZATION_SCOPES_ATTRIBUTE, Set.of());
+
+                if (nonOrganizationScopes.isEmpty()) {
+                    nonOrganizationScopes = new HashSet<>();
+                }
+
+                // scope does not support organizations, cache the scope in this session to avoid processing it again
+                nonOrganizationScopes.add(scope);
+                session.setAttribute(UNSUPPORTED_ORGANIZATION_SCOPES_ATTRIBUTE, nonOrganizationScopes);
+
+                return null;
+            }
+
+            organizationScopes = session.getAttributeOrDefault(ORGANIZATION_SCOPES_SESSION_ATTRIBUTE, Set.of());
+
+            if (organizationScopes.isEmpty()) {
+                organizationScopes = new HashSet<>();
+            }
+
+            organizationScopes.add(clientScope);
+            // scope supports organizations, cache the scope in this session to avoid processing it again
+            session.setAttribute(ORGANIZATION_SCOPES_SESSION_ATTRIBUTE, organizationScopes);
+        }
+
+        return clientScope;
     }
 
-    private static boolean hasOrganizationScope(String scope) {
-        return scope != null && scope.contains(OIDCLoginProtocolFactory.ORGANIZATION);
-    }
+    private static ClientScopeModel getClientScope(ClientModel client, String scope) {
+        ClientScopeModel clientScope = client.getClientScopes(false).get(scope);
 
-    private static Stream<String> parseScopeParameter(String rawScope) {
-        return TokenManager.parseScopeParameter(rawScope)
-                .filter(OrganizationScope::hasOrganizationScope);
+        if (clientScope == null) {
+            clientScope = client.getClientScopes(true).get(scope);
+        }
+
+        return clientScope;
     }
 }

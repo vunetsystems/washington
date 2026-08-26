@@ -17,24 +17,16 @@
 
 package org.keycloak.testsuite.pages;
 
-import org.jboss.arquillian.test.api.ArquillianResource;
-import org.junit.Assert;
-import org.keycloak.common.util.KeycloakUriBuilder;
-import org.keycloak.testsuite.arquillian.SuiteContext;
-import org.keycloak.testsuite.util.DroneUtils;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.openqa.selenium.WebDriver;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
-import java.net.URI;
-import java.net.URISyntaxException;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.junit.jupiter.api.Assertions;
+import org.openqa.selenium.WebDriver;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public abstract class AbstractPage {
-
-    @ArquillianResource
-    protected SuiteContext suiteContext;
 
     @ArquillianResource
     protected WebDriver driver;
@@ -44,28 +36,14 @@ public abstract class AbstractPage {
 
     public void assertCurrent() {
         String name = getClass().getSimpleName();
-        Assert.assertTrue("Expected " + name + " but was " + DroneUtils.getCurrentDriver().getTitle() + " (" + DroneUtils.getCurrentDriver().getCurrentUrl() + ")",
-                isCurrent());
-    }
-
-    protected URI getAuthServerRoot() {
-        try {
-            return KeycloakUriBuilder.fromUri(suiteContext.getAuthServerInfo().getBrowserContextRoot().toURI()).path("/auth/").build();
-        } catch (URISyntaxException e) {
-            throw new RuntimeException(e);
-        }
+        Assertions.assertTrue(isCurrent(),
+                "Expected " + name + " but was " + driver.getTitle() + " (" + driver.getCurrentUrl() + ")");
     }
 
     abstract public boolean isCurrent();
 
     public boolean isCurrent(String expectedTitle) {
         return PageUtils.getPageTitle(driver).equals(expectedTitle);
-    }
-
-    abstract public void open() throws Exception;
-
-    public WebDriver getDriver() {
-        return driver;
     }
 
     public void setDriver(WebDriver driver) {
