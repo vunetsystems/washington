@@ -259,6 +259,7 @@ jobs:
           # release/3.2 ? REL=3.2 ? VERSION=3.2.0
           REL="${{ needs.branch-context.outputs.ref-name }}"
           REL="${REL#release/}"
+          REL="${REL%%-*}"   # drop optional label (e.g. release/3.2-appsec -> 3.2)
           VERSION="${REL}.0"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Derived initial platform version: ${VERSION}"
