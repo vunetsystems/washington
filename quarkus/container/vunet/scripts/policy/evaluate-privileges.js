@@ -67,6 +67,28 @@ function _getExplicitPrivileges(user) {
     .collect(Collectors.toSet());
 }
 
+// Mirrors _getExplicitPrivileges(user), but the source of groups is a
+// Service Account's `group_ids` claim (resolved against the realm) instead
+// of a real user's group memberships.
+function _getExplicitPrivilegesFromGroupIds(groupIds, realm) {
+  var explicitPrivileges = new HashSet();
+
+  for (var i = 0; i < groupIds.length; i++) {
+    var groupId = groupIds[i];
+    var group = realm.getGroupById(groupId);
+
+    if (group === null || group === undefined) {
+      logger.warnv("group_ids claim referenced unknown/unresolvable group id `{0}` (skipping)", groupId);
+      continue;
+    }
+
+    var groupPrivileges = group.getAttributeStream("privilege").collect(Collectors.toSet());
+    explicitPrivileges.addAll(groupPrivileges);
+  }
+
+  return explicitPrivileges;
+}
+
 // Extend explicit privileges with implicit privileges
 function _extendExplicitPrivileges(explicitPrivileges) {
   var extendedPrivileges = new HashSet(explicitPrivileges);
@@ -107,6 +129,16 @@ function getUserPrivileges(user) {
   return extendedPrivileges;
 }
 
+// Mirrors getUserPrivileges(user) for the group_ids-based Service Account flow.
+function getPrivilegesForGroupIds(groupIds, realm) {
+  var explicitPrivileges = _getExplicitPrivilegesFromGroupIds(groupIds, realm);
+  var extendedPrivileges = _extendExplicitPrivileges(explicitPrivileges);
+  var printablePrivileges = extendedPrivileges.stream().map(fromUrn).collect(Collectors.joining(", "));
+
+  logger.debugv("group_ids [{0}] resolve to privileges: {1}", groupIds.join(", "), printablePrivileges);
+  return extendedPrivileges;
+}
+
 function _evaluateForAdmin(identity) {
   if (identity.hasRealmRole('admin')) {
     logger.info("Granting all permissions to admin");
@@ -131,6 +163,19 @@ function _evaluateForUser(user, userId, privilege) {
   }
 }
 
+// Evaluates a privilege against a Service Account's group_ids claim instead
+// of a real user's group memberships. Only ever invoked when the request
+// carries `group_ids` AND was authenticated as the trusted `vusmartmaps`
+// client -- see the guard at the bottom of this script.
+function _evaluateForGroupIds(groupIds, realm, privilege) {
+  var privileges = getPrivilegesForGroupIds(groupIds, realm);
+  var result = privileges.contains(privilege);
+  var resultString = result ? "granted" : "denied";
+  logger.infov("checking if group_ids [{0}] has privilege `{1}`: {2}", groupIds.join(", "), fromUrn(privilege), resultString);
+
+  return result;
+}
+
 function evaluate(identity, user, privilege) {
   if (_evaluateForAdmin(identity)) {
     $evaluation.grant();
@@ -141,8 +186,36 @@ function evaluate(identity, user, privilege) {
   }
 }
 
+// Reads the `group_ids` claim (from claim_token, folded into context
+// attributes by DefaultEvaluationContext). Returns:
+//   - null       => claim not present at all
+//   - [] or [..] => claim present (possibly empty) -- caller must treat
+//                   presence as "engage the group_ids branch"
+function _extractGroupIds(contextAttributes) {
+  var entry = contextAttributes.getValue('group_ids');
+
+  if (entry === null || entry === undefined) {
+    return null;
+  }
+
+  var groupIds = [];
+  for (var i = 0; i < entry.size(); i++) {
+    groupIds.push(entry.asString(i));
+  }
+  return groupIds;
+}
+
+// True only when the request was authenticated (client-credentials, via
+// client secret) as the trusted `vusmartmaps` client -- Keycloak itself
+// guarantees a caller cannot spoof another client's kc.client.id/azp.
+function _isTrustedServiceClient(contextAttributes) {
+  var entry = contextAttributes.getValue('kc.client.id');
+  return entry !== null && entry !== undefined && entry.size() > 0 && entry.asString(0) === 'vusmartmaps';
+}
+
 // Authorization evaluation logic
 var _context = $evaluation.getContext();
+var _contextAttributes = _context.getAttributes();
 
 // Resource and scope information
 var _permission = $evaluation.getPermission();
@@ -150,18 +223,42 @@ var _resource = _permission.getResource().getName();
 var _scope = _permission.getScopes().toArray()[0].getName(); // cairo APIs request only one scope at max for any API endpoint
 var privilege = _resource + ':' + _scope;
 
-// Realm, Identity, and User information
+// Realm and Identity information
 var _authProvider = $evaluation.getAuthorizationProvider();
 var _realm = _authProvider.getRealm();
 var identity = _context.getIdentity();
-var user = _authProvider.getKeycloakSession().users().getUserById(
-  _realm,
-  identity.getId()
-);
 
 logger.debug("---Starting evaluation---")
 logger.debugv("Evaluating privilege: {0}", fromUrn(privilege));
 
-evaluate(identity, user, privilege);
+var _groupIds = _extractGroupIds(_contextAttributes);
+var _trustedServiceClient = _isTrustedServiceClient(_contextAttributes);
+
+if (_groupIds !== null && _trustedServiceClient) {
+  // Service Account flow: caller is the trusted `vusmartmaps` client
+  // presenting group_ids on behalf of a Traefik/Auth-Service-issued
+  // internal token. Bypasses the admin short-circuit and user lookup
+  // entirely -- this is not a real Keycloak user.
+  logger.debugv("Evaluating privilege {0} via group_ids claim ({1} group id(s)) for trusted client `vusmartmaps`",
+    fromUrn(privilege), _groupIds.length);
+
+  if (_evaluateForGroupIds(_groupIds, _realm, privilege)) {
+    $evaluation.grant();
+  } else {
+    $evaluation.denyIfNoEffect();
+  }
+} else {
+  if (_groupIds !== null && !_trustedServiceClient) {
+    logger.warnv("group_ids claim present but caller is not authenticated as trusted client `vusmartmaps`; ignoring claim and falling back to standard user-based evaluation");
+  }
+
+  // Realm, Identity, and User information
+  var user = _authProvider.getKeycloakSession().users().getUserById(
+    _realm,
+    identity.getId()
+  );
+
+  evaluate(identity, user, privilege);
+}
 
 logger.debug("---Ending evaluation---");
