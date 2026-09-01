@@ -57,6 +57,10 @@
   }, {
     "class" : "org.keycloak.migration.migrators.MigrateTo25_0_0"
   }, {
+    "class" : "org.keycloak.migration.migrators.MigrateTo25_0_13"
+  }, {
+    "class" : "org.keycloak.migration.migrators.MigrateTo25_1_2"
+  }, {
     "class" : "org.keycloak.migration.migrators.MigrateTo1_4_0"
   }, {
     "class" : "org.keycloak.migration.migrators.RealmMigration"
