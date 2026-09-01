@@ -1388,6 +1388,119 @@
                 <artifactId>keycloak-ssf-services</artifactId>
                 <version>${project.version}</version>
             </dependency>
+
+            <!-- Added by vunet -->
+            <!-- CVE-2026-59903: Netty CorsHandler Vary header cache poisoning, fixed in 4.1.137.Final -->
+            <!-- Remove when quarkus.version's own BOM ships netty >= 4.1.137.Final -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-buffer</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec-dns</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec-haproxy</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec-http</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec-http2</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-codec-socks</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-common</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-handler</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-handler-proxy</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-resolver</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-resolver-dns</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-transport</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-transport-classes-epoll</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-transport-native-epoll</artifactId>
+                <version>4.1.137.Final</version>
+                <classifier>linux-x86_64</classifier>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-transport-native-epoll</artifactId>
+                <version>4.1.137.Final</version>
+                <classifier>linux-aarch_64</classifier>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-transport-native-unix-common</artifactId>
+                <version>4.1.137.Final</version>
+            </dependency>
+
+            <!-- CVE-2026-45292 (OpenTelemetry unbounded memory allocation in W3C baggage propagation)
+                 fix REVERTED 2026-08-27: every partial version bump attempted (api+context only,
+                 then chasing each resulting internal-package NoClassDefFoundError/ClassNotFoundException
+                 one at a time - exporter.internal.grpc.GrpcSender, sdk.internal.ThrottlingLogger,
+                 common.impl.ApiUsageLogger) broke Quarkus's OTel tracing/metrics integration, which is
+                 compiled against Quarkus 3.33.3.1's exact original 1.57.0 opentelemetry-* set as a
+                 matched unit. Compensating control: verify Quarkus/Vert.x's default max-header-size
+                 rejects the oversized baggage headers this CVE requires to exploit (see verification
+                 notes). Revisit only once quarkus.version's own BOM ships opentelemetry-api >= 1.62.0
+                 as a fully matched set. -->
+
+            <!-- quarkus-opentelemetry pulls in the OTLP exporter but ships with no actual
+                 transport implementation - startup fails with "No GrpcSenderProvider/
+                 HttpSenderProvider found on classpath" the moment tracing/metrics export is
+                 actually exercised (was masked before by QUARKUS_OTEL_SDK_DISABLED=true).
+                 Pinned to 1.57.0 to match the rest of the untouched exporter family. -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+                <version>1.57.0</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

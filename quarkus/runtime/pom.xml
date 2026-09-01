@@ -113,6 +113,12 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-opentelemetry</artifactId>
         </dependency>
+        <!-- Added by vunet: quarkus-opentelemetry pulls in the OTLP exporter but no transport
+             implementation - see version pin comment in root pom.xml for details. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.opentelemetry.instrumentation</groupId>
             <artifactId>opentelemetry-jdbc</artifactId>
