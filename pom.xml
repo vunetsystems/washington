@@ -1389,7 +1389,6 @@
                 <version>${project.version}</version>
             </dependency>
 
-            <!-- Added by vunet -->
             <!-- CVE-2026-59903: Netty CorsHandler Vary header cache poisoning, fixed in 4.1.137.Final -->
             <!-- Remove when quarkus.version's own BOM ships netty >= 4.1.137.Final -->
             <dependency>
@@ -1480,22 +1479,10 @@
                 <version>4.1.137.Final</version>
             </dependency>
 
-            <!-- CVE-2026-45292 (OpenTelemetry unbounded memory allocation in W3C baggage propagation)
-                 fix REVERTED 2026-08-27: every partial version bump attempted (api+context only,
-                 then chasing each resulting internal-package NoClassDefFoundError/ClassNotFoundException
-                 one at a time - exporter.internal.grpc.GrpcSender, sdk.internal.ThrottlingLogger,
-                 common.impl.ApiUsageLogger) broke Quarkus's OTel tracing/metrics integration, which is
-                 compiled against Quarkus 3.33.3.1's exact original 1.57.0 opentelemetry-* set as a
-                 matched unit. Compensating control: verify Quarkus/Vert.x's default max-header-size
-                 rejects the oversized baggage headers this CVE requires to exploit (see verification
-                 notes). Revisit only once quarkus.version's own BOM ships opentelemetry-api >= 1.62.0
-                 as a fully matched set. -->
-
-            <!-- quarkus-opentelemetry pulls in the OTLP exporter but ships with no actual
-                 transport implementation - startup fails with "No GrpcSenderProvider/
-                 HttpSenderProvider found on classpath" the moment tracing/metrics export is
-                 actually exercised (was masked before by QUARKUS_OTEL_SDK_DISABLED=true).
-                 Pinned to 1.57.0 to match the rest of the untouched exporter family. -->
+            <!-- CVE-2026-45292: opentelemetry-api bump reverted, breaks Quarkus's matched 1.57.0 OTel
+                 set (NoClassDefFoundError). Mitigated by Vert.x's default max-header-size; revisit once
+                 quarkus.version ships opentelemetry-api >= 1.62.0. Dependency itself is needed because
+                 quarkus-opentelemetry has no transport impl, so enabling tracing crashes without it. -->
             <dependency>
                 <groupId>io.opentelemetry</groupId>
                 <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
