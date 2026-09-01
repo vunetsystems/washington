@@ -17,17 +17,30 @@
 
 package org.keycloak.connections.jpa;
 
-import static org.keycloak.connections.jpa.util.JpaUtils.configureNamedQuery;
-import static org.keycloak.connections.jpa.util.JpaUtils.getDatabaseType;
-import static org.keycloak.connections.jpa.util.JpaUtils.loadSpecificNamedQueries;
+import java.io.File;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import javax.naming.InitialContext;
+import javax.sql.DataSource;
 
-import org.hibernate.cfg.AvailableSettings;
-import org.hibernate.engine.transaction.jta.platform.internal.AbstractJtaPlatform;
-import org.jboss.logging.Logger;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.SynchronizationType;
+import jakarta.transaction.TransactionManager;
+import jakarta.transaction.UserTransaction;
+
 import org.keycloak.Config;
 import org.keycloak.ServerStartupError;
 import org.keycloak.common.util.StackUtil;
 import org.keycloak.common.util.StringPropertyReplacer;
+import org.keycloak.connections.jpa.support.EntityManagerProxy;
 import org.keycloak.connections.jpa.updater.JpaUpdaterProvider;
 import org.keycloak.connections.jpa.updater.liquibase.LiquibaseJpaUpdaterProviderFactory;
 import org.keycloak.connections.jpa.util.JpaUtils;
@@ -42,24 +55,14 @@ import org.keycloak.provider.ServerInfoAwareProviderFactory;
 import org.keycloak.timer.TimerProvider;
 import org.keycloak.transaction.JtaTransactionManagerLookup;
 
-import javax.naming.InitialContext;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
-import jakarta.persistence.SynchronizationType;
-import javax.sql.DataSource;
-import jakarta.transaction.TransactionManager;
-import jakarta.transaction.UserTransaction;
-import java.io.File;
-import java.sql.Connection;
-import java.sql.DatabaseMetaData;
-import java.sql.DriverManager;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import liquibase.GlobalConfiguration;
+import org.hibernate.cfg.AvailableSettings;
+import org.hibernate.engine.transaction.jta.platform.internal.AbstractJtaPlatform;
+import org.jboss.logging.Logger;
+
+import static org.keycloak.connections.jpa.util.JpaUtils.configureNamedQuery;
+import static org.keycloak.connections.jpa.util.JpaUtils.getDatabaseType;
+import static org.keycloak.connections.jpa.util.JpaUtils.loadSpecificNamedQueries;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -88,10 +91,10 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
         logger.trace("Create JpaConnectionProvider");
         lazyInit(session);
 
-        return new DefaultJpaConnectionProvider(createEntityManager(session));
+        return new DefaultJpaConnectionProvider(createEntityManager(session, true));
     }
 
-    private EntityManager createEntityManager(KeycloakSession session) {
+    private EntityManager createEntityManager(KeycloakSession session, boolean sessionManaged) {
         EntityManager em;
         if (!jtaEnabled) {
             logger.trace("enlisting EntityManager in JpaKeycloakTransaction");
@@ -100,7 +103,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
 
             em = emf.createEntityManager(SynchronizationType.SYNCHRONIZED);
         }
-        em = PersistenceExceptionConverter.create(session, em);
+        em = EntityManagerProxy.create(session, em, sessionManaged);
         if (!jtaEnabled) {
             session.getTransactionManager().enlist(new JpaKeycloakTransaction(em));
         }
@@ -110,7 +113,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
     private void addSpecificNamedQueries(KeycloakSession session, Connection connection) {
         EntityManager em = null;
         try {
-            em = createEntityManager(session);
+            em = createEntityManager(session, false);
             String dbKind = getDatabaseType(connection.getMetaData().getDatabaseProductName());
             for (Map.Entry<Object, Object> query : loadSpecificNamedQueries(dbKind.toLowerCase()).entrySet()) {
                 String queryName = query.getKey().toString();
@@ -178,9 +181,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                         } else {
                             String url = config.get("url");
                             String driver = config.get("driver");
-                            if (driver.equals("org.h2.Driver")) {
-                                url = addH2NonKeywords(url);
-                            }
+                            url = augmentJdbcUrl(driver, url);
                             properties.put(AvailableSettings.JAKARTA_JDBC_URL, url);
                             properties.put(AvailableSettings.JAKARTA_JDBC_DRIVER, driver);
 
@@ -373,15 +374,23 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
             } else {
                 String url = config.get("url");
                 String driver = config.get("driver");
-                if (driver.equals("org.h2.Driver")) {
-                    url = addH2NonKeywords(url);
-                }
+                url = augmentJdbcUrl(driver, url);
                 Class.forName(driver);
-                return DriverManager.getConnection(StringPropertyReplacer.replaceProperties(url, System.getProperties()), config.get("user"), config.get("password"));
+                return DriverManager.getConnection(StringPropertyReplacer.replaceProperties(url, System.getProperties()::getProperty), config.get("user"), config.get("password"));
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to connect to database", e);
         }
+    }
+
+    private String augmentJdbcUrl(String driver, String url) {
+        if (driver.equals("org.postgresql.xa.PGXADataSource") || driver.equals("org.postgresql.Driver")) {
+            url = addPostgreSQLKeywords(url);
+        }
+        if (driver.equals("org.h2.Driver")) {
+            url = addH2NonKeywords(url);
+        }
+        return url;
     }
 
     @Override
@@ -414,7 +423,15 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
     }
 
     private void migrateModel(KeycloakSession session) {
-        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), MigrationModelManager::migrate);
+        // Using a lock to prevent concurrent migration in concurrently starting nodes
+        DBLockManager dbLockManager = new DBLockManager(session);
+        DBLockProvider dbLock = dbLockManager.getDBLock();
+        dbLock.waitForLock(DBLockProvider.Namespace.DATABASE);
+        try {
+            KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), MigrationModelManager::migrate);
+        } finally {
+            dbLock.releaseLock();
+        }
     }
 
     /**
@@ -431,6 +448,24 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
     private String addH2NonKeywords(String jdbcUrl) {
         if (!jdbcUrl.contains("NON_KEYWORDS=")) {
             jdbcUrl = jdbcUrl + ";NON_KEYWORDS=VALUE";
+        }
+        return jdbcUrl;
+    }
+
+    /**
+     * For a PostgreSQL cluster, Keycloak would need to connect to the primary node that is writable.
+     * The `targetServerType` should avoid connecting to a reader instance accidentally during node failover.
+
+     * @return JDBC URL with <code>targetServerType=primary</code> appended if the URL doesn't contain <code>targetServerType=</code> yet
+     */
+    private String addPostgreSQLKeywords(String jdbcUrl) {
+        if (!jdbcUrl.contains("targetServerType=")) {
+            if (jdbcUrl.contains("?")) {
+                jdbcUrl = jdbcUrl + "&";
+            } else {
+                jdbcUrl = jdbcUrl + "?";
+            }
+            jdbcUrl = jdbcUrl + "targetServerType=primary";
         }
         return jdbcUrl;
     }

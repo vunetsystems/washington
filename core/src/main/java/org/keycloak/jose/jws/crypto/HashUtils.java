@@ -17,13 +17,14 @@
 
 package org.keycloak.jose.jws.crypto;
 
-import org.keycloak.common.util.Base64Url;
-import org.keycloak.crypto.HashException;
-import org.keycloak.crypto.JavaAlgorithm;
-
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
+
+import org.keycloak.common.util.Base64Url;
+import org.keycloak.crypto.HashException;
+import org.keycloak.crypto.JavaAlgorithm;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -72,6 +73,18 @@ public class HashUtils {
         byte[] hashInput = Arrays.copyOf(hash, hashLength);
 
         return Base64Url.encode(hashInput);
+    }
+
+    public static String sha256UrlEncodedHash(String input, Charset charset) {
+        byte[] inputBytes = input.getBytes(charset);
+        byte[] hashedOutput = hash(JavaAlgorithm.SHA256, inputBytes);
+        return Base64Url.encode(hashedOutput);
+    }
+
+    public static String sha384UrlEncodedHash(String input, Charset charset) {
+        byte[] inputBytes = input.getBytes(charset);
+        byte[] hashedOutput = hash(JavaAlgorithm.SHA384, inputBytes);
+        return Base64Url.encode(hashedOutput);
     }
 
 }

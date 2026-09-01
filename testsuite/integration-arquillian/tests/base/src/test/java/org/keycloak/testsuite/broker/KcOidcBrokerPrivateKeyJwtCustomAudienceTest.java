@@ -16,6 +16,10 @@
  */
 package org.keycloak.testsuite.broker;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.keycloak.authentication.authenticators.client.JWTClientAuthenticator;
 import org.keycloak.crypto.Algorithm;
 import org.keycloak.models.IdentityProviderSyncMode;
@@ -25,13 +29,10 @@ import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.KeysMetadataRepresentation.KeyMetadataRepresentation;
 import org.keycloak.testsuite.util.KeyUtils;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_ALIAS;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_PROVIDER_ID;
 import static org.keycloak.testsuite.broker.BrokerTestTools.createIdentityProvider;
+import static org.keycloak.testsuite.util.ServerURLs.AUTH_SERVER_HOST2;
 
 public class KcOidcBrokerPrivateKeyJwtCustomAudienceTest extends AbstractBrokerTest {
 
@@ -64,7 +65,7 @@ public class KcOidcBrokerPrivateKeyJwtCustomAudienceTest extends AbstractBrokerT
             applyDefaultConfiguration(config, syncMode);
             config.put("clientSecret", null);
             config.put("clientAuthMethod", OIDCLoginProtocol.PRIVATE_KEY_JWT);
-            config.put("clientAssertionAudience", "https://localhost:8543/auth/realms/provider");
+            config.put("clientAssertionAudience", "https://" + AUTH_SERVER_HOST2 + ":8543/auth/realms/provider");
             return idp;
         }
 

@@ -41,7 +41,10 @@ export const LdapSettingsSearching = ({
           controller={{
             defaultValue: "",
             rules: {
-              required: { value: true, message: t("validateEditMode") },
+              required: {
+                value: true,
+                message: t("validateEditMode"),
+              },
             },
           }}
           options={["", "READ_ONLY", "WRITABLE", "UNSYNCED"]}
@@ -53,6 +56,11 @@ export const LdapSettingsSearching = ({
           rules={{
             required: t("validateUsersDn"),
           }}
+        />
+        <TextControl
+          name="config.relativeCreateDn.0"
+          label={t("relativeUserCreateDn")}
+          labelIcon={t("relativeUserCreateDnHelp")}
         />
         <TextControl
           name="config.usernameLDAPAttribute.0"
@@ -134,7 +142,7 @@ export const LdapSettingsSearching = ({
         >
           <Controller
             name="config.pagination"
-            defaultValue={["false"]}
+            defaultValue={["true"]}
             control={form.control}
             render={({ field }) => (
               <Switch
