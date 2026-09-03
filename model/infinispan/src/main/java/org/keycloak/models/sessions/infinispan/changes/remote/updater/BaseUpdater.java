@@ -34,6 +34,7 @@ public abstract class BaseUpdater<K, V> implements Updater<K, V> {
     private final K cacheKey;
     private final V cacheValue;
     private final long versionRead;
+    private final UpdaterState initialState;
     private UpdaterState state;
 
     protected BaseUpdater(K cacheKey, V cacheValue, long versionRead, UpdaterState state) {
@@ -41,6 +42,7 @@ public abstract class BaseUpdater<K, V> implements Updater<K, V> {
         this.cacheValue = cacheValue;
         this.versionRead = versionRead;
         this.state = Objects.requireNonNull(state);
+        this.initialState = state;
     }
 
     @Override
@@ -60,7 +62,7 @@ public abstract class BaseUpdater<K, V> implements Updater<K, V> {
 
     @Override
     public final boolean isDeleted() {
-        return state == UpdaterState.DELETED;
+        return state == UpdaterState.DELETED || state == UpdaterState.DELETED_TRANSIENT;
     }
 
     @Override
@@ -74,8 +76,26 @@ public abstract class BaseUpdater<K, V> implements Updater<K, V> {
     }
 
     @Override
+    public final boolean isExpired() {
+        return state == UpdaterState.EXPIRED;
+    }
+
+    @Override
     public final void markDeleted() {
-        state = UpdaterState.DELETED;
+        state = switch (state) {
+            case READ, DELETED -> UpdaterState.DELETED;
+            case CREATED, DELETED_TRANSIENT, EXPIRED -> UpdaterState.DELETED_TRANSIENT;
+        };
+    }
+
+    @Override
+    public void markExpired() {
+        state = UpdaterState.EXPIRED;
+    }
+
+    @Override
+    public boolean isTransient() {
+        return state == UpdaterState.DELETED_TRANSIENT;
     }
 
     @Override
@@ -103,6 +123,13 @@ public abstract class BaseUpdater<K, V> implements Updater<K, V> {
     }
 
     /**
+     * Resets the {@link UpdaterState} to its initial value.
+     */
+    protected final void resetState() {
+        state = initialState;
+    }
+
+    /**
      * @return {@code true} if the entity was changed after being created/read.
      */
     protected abstract boolean isUnchanged();
@@ -120,5 +147,14 @@ public abstract class BaseUpdater<K, V> implements Updater<K, V> {
          * The cache value was read from the Infinispan cache.
          */
         READ,
+        /**
+         * The entity is transient (it won't be updated in the external infinispan cluster) and deleted.
+         */
+        DELETED_TRANSIENT,
+        /**
+         * The entity is expired (max-idle or lifespan). No changes should be applied.
+         */
+        EXPIRED,
+
     }
 }

@@ -28,6 +28,17 @@ import java.util.List;
  */
 public class ProviderConfigProperty {
     public static final String BOOLEAN_TYPE="boolean";
+
+    /**
+     * Integral Value
+     */
+    public static final String INTEGER_TYPE="Integer";
+
+    /**
+     * Arbitrary number, e.g. integral, floating-point.
+     */
+    public static final String NUMBER_TYPE="Number";
+
     public static final String STRING_TYPE="String";
 
     /**
@@ -72,6 +83,13 @@ public class ProviderConfigProperty {
      * URL field
      */
     public static final String URL_TYPE ="Url";
+
+    public static final String IDENTITY_PROVIDER_MULTI_LIST_TYPE="IdentityProviderMultiList"; // only in admin console, not in themes
+
+    /**
+     * Display metadata for wallet applications to show user-friendly claim names
+     */
+    public static final String CLAIM_DISPLAY_TYPE="ClaimDisplay";
 
     protected String name;
     protected String label;

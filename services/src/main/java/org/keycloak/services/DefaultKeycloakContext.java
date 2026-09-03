@@ -17,31 +17,45 @@
 
 package org.keycloak.services;
 
+import java.lang.reflect.Proxy;
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+
+import jakarta.enterprise.context.ContextNotActiveException;
 import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.UriInfo;
+
+import org.keycloak.Token;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.http.HttpRequest;
 import org.keycloak.http.HttpResponse;
 import org.keycloak.locale.LocaleSelectorProvider;
+import org.keycloak.logging.MappedDiagnosticContextProvider;
+import org.keycloak.logging.MappedDiagnosticContextUtil;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakContext;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakUriInfo;
 import org.keycloak.models.OrganizationModel;
+import org.keycloak.models.Permissions;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
+import org.keycloak.representations.JsonWebToken;
 import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.tracing.TracingAttributes;
+import org.keycloak.tracing.TracingProvider;
 import org.keycloak.urls.UrlType;
 
-import java.net.URI;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
+import io.opentelemetry.api.trace.Span;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public abstract class DefaultKeycloakContext implements KeycloakContext {
-
     private RealmModel realm;
 
     private ClientModel client;
@@ -53,12 +67,16 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
     private Map<UrlType, KeycloakUriInfo> uriInfo;
 
     private AuthenticationSessionModel authenticationSession;
+    private UserSessionModel userSession;
     private HttpRequest request;
     private HttpResponse response;
     private ClientConnection clientConnection;
+    private Token bearerToken;
+    private final Permissions permissions;
 
     public DefaultKeycloakContext(KeycloakSession session) {
         this.session = session;
+        this.permissions = new DefaultPermissions(session, this);
     }
 
     @Override
@@ -77,8 +95,15 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
             if (uriInfo == null) {
                 uriInfo = new HashMap<>();
             }
-
-            uriInfo.put(type, new KeycloakUriInfo(session, type, getHttpRequest().getUri()));
+            UriInfo info = null;
+            try {
+                info = getHttpRequest().getUri();
+            } catch (ContextNotActiveException e) {
+                info = (UriInfo) Proxy.newProxyInstance(UriInfo.class.getClassLoader(), new Class[] { UriInfo.class }, (proxy, method, args) -> {
+                    throw new ContextNotActiveException(e); // see the javadoc on UriInfo / KeycloakUriInfo, but we are throwing ContextNotActiveException, rather than IllegalStateException.
+                });
+            }
+            uriInfo.put(type, new KeycloakUriInfo(session, type, info));
         }
         return uriInfo.get(type);
     }
@@ -88,12 +113,6 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
         return getUri(UrlType.FRONTEND);
     }
 
-    /**
-     * @deprecated
-     * Use {@link #getHttpRequest()} to obtain the request headers.
-     * @return
-     */
-    @Deprecated
     @Override
     public HttpHeaders getRequestHeaders() {
         return getHttpRequest().getHttpHeaders();
@@ -108,16 +127,25 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
     public void setRealm(RealmModel realm) {
         this.realm = realm;
         this.uriInfo = null;
+        trace(realm);
+        mdc().update(this, realm);
     }
 
     @Override
     public ClientModel getClient() {
+        if (client == null) {
+            client = Optional.ofNullable(authenticationSession)
+                    .map(AuthenticationSessionModel::getClient)
+                    .orElse(null);
+        }
         return client;
     }
 
     @Override
     public void setClient(ClientModel client) {
         this.client = client;
+        trace(client);
+        mdc().update(this, client);
     }
 
     @Override
@@ -128,12 +156,13 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
     @Override
     public void setOrganization(OrganizationModel organization) {
         this.organization = organization;
+        mdc().update(this, organization);
     }
 
     @Override
     public ClientConnection getConnection() {
         if (clientConnection == null) {
-            clientConnection = createClientConnection();
+            clientConnection = createClientConnection().orElseGet(() -> new ClientConnection() {});
         }
 
         return clientConnection;
@@ -145,6 +174,11 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
     }
 
     @Override
+    public Locale resolveLocale(UserModel user, boolean ignoreAcceptLanguageHeader) {
+        return session.getProvider(LocaleSelectorProvider.class).resolveLocale(getRealm(), user, ignoreAcceptLanguageHeader);
+    }
+
+    @Override
     public AuthenticationSessionModel getAuthenticationSession() {
         return authenticationSession;
     }
@@ -152,12 +186,14 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
     @Override
     public void setAuthenticationSession(AuthenticationSessionModel authenticationSession) {
         this.authenticationSession = authenticationSession;
+        trace(authenticationSession);
+        mdc().update(this, authenticationSession);
     }
 
     @Override
     public HttpRequest getHttpRequest() {
         if (request == null) {
-            request = createHttpRequest();
+            request = createHttpRequest().orElseThrow(ContextNotActiveException::new);
         }
 
         return request;
@@ -166,19 +202,19 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
     @Override
     public HttpResponse getHttpResponse() {
         if (response == null) {
-            response = createHttpResponse();
+            response = createHttpResponse().orElseThrow(ContextNotActiveException::new);
         }
 
         return response;
     }
 
-    protected ClientConnection createClientConnection() {
-        return null;
+    protected Optional<ClientConnection> createClientConnection() {
+        return Optional.empty();
     }
 
-    protected abstract HttpRequest createHttpRequest();
+    protected abstract Optional<HttpRequest> createHttpRequest();
 
-    protected abstract HttpResponse createHttpResponse();
+    protected abstract Optional<HttpResponse> createHttpResponse();
 
     protected KeycloakSession getSession() {
         return session;
@@ -199,4 +235,102 @@ public abstract class DefaultKeycloakContext implements KeycloakContext {
         this.response = httpResponse;
     }
 
+    @Override
+    public UserSessionModel getUserSession() {
+        return userSession;
+    }
+
+    @Override
+    public void setUserSession(UserSessionModel userSession) {
+        this.userSession = userSession;
+        trace(userSession);
+        mdc().update(this, userSession);
+    }
+
+    // Tracing
+    private Span getCurrentSpan() {
+        return session.getProvider(TracingProvider.class).getCurrentSpan();
+    }
+
+    private void trace(AuthenticationSessionModel session) {
+        if (session != null) {
+            var span = getCurrentSpan();
+            if (!span.isRecording()) return;
+
+            if (session.getParentSession() != null) {
+                span.setAttribute(TracingAttributes.AUTH_SESSION_ID, session.getParentSession().getId());
+            }
+            if (session.getTabId() != null) {
+                span.setAttribute(TracingAttributes.AUTH_TAB_ID, session.getTabId());
+            }
+        }
+    }
+
+    private void trace(RealmModel realm) {
+        if (realm != null) {
+            var span = getCurrentSpan();
+            if (span.isRecording()) {
+                span.setAttribute(TracingAttributes.REALM_NAME, realm.getName());
+            }
+        }
+    }
+
+    private void trace(ClientModel client) {
+        if (client != null) {
+            var span = getCurrentSpan();
+            if (span.isRecording()) {
+                span.setAttribute(TracingAttributes.CLIENT_ID, client.getClientId());
+            }
+        }
+    }
+
+    private void trace(UserSessionModel userSession) {
+        if (userSession != null) {
+            var span = getCurrentSpan();
+            if (span.isRecording()) {
+                span.setAttribute(TracingAttributes.SESSION_ID, userSession.getId());
+            }
+        }
+    }
+
+    @Override
+    public void setBearerToken(Token token) {
+        this.bearerToken = token;
+    }
+
+    @Override
+    public Token getBearerToken() {
+        return bearerToken;
+    }
+
+    @Override
+    public UserModel getUser() {
+        UserModel user = null;
+
+        if (bearerToken instanceof JsonWebToken jwt) {
+            String issuer = jwt.getIssuer();
+            String realmName = issuer.substring(issuer.lastIndexOf("/") + 1);
+            RealmModel realm = session.realms().getRealmByName(realmName);
+            String id = jwt.getSubject();
+
+            if (realm != null && id != null) {
+                user = session.users().getUserById(realm, id);
+            }
+        }
+
+        if (user == null) {
+            user = userSession == null ? null : userSession.getUser();
+        }
+
+        return user;
+    }
+
+    private MappedDiagnosticContextProvider mdc() {
+        return MappedDiagnosticContextUtil.getMappedDiagnosticContextProvider(session);
+    }
+
+    @Override
+    public Permissions getPermissions() {
+        return permissions;
+    }
 }

@@ -1,5 +1,6 @@
 import {
   ContinueCancelModal,
+  label,
   useEnvironment,
 } from "@keycloak/keycloak-ui-shared";
 import {
@@ -27,10 +28,11 @@ import {
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { AccountEnvironment } from "..";
 import { deleteConsent, getApplications } from "../api/methods";
 import { ClientRepresentation } from "../api/representations";
 import { Page } from "../components/page/Page";
-import { TFuncKey } from "../i18n";
+import type { TFuncKey } from "../i18n-type";
 import { formatDate } from "../utils/formatDate";
 import { useAccountAlerts } from "../utils/useAccountAlerts";
 import { usePromise } from "../utils/usePromise";
@@ -41,7 +43,7 @@ type Application = ClientRepresentation & {
 
 export const Applications = () => {
   const { t } = useTranslation();
-  const context = useEnvironment();
+  const context = useEnvironment<AccountEnvironment>();
   const { addAlert, addError } = useAccountAlerts();
 
   const [applications, setApplications] = useState<Application[]>();
@@ -142,14 +144,20 @@ export const Applications = () => {
                         variant="link"
                         onClick={() => window.open(application.effectiveUrl)}
                       >
-                        {application.clientName || application.clientId}{" "}
+                        {label(
+                          t,
+                          application.clientName || application.clientId,
+                        )}{" "}
                         <ExternalLinkAltIcon />
                       </Button>
                     )}
                     {!application.effectiveUrl && (
-                      <span>
-                        {application.clientName || application.clientId}
-                      </span>
+                      <>
+                        {label(
+                          t,
+                          application.clientName || application.clientId,
+                        )}
+                      </>
                     )}
                   </DataListCell>,
                   <DataListCell
@@ -209,7 +217,8 @@ export const Applications = () => {
                       </DescriptionListTerm>
                       {application.consent.grantedScopes.map((scope) => (
                         <DescriptionListDescription key={`scope${scope.id}`}>
-                          <CheckIcon /> {t(scope.name as TFuncKey)}
+                          <CheckIcon />{" "}
+                          {t(scope.name as TFuncKey, scope.displayText)}
                         </DescriptionListDescription>
                       ))}
                     </DescriptionListGroup>
@@ -246,7 +255,10 @@ export const Applications = () => {
                         {t("accessGrantedOn")}
                       </DescriptionListTerm>
                       <DescriptionListDescription>
-                        {formatDate(new Date(application.consent.createdDate))}
+                        {formatDate(
+                          new Date(application.consent.createdDate),
+                          context.environment.locale,
+                        )}
                       </DescriptionListDescription>
                     </DescriptionListGroup>
                   </>

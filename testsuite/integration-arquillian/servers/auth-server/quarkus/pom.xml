@@ -5,7 +5,7 @@
     <parent>
         <artifactId>integration-arquillian-servers-auth-server</artifactId>
         <groupId>org.keycloak.testsuite</groupId>
-        <version>25.1.6</version>
+        <version>26.7.2</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -201,7 +201,7 @@
                             <artifactItems>
                                 <artifactItem>
                                     <groupId>com.oracle.database.jdbc</groupId>
-                                    <artifactId>ojdbc11</artifactId>
+                                    <artifactId>ojdbc17</artifactId>
                                     <version>${oracle-jdbc.version}</version>
                                     <type>jar</type>
                                     <outputDirectory>${auth.server.home}/providers</outputDirectory>
@@ -240,6 +240,14 @@
                                     <overWrite>false</overWrite>
                                     <outputDirectory>${auth.server.home}/providers</outputDirectory>
                                 </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.keycloak.testframework</groupId>
+                                    <artifactId>keycloak-test-framework-remote-providers</artifactId>
+                                    <version>${project.version}</version>
+                                    <type>jar</type>
+                                    <overWrite>false</overWrite>
+                                    <outputDirectory>${auth.server.home}/providers</outputDirectory>
+                                </artifactItem>
                             </artifactItems>
                         </configuration>
                     </execution>
@@ -269,7 +277,7 @@
                 <executions>
                     <execution>
                         <id>ant-generate-default</id>
-                        <phase>generate-resources</phase>
+                        <phase>compile</phase>
                         <goals>
                             <goal>run</goal>
                         </goals>
@@ -346,7 +354,7 @@
                                 </goals>
                                 <configuration>
                                     <outputDirectory>${auth.server.home}/providers</outputDirectory>
-                                    <includeArtifactIds>bc-fips,bctls-fips,bcpkix-fips</includeArtifactIds>
+                                    <includeArtifactIds>bc-fips,bctls-fips,bcpkix-fips,bcutil-fips</includeArtifactIds>
                                 </configuration>
                             </execution>
                             <execution>
@@ -357,7 +365,7 @@
                                 </goals>
                                 <configuration>
                                     <outputDirectory>${auth.server.home}/bin/client/lib</outputDirectory>
-                                    <includeArtifactIds>bc-fips,bctls-fips</includeArtifactIds>
+                                    <includeArtifactIds>bc-fips,bctls-fips,bcutil-fips</includeArtifactIds>
                                 </configuration>
                             </execution>
                         </executions>

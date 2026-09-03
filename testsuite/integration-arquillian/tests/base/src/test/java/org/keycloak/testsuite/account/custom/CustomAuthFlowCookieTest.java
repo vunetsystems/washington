@@ -16,10 +16,11 @@
  */
 package org.keycloak.testsuite.account.custom;
 
-import org.junit.Test;
 import org.keycloak.models.AuthenticationExecutionModel.Requirement;
 
-import static org.junit.Assert.assertEquals;
+import org.junit.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
 /**
@@ -32,7 +33,7 @@ public class CustomAuthFlowCookieTest extends AbstractCustomAccountManagementTes
     public void cookieAlternative() {
         //test default setting of cookie provider
         //login
-        driver.navigate().to(oauth.getLoginFormUrl());
+        oauth.openLoginForm();
         testRealmLoginPage.form().login(testUser);
         
         //check SSO is working
@@ -47,7 +48,7 @@ public class CustomAuthFlowCookieTest extends AbstractCustomAccountManagementTes
         updateRequirement("browser", "auth-cookie", Requirement.DISABLED);
         
         //login
-        driver.navigate().to(oauth.getLoginFormUrl());
+        oauth.openLoginForm();
         testRealmLoginPage.form().login(testUser);
         
         //SSO shouldn't work

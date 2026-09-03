@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -39,17 +40,20 @@ import org.keycloak.models.CibaConfig;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.GroupModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ModelException;
 import org.keycloak.models.OAuth2DeviceConfig;
 import org.keycloak.models.OTPPolicy;
 import org.keycloak.models.ParConfig;
 import org.keycloak.models.PasswordPolicy;
-import org.keycloak.models.RequiredActionConfigModel;
 import org.keycloak.models.RealmModel;
+import org.keycloak.models.RequiredActionConfigModel;
 import org.keycloak.models.RequiredActionProviderModel;
 import org.keycloak.models.RequiredCredentialModel;
 import org.keycloak.models.WebAuthnPolicy;
 import org.keycloak.models.cache.infinispan.DefaultLazyLoader;
 import org.keycloak.models.cache.infinispan.LazyLoader;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -72,16 +76,21 @@ public class CachedRealm extends AbstractExtendableRevisioned {
     protected boolean identityFederationEnabled;
     protected boolean editUsernameAllowed;
     protected boolean organizationsEnabled;
+    protected boolean adminPermissionsEnabled;
+    protected boolean verifiableCredentialsEnabled;
+    protected boolean scimApiEnabled;
     //--- brute force settings
     protected boolean bruteForceProtected;
     protected boolean permanentLockout;
     protected int maxTemporaryLockouts;
+    protected RealmRepresentation.BruteForceStrategy bruteForceStrategy;
     protected int maxFailureWaitSeconds;
     protected int minimumQuickLoginWaitSeconds;
     protected int waitIncrementSeconds;
     protected long quickLoginCheckMilliSeconds;
     protected int maxDeltaTimeSeconds;
     protected int failureFactor;
+    protected int maxSecondaryAuthFailures;
     //--- end brute force settings
 
     protected String defaultSignatureAlgorithm;
@@ -105,8 +114,6 @@ public class CachedRealm extends AbstractExtendableRevisioned {
     protected int accessCodeLifespanUserAction;
     protected int accessCodeLifespanLogin;
     protected LazyLoader<RealmModel, OAuth2DeviceConfig> deviceConfig;
-    protected LazyLoader<RealmModel, CibaConfig> cibaConfig;
-    protected LazyLoader<RealmModel, ParConfig> parConfig;
     protected int actionTokenGeneratedByAdminLifespan;
     protected int actionTokenGeneratedByUserLifespan;
     protected int notBefore;
@@ -155,11 +162,12 @@ public class CachedRealm extends AbstractExtendableRevisioned {
     protected boolean adminEventsEnabled;
     protected boolean adminEventsDetailsEnabled;
     protected String defaultRoleId;
+    protected String adminPermissionsClientId;
     private boolean allowUserManagedAccess;
 
     protected List<String> defaultGroups;
-    protected List<String> defaultDefaultClientScopes = new LinkedList<>();
-    protected List<String> optionalDefaultClientScopes = new LinkedList<>();
+    protected DefaultLazyLoader<RealmModel, List<String>> defaultDefaultClientScopes;
+    protected DefaultLazyLoader<RealmModel, List<String>> optionalDefaultClientScopes;
     protected boolean internationalizationEnabled;
     protected Set<String> supportedLocales;
     protected String defaultLocale;
@@ -170,7 +178,7 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
     protected Map<String, Map<String,String>> realmLocalizationTexts;
 
-    public CachedRealm(Long revision, RealmModel model) {
+    public CachedRealm(long revision, RealmModel model) {
         super(revision, model.getId());
         name = model.getName();
         displayName = model.getDisplayName();
@@ -187,16 +195,21 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         resetPasswordAllowed = model.isResetPasswordAllowed();
         editUsernameAllowed = model.isEditUsernameAllowed();
         organizationsEnabled = model.isOrganizationsEnabled();
+        adminPermissionsEnabled = model.isAdminPermissionsEnabled();
+        verifiableCredentialsEnabled = model.isVerifiableCredentialsEnabled();
+        scimApiEnabled = model.isScimApiEnabled();
         //--- brute force settings
         bruteForceProtected = model.isBruteForceProtected();
         permanentLockout = model.isPermanentLockout();
         maxTemporaryLockouts = model.getMaxTemporaryLockouts();
+        bruteForceStrategy = model.getBruteForceStrategy();
         maxFailureWaitSeconds = model.getMaxFailureWaitSeconds();
         minimumQuickLoginWaitSeconds = model.getMinimumQuickLoginWaitSeconds();
         waitIncrementSeconds = model.getWaitIncrementSeconds();
         quickLoginCheckMilliSeconds = model.getQuickLoginCheckMilliSeconds();
         maxDeltaTimeSeconds = model.getMaxDeltaTimeSeconds();
         failureFactor = model.getFailureFactor();
+        maxSecondaryAuthFailures = model.getMaxSecondaryAuthFailures();
         //--- end brute force settings
 
         defaultSignatureAlgorithm = model.getDefaultSignatureAlgorithm();
@@ -218,8 +231,6 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         accessTokenLifespanForImplicitFlow = model.getAccessTokenLifespanForImplicitFlow();
         accessCodeLifespan = model.getAccessCodeLifespan();
         deviceConfig = new DefaultLazyLoader<>(OAuth2DeviceConfig::new, null);
-        cibaConfig = new DefaultLazyLoader<>(CibaConfig::new, null);
-        parConfig = new DefaultLazyLoader<>(ParConfig::new, null);
         accessCodeLifespanUserAction = model.getAccessCodeLifespanUserAction();
         accessCodeLifespanLogin = model.getAccessCodeLifespanLogin();
         actionTokenGeneratedByAdminLifespan = model.getActionTokenGeneratedByAdminLifespan();
@@ -236,7 +247,7 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         emailTheme = model.getEmailTheme();
 
         requiredCredentials = model.getRequiredCredentialsStream().collect(Collectors.toList());
-        userActionTokenLifespans = Collections.unmodifiableMap(new HashMap<>(model.getUserActionTokenLifespans()));
+        userActionTokenLifespans = Map.copyOf(model.getUserActionTokenLifespans());
 
         smtpConfig = model.getSmtpConfig();
         browserSecurityHeaders = model.getBrowserSecurityHeaders();
@@ -248,12 +259,20 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
         adminEventsEnabled = model.isAdminEventsEnabled();
         adminEventsDetailsEnabled = model.isAdminEventsDetailsEnabled();
+        adminPermissionsClientId = model.getAdminPermissionsClient() == null ? null : model.getAdminPermissionsClient().getId();
 
-        defaultRoleId = model.getDefaultRole().getId();
+        if(Objects.isNull(model.getDefaultRole())) {
+            throw new ModelException("Default Role is null for Realm " + name);
+        } else {
+            defaultRoleId = model.getDefaultRole().getId();
+        }
         ClientModel masterAdminClient = model.getMasterAdminClient();
         this.masterAdminClient = (masterAdminClient != null) ? masterAdminClient.getId() : null;
 
-        cacheClientScopes(model);
+        defaultDefaultClientScopes = new DefaultLazyLoader<>(realm -> realm.getDefaultClientScopesStream(true).map(ClientScopeModel::getId)
+                .collect(Collectors.toList()), null);
+        optionalDefaultClientScopes = new DefaultLazyLoader<>(realm -> realm.getDefaultClientScopesStream(false).map(ClientScopeModel::getId)
+                .collect(Collectors.toList()), null);
 
         internationalizationEnabled = model.isInternationalizationEnabled();
         supportedLocales = model.getSupportedLocalesStream().collect(Collectors.toSet());
@@ -273,11 +292,11 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
         authenticatorConfigs = model.getAuthenticatorConfigsStream()
                 .collect(Collectors.toMap(AuthenticatorConfigModel::getId, Function.identity()));
-        List<RequiredActionConfigModel> requiredActionConfigsList = model.getRequiredActionConfigsStream().collect(Collectors.toList());
-        for (RequiredActionConfigModel requiredActionConfig : requiredActionConfigsList) {
-            requiredActionProviderConfigs.put(requiredActionConfig.getId(), requiredActionConfig);
-            requiredActionProviderConfigsByAlias.put(requiredActionConfig.getAlias(), requiredActionConfig);
-        }
+        model.getRequiredActionConfigsStream()
+                .forEach(requiredActionConfig -> {
+                    requiredActionProviderConfigs.put(requiredActionConfig.getId(), requiredActionConfig);
+                    requiredActionProviderConfigsByAlias.put(requiredActionConfig.getAlias(), requiredActionConfig);
+                });
 
         requiredActionProviderList = model.getRequiredActionProvidersStream().collect(Collectors.toList());
         for (RequiredActionProviderModel action : requiredActionProviderList) {
@@ -301,7 +320,7 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         model.getComponentsStream().forEach(component ->
             componentsByParent.add(component.getParentId(), component)
         );
-        components = model.getComponentsStream().collect(Collectors.toMap(component -> component.getId(), Function.identity()));
+        components = model.getComponentsStream().collect(Collectors.toMap(ComponentModel::getId, Function.identity()));
 
         try {
             attributes = model.getAttributes();
@@ -311,19 +330,16 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         realmLocalizationTexts = model.getRealmLocalizationTexts();
     }
 
-    protected void cacheClientScopes(RealmModel model) {
-        defaultDefaultClientScopes = model.getDefaultClientScopesStream(true).map(ClientScopeModel::getId)
-                .collect(Collectors.toList());
-        optionalDefaultClientScopes = model.getDefaultClientScopesStream(false).map(ClientScopeModel::getId)
-                .collect(Collectors.toList());
-    }
-
     public String getMasterAdminClient() {
         return masterAdminClient;
     }
 
     public String getDefaultRoleId() {
         return defaultRoleId;
+    }
+
+    public String getAdminPermissionsClientId() {
+        return adminPermissionsClientId;
     }
 
     public String getName() {
@@ -370,6 +386,10 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         return maxTemporaryLockouts;
     }
 
+    public RealmRepresentation.BruteForceStrategy getBruteForceStrategy() {
+        return bruteForceStrategy;
+    }
+
     public int getMaxFailureWaitSeconds() {
         return this.maxFailureWaitSeconds;
     }
@@ -394,6 +414,10 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         return failureFactor;
     }
 
+    public int getMaxSecondaryAuthFailures() {
+        return maxSecondaryAuthFailures;
+    }
+
     public boolean isVerifyEmail() {
         return verifyEmail;
     }
@@ -416,6 +440,14 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
     public boolean isOrganizationsEnabled() {
         return organizationsEnabled;
+    }
+
+    public boolean isAdminPermissionsEnabled() {
+        return adminPermissionsEnabled;
+    }
+
+    public boolean isVerifiableCredentialsEnabled() {
+        return verifiableCredentialsEnabled;
     }
 
     public String getDefaultSignatureAlgorithm() {
@@ -499,16 +531,16 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         return accessCodeLifespanLogin;
     }
 
-    public OAuth2DeviceConfig getOAuth2DeviceConfig(Supplier<RealmModel> modelSupplier) {
-        return deviceConfig.get(modelSupplier);
+    public OAuth2DeviceConfig getOAuth2DeviceConfig(KeycloakSession session, Supplier<RealmModel> modelSupplier) {
+        return deviceConfig.get(session, modelSupplier);
     }
 
     public CibaConfig getCibaConfig(Supplier<RealmModel> modelSupplier) {
-        return cibaConfig.get(modelSupplier);
+        return CibaConfig.fromCache(modelSupplier, Collections.unmodifiableMap(attributes));
     }
 
     public ParConfig getParConfig(Supplier<RealmModel> modelSupplier) {
-        return parConfig.get(modelSupplier);
+        return ParConfig.fromCache(modelSupplier, Collections.unmodifiableMap(attributes));
     }
 
     public int getActionTokenGeneratedByAdminLifespan() {
@@ -675,12 +707,12 @@ public class CachedRealm extends AbstractExtendableRevisioned {
         return defaultGroups;
     }
 
-    public List<String> getDefaultDefaultClientScopes() {
-        return defaultDefaultClientScopes;
+    public List<String> getDefaultDefaultClientScopes(KeycloakSession session, Supplier<RealmModel> modelSupplier) {
+        return defaultDefaultClientScopes.get(session, modelSupplier);
     }
 
-    public List<String> getOptionalDefaultClientScopes() {
-        return optionalDefaultClientScopes;
+    public List<String> getOptionalDefaultClientScopes(KeycloakSession session, Supplier<RealmModel> modelSupplier) {
+        return optionalDefaultClientScopes.get(session, modelSupplier);
     }
 
     public List<AuthenticationFlowModel> getAuthenticationFlowList() {
@@ -696,7 +728,7 @@ public class CachedRealm extends AbstractExtendableRevisioned {
     }
 
     public MultivaluedMap<String, ComponentModel> getComponentsByParentAndType() {
-        return new MultivaluedHashMap<>(componentsByParentAndType);
+        return new ConcurrentMultivaluedHashMap<>(componentsByParentAndType);
     }
 
     public Map<String, ComponentModel> getComponents() {
@@ -740,5 +772,9 @@ public class CachedRealm extends AbstractExtendableRevisioned {
 
     public Map<String, RequiredActionConfigModel> getRequiredActionProviderConfigs() {
         return requiredActionProviderConfigs;
+    }
+
+    public boolean isScimApiEnabled() {
+        return scimApiEnabled;
     }
 }

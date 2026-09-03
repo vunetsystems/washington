@@ -16,18 +16,14 @@
  */
 package org.keycloak.testsuite.authz.admin;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import java.util.Collections;
 import java.util.stream.Collectors;
 
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
 
-import org.junit.Test;
 import org.keycloak.admin.client.resource.AuthorizationResource;
 import org.keycloak.admin.client.resource.ClientResource;
 import org.keycloak.admin.client.resource.PolicyResource;
@@ -36,14 +32,22 @@ import org.keycloak.admin.client.resource.RolePolicyResource;
 import org.keycloak.admin.client.resource.RolesResource;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.OAuth2ErrorRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.authorization.DecisionStrategy;
 import org.keycloak.representations.idm.authorization.Logic;
 import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.representations.idm.authorization.RolePolicyRepresentation;
-import org.keycloak.testsuite.util.RealmBuilder;
-import org.keycloak.testsuite.util.RoleBuilder;
-import org.keycloak.testsuite.util.RolesBuilder;
+import org.keycloak.testframework.realm.RealmBuilder;
+import org.keycloak.testframework.realm.RoleBuilder;
+
+import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -52,11 +56,10 @@ public class RolePolicyManagementTest extends AbstractPolicyManagementTest {
 
     @Override
     protected RealmBuilder createTestRealm() {
-        return super.createTestRealm().roles(
-                RolesBuilder.create()
-                        .realmRole(new RoleRepresentation("Role A", "Role A description", false))
-                        .realmRole(new RoleRepresentation("Role B", "Role B description", false))
-                        .realmRole(new RoleRepresentation("Role C", "Role C description", false))
+        return super.createTestRealm().realmRoles(
+                RoleBuilder.create("Role A").description("Role A description"),
+                RoleBuilder.create("Role B").description("Role B description"),
+                RoleBuilder.create("Role C").description("Role C description")
         );
     }
 
@@ -229,13 +232,49 @@ public class RolePolicyManagementTest extends AbstractPolicyManagementTest {
         }
     }
 
-    private void assertCreated(AuthorizationResource authorization, RolePolicyRepresentation representation) {
+    @Test
+    public void testFailDuplicatedRoles() {
+        AuthorizationResource authorization = getClient().authorization();
+        RolePolicyRepresentation representation = new RolePolicyRepresentation();
+
+        representation.setName(KeycloakModelUtils.generateId());
+        representation.setDescription("description");
+        representation.setDecisionStrategy(DecisionStrategy.CONSENSUS);
+        representation.setLogic(Logic.NEGATIVE);
+        representation.addRole("Role A");
+        representation.addRole("Role A");
+
+        try (
+            Response response = authorization.policies().role().create(representation);
+        ) {
+            assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+            assertEquals("Role can't be specified multiple times - Role A", response.readEntity(OAuth2ErrorRepresentation.class).getError());
+        }
+
+        representation.getRoles().clear();
+        representation.addRole("Role A");
+        representation.addRole("Role B");
+        representation = assertCreated(authorization, representation);
+
+        representation.addRole("Role B");
+        try {
+            authorization.policies().role().findById(representation.getId()).update(representation);
+            Assertions.fail("should fail due to duplicated roles");
+        } catch (BadRequestException bre) {
+            Response response = bre.getResponse();
+            assertEquals(Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+            assertEquals("Role can't be specified multiple times - Role B", response.readEntity(OAuth2ErrorRepresentation.class).getError());
+        }
+    }
+
+    private RolePolicyRepresentation assertCreated(AuthorizationResource authorization, RolePolicyRepresentation representation) {
         RolePoliciesResource permissions = authorization.policies().role();
 
         try (Response response = permissions.create(representation)) {
             RolePolicyRepresentation created = response.readEntity(RolePolicyRepresentation.class);
             RolePolicyResource permission = permissions.findById(created.getId());
             assertRepresentation(representation, permission);
+            return permission.toRepresentation();
         }
     }
 

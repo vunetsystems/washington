@@ -1,20 +1,20 @@
 package org.keycloak.testsuite.util;
 
-import org.jboss.arquillian.container.spi.Container;
-import org.jboss.logging.Logger;
-import org.keycloak.testsuite.arquillian.ContainerInfo;
-import org.keycloak.testsuite.arquillian.SuiteContext;
-import org.keycloak.testsuite.arquillian.annotation.SetDefaultProvider;
-import org.keycloak.testsuite.arquillian.containers.AbstractQuarkusDeployableContainer;
-import org.keycloak.utils.StringUtil;
-
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+
+import org.keycloak.testsuite.arquillian.ContainerInfo;
+import org.keycloak.testsuite.arquillian.SuiteContext;
+import org.keycloak.testsuite.arquillian.annotation.SetDefaultProvider;
+import org.keycloak.testsuite.arquillian.containers.AbstractQuarkusDeployableContainer;
+import org.keycloak.utils.StringUtil;
+
+import org.jboss.arquillian.container.spi.Container;
+import org.jboss.logging.Logger;
 
 public class SpiProvidersSwitchingUtils {
 
@@ -70,24 +70,24 @@ public class SpiProvidersSwitchingUtils {
             @Override
             public void setDefaultProvider(Container container, String spiName, String providerId, String... config) {
                 List<String> args = new LinkedList<>();
-                args.add(KEYCLOAKX_ARG_SPI_PREFIX + toDashCase(spiName) + "-provider=" + providerId);
+                args.add(KEYCLOAKX_ARG_SPI_PREFIX + toDashCase(spiName) + "--provider=" + providerId);
                 if (config != null) {
                     String optionName = null;
                     for (String c : config) {
                         if (optionName == null) {
                             optionName = c;
                         } else {
-                            args.add(KEYCLOAKX_ARG_SPI_PREFIX + toDashCase(spiName) + "-" + providerId + "-" + optionName + "=" + c);
+                            args.add(KEYCLOAKX_ARG_SPI_PREFIX + toDashCase(spiName) + "--" + providerId + "--" + optionName + "=" + c);
                             optionName = null;
                         }
                     }
                 }
-                getQuarkusContainer(container).setAdditionalBuildArgs(args);
+                getQuarkusContainer(container).setSpiConfig(spiName, args);
             }
 
             @Override
             public void removeProviderConfig(Container container, String spiName) {
-                getQuarkusContainer(container).setAdditionalBuildArgs(Collections.emptyList());
+                getQuarkusContainer(container).removeSpiConfig(spiName);
             }
 
             private AbstractQuarkusDeployableContainer getQuarkusContainer(Container container) {
@@ -198,7 +198,7 @@ public class SpiProvidersSwitchingUtils {
         Container container = authServerInfo.getArquillianContainer();
 
         log.infof("Removing default provider setting for %s", spi);
-        
+
         if (annotation.onlyUpdateDefault()) {
             spiSwitcher.unsetDefaultProvider(container, spi);
         } else {

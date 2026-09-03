@@ -18,11 +18,14 @@
 package org.keycloak.protocol.oidc.grants.device;
 
 import java.net.URI;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriBuilder;
 import jakarta.ws.rs.core.UriInfo;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
 import org.keycloak.events.Details;
@@ -161,6 +164,17 @@ public class DeviceGrantType extends OAuth2GrantTypeBase {
         }
 
         return deviceCodeModel;
+    }
+
+    public static boolean isDeviceCodeDeniedForDeviceVerificationFlow(KeycloakSession session, RealmModel realm, AuthenticationSessionModel authSession) {
+        if (DeviceGrantType.isOAuth2DeviceVerificationFlow(authSession)) {
+            String verifiedUserCode = authSession.getClientNote(DeviceGrantType.OAUTH2_DEVICE_VERIFIED_USER_CODE);
+            OAuth2DeviceCodeModel deviceCodeModel = DeviceEndpoint.getDeviceByUserCode(session, realm, verifiedUserCode);
+            if (deviceCodeModel != null) {
+                return deviceCodeModel.isDenied();
+            }
+        }
+        return false;
     }
 
     public static void removeDeviceByDeviceCode(KeycloakSession session, String deviceCode) {
@@ -322,7 +336,9 @@ public class DeviceGrantType extends OAuth2GrantTypeBase {
         try {
             session.clientPolicy().triggerOnEvent(new DeviceTokenRequestContext(deviceCodeModel, formParams));
         } catch (ClientPolicyException cpe) {
-            event.detail(Details.REASON, cpe.getErrorDetail());
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
             event.error(cpe.getError());
             throw new CorsErrorResponseException(cors, OAuthErrorException.INVALID_GRANT, cpe.getErrorDetail(),
                 Response.Status.BAD_REQUEST);
@@ -331,7 +347,7 @@ public class DeviceGrantType extends OAuth2GrantTypeBase {
         // Compute client scopes again from scope parameter. Check if user still has them granted
         // (but in device_code-to-token request, it could just theoretically happen that they are not available)
         String scopeParam = deviceCodeModel.getScope();
-        if (!TokenManager.verifyConsentStillAvailable(session, user, client, TokenManager.getRequestedClientScopes(session, scopeParam, client, user))) {
+        if (!TokenManager.verifyConsentStillAvailable(session, user, client, clientSession, scopeParam)) {
             String errorMessage = "Client no longer has requested consent from user";
             event.detail(Details.REASON, errorMessage);
             event.error(Errors.NOT_ALLOWED);
@@ -351,6 +367,11 @@ public class DeviceGrantType extends OAuth2GrantTypeBase {
     @Override
     public EventType getEventType() {
         return EventType.OAUTH2_DEVICE_CODE_TO_TOKEN;
+    }
+
+    @Override
+    public Set<String> getTokenParameterNames() {
+        return Collections.emptySet();
     }
 
 }

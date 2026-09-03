@@ -988,7 +988,7 @@ public class Reflections {
      * @throws InstantiationException
      * @deprecated for removal in Keycloak 27
      */
-    @Deprecated(forRemoval = true)
+    @Deprecated
     public static <T> T newInstance(final Class<T> fromClass) throws ClassNotFoundException, IllegalAccessException, InstantiationException {
         return newInstance(fromClass, fromClass.getName());
     }
@@ -1008,7 +1008,7 @@ public class Reflections {
      * @throws InstantiationException
      * @deprecated for removal in Keycloak 27
      */
-    @Deprecated(forRemoval = true)
+    @Deprecated
     public static <T> T newInstance(final Class<?> type, final String fullQualifiedName) throws ClassNotFoundException, IllegalAccessException, InstantiationException {
         return (T) classForName(fullQualifiedName, type.getClassLoader()).newInstance();
     }
@@ -1050,5 +1050,39 @@ public class Reflections {
         }
 
         return Object.class;
+    }
+
+    public static <T> T convertValueToType(Object value, Class<T> type) {
+
+        if (value == null) {
+            return null;
+
+        } else if (value instanceof String) {
+            if (type == String.class) {
+                return type.cast(value);
+            } else if (type == Boolean.class) {
+                return type.cast(Boolean.parseBoolean(value.toString()));
+            } else if (type == Integer.class) {
+                return type.cast(Integer.parseInt(value.toString()));
+            } else if (type == Long.class) {
+                return type.cast(Long.parseLong(value.toString()));
+            }
+        } else if (value instanceof Number) {
+            if (type == Integer.class) {
+                return type.cast(((Number) value).intValue());
+            } else if (type == Long.class) {
+                return type.cast(((Number) value).longValue());
+            } else if (type == String.class) {
+                return type.cast(value.toString());
+            }
+        } else if (value instanceof Boolean) {
+            if (type == Boolean.class) {
+                return type.cast(value);
+            } else if (type == String.class) {
+                return type.cast(value);
+            }
+        }
+
+        throw new RuntimeException("Unable to handle type [" + type + "]");
     }
 }
