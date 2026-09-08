@@ -835,6 +835,17 @@
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "denver-orchestration",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ],
       "defaultClientScopes": [
@@ -946,6 +957,17 @@
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "nairobi",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ],
       "defaultClientScopes": [
@@ -1053,6 +1075,17 @@
           "consentRequired": false,
           "config": {
             "included.client.audience": "vusmartmaps",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "orchestration-service",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -1719,6 +1752,17 @@
           "consentRequired": false,
           "config": {
             "included.client.audience": "vusmartmaps",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "omniagent-client",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
