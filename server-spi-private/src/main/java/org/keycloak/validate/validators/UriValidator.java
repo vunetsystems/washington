@@ -16,13 +16,6 @@
  */
 package org.keycloak.validate.validators;
 
-import org.keycloak.provider.ConfiguredProvider;
-import org.keycloak.provider.ProviderConfigProperty;
-import org.keycloak.validate.AbstractSimpleValidator;
-import org.keycloak.validate.ValidationContext;
-import org.keycloak.validate.ValidationError;
-import org.keycloak.validate.ValidatorConfig;
-
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -33,6 +26,13 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import org.keycloak.provider.ConfiguredProvider;
+import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.validate.AbstractSimpleValidator;
+import org.keycloak.validate.ValidationContext;
+import org.keycloak.validate.ValidationError;
+import org.keycloak.validate.ValidatorConfig;
 
 /**
  * URI validation - accepts {@link URI}, {@link URL} and single String. Null input is valid, use other validators (like
@@ -54,9 +54,9 @@ public class UriValidator extends AbstractSimpleValidator implements ConfiguredP
     public static final String MESSAGE_INVALID_SCHEME = "error-invalid-uri-scheme";
     public static final String MESSAGE_INVALID_FRAGMENT = "error-invalid-uri-fragment";
 
-    public static boolean DEFAULT_ALLOW_FRAGMENT = true;
+    public static final boolean DEFAULT_ALLOW_FRAGMENT = true;
 
-    public static boolean DEFAULT_REQUIRE_VALID_URL = true;
+    public static final boolean DEFAULT_REQUIRE_VALID_URL = true;
 
     public static final String ID = "uri";
 
@@ -102,8 +102,8 @@ public class UriValidator extends AbstractSimpleValidator implements ConfiguredP
     @Override
     protected void doValidate(Object input, String inputHint, ValidationContext context, ValidatorConfig config) {
     	
-    	if(input == null || (input instanceof String && ((String) input).isEmpty())) {
-    		return;
+    	if (input == null || (input instanceof String && ((String) input).isEmpty())) {
+            return;
     	}
 
         try {
@@ -125,13 +125,12 @@ public class UriValidator extends AbstractSimpleValidator implements ConfiguredP
 
     private URI toUri(Object input) throws URISyntaxException {
 
-        if (input instanceof String) {
-            String uriString = (String) input;
+        if (input instanceof String uriString) {
             return new URI(uriString);
-        } else if (input instanceof URI) {
-            return (URI) input;
-        } else if (input instanceof URL) {
-            return ((URL) input).toURI();
+        } else if (input instanceof URI uri) {
+            return uri;
+        } else if (input instanceof URL url) {
+            return url.toURI();
         }
 
         return null;
@@ -164,7 +163,7 @@ public class UriValidator extends AbstractSimpleValidator implements ConfiguredP
         // This cannot be moved higher because it acts on differently based on environment (e.g. sometimes it checks
         // scheme, sometimes it doesn't).
         if (requireValidUrl && valid) {
-            URL ignored = uri.toURL(); // throws an exception
+            uri.toURL(); // throws an exception
         }
 
         return valid;

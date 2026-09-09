@@ -16,10 +16,12 @@ import { sortBy } from "lodash-es";
 import { BellIcon } from "@patternfly/react-icons";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useAdminClient } from "../admin-client";
 import { useConfirmDialog } from "../components/confirm-dialog/ConfirmDialog";
 import { ManageOrderDialog } from "../identity-providers/ManageOrderDialog";
+import { toIdentityProvider } from "../identity-providers/routes/IdentityProvider";
+import { useRealm } from "../context/realm-context/RealmContext";
 import useToggle from "../utils/useToggle";
 import { LinkIdentityProviderModal } from "./LinkIdentityProviderModal";
 import { EditOrganizationParams } from "./routes/EditOrganization";
@@ -43,10 +45,7 @@ const ShownOnLoginPageCheck = ({
         { alias: row.alias! },
         {
           ...row,
-          config: {
-            ...row.config,
-            "kc.org.broker.public": `${value}`,
-          },
+          hideOnLogin: value,
         },
       );
       addAlert(t("linkUpdatedSuccessful"));
@@ -61,7 +60,7 @@ const ShownOnLoginPageCheck = ({
     <Switch
       label={t("on")}
       labelOff={t("off")}
-      isChecked={row.config?.["kc.org.broker.public"] === "true"}
+      isChecked={row.hideOnLogin}
       onChange={(_, value) => toggle(value)}
     />
   );
@@ -71,6 +70,7 @@ export const IdentityProviders = () => {
   const { adminClient } = useAdminClient();
   const { t } = useTranslation();
   const { id: orgId } = useParams<EditOrganizationParams>();
+  const { realm } = useRealm();
   const { addAlert, addError } = useAlerts();
 
   const [key, setKey] = useState(0);
@@ -194,6 +194,18 @@ export const IdentityProviders = () => {
             columns={[
               {
                 name: "alias",
+                cellRenderer: (row) => (
+                  <Link
+                    to={toIdentityProvider({
+                      realm,
+                      providerId: row.providerId!,
+                      alias: row.alias!,
+                      tab: "settings",
+                    })}
+                  >
+                    {row.alias}
+                  </Link>
+                ),
               },
               {
                 name: "config['kc.org.domain']",
@@ -204,8 +216,8 @@ export const IdentityProviders = () => {
                 displayKey: "providerDetails",
               },
               {
-                name: "config['kc.org.broker.public']",
-                displayKey: "shownOnLoginPage",
+                name: "hideOnLogin",
+                displayKey: "hideOnLoginPage",
                 cellRenderer: (row) => (
                   <ShownOnLoginPageCheck row={row} refresh={refresh} />
                 ),

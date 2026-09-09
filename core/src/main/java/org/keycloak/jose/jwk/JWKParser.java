@@ -19,22 +19,25 @@ package org.keycloak.jose.jwk;
 
 import java.math.BigInteger;
 import java.security.KeyFactory;
-import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
-import java.security.spec.EdECPoint;
-import java.security.spec.EdECPublicKeySpec;
-import java.security.spec.InvalidKeySpecException;
-import java.security.spec.NamedParameterSpec;
+import java.security.spec.ECParameterSpec;
+import java.security.spec.ECPoint;
+import java.security.spec.ECPublicKeySpec;
+import java.security.spec.RSAPublicKeySpec;
 
+import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.common.util.Base64Url;
-import org.keycloak.crypto.Algorithm;
 import org.keycloak.crypto.KeyType;
 import org.keycloak.util.JsonSerialization;
+
+import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
-public class JWKParser extends AbstractJWKParser {
+public class JWKParser {
+
+    protected JWK jwk;
 
     private JWKParser() {
     }
@@ -60,68 +63,97 @@ public class JWKParser extends AbstractJWKParser {
         }
     }
 
-    @Override
+    public JWK getJwk() {
+        return jwk;
+    }
+
     public PublicKey toPublicKey() {
         if (jwk == null) {
             throw new IllegalStateException("Not possible to convert to the publicKey. The jwk is not set");
         }
         String keyType = jwk.getKeyType();
+
+        // subtypes may store properties differently while representing the same JWK, serializing it to nodes
+        // makes sure there is no difference when creating the keys
+        JsonNode normalizedJwkNode = JsonSerialization.writeValueAsNode(jwk);
         if (KeyType.RSA.equals(keyType)) {
-            return createRSAPublicKey();
+            return createRSAPublicKey(normalizedJwkNode);
         } else if (KeyType.EC.equals(keyType)) {
-            return createECPublicKey();
+            return createECPublicKey(normalizedJwkNode);
         } else if (KeyType.OKP.equals(keyType)) {
-            return createOKPPublicKey();
+            return JWKBuilder.EdEC_UTILS.createOKPPublicKey(jwk);
+        } else if (KeyType.AKP.equals(keyType)) {
+            return createAPKPublicKey(normalizedJwkNode);
         } else {
             throw new RuntimeException("Unsupported keyType " + keyType);
         }
     }
 
-    private PublicKey createOKPPublicKey() {
-        String x = (String) jwk.getOtherClaims().get(OKPPublicJWK.X);
-        String crv = (String) jwk.getOtherClaims().get(OKPPublicJWK.CRV);
-        // JWK representation "x" of a public key
-        int bytesLength = 0;
-        if (Algorithm.Ed25519.equals(crv)) {
-            bytesLength = 32;
-        } else if (Algorithm.Ed448.equals(crv)) {
-            bytesLength = 57;
-        } else {
-            throw new RuntimeException("Invalid JWK representation of OKP type algorithm");
+    private static PublicKey createECPublicKey(JsonNode jwk) {
+
+
+        /* Try retrieving the necessary fields */
+        String crv = jwk.path(ECPublicJWK.CRV).asText(null);
+        String xStr = jwk.get(ECPublicJWK.X).asText(null);
+        String yStr = jwk.get(ECPublicJWK.Y).asText(null);
+
+        /* Check if the retrieving of necessary fields success */
+        if (crv == null || xStr == null || yStr == null) {
+            throw new RuntimeException("Fail to retrieve ECPublicJWK.CRV, ECPublicJWK.X or ECPublicJWK.Y field.");
         }
 
-        byte[] decodedX = Base64Url.decode(x);
-        if (decodedX.length != bytesLength) {
-            throw new RuntimeException("Invalid JWK representation of OKP type public key");
+        BigInteger x = new BigInteger(1, Base64Url.decode(xStr));
+        BigInteger y = new BigInteger(1, Base64Url.decode(yStr));
+
+        String name;
+        switch (crv) {
+            case "P-256" :
+                name = "secp256r1";
+                break;
+            case "P-384" :
+                name = "secp384r1";
+                break;
+            case "P-521" :
+                name = "secp521r1";
+                break;
+            default :
+                throw new RuntimeException("Unsupported curve");
         }
 
-        // x-coordinate's parity check shown by MSB(bit) of MSB(byte) of decoded "x": 1 is odd, 0 is even
-        boolean isOddX = false;
-        if ((decodedX[decodedX.length - 1] & -128) != 0) { // 0b10000000
-            isOddX = true;
-        }
-
-        // MSB(bit) of MSB(byte) showing x-coodinate's parity is set to 0
-        decodedX[decodedX.length - 1] &= 127; // 0b01111111
-
-        // both x and y-coordinate in twisted Edwards curve are always 0 or natural number
-        BigInteger y = new BigInteger(1, JWKBuilder.reverseBytes(decodedX));
-        NamedParameterSpec spec = new NamedParameterSpec(crv);
-        EdECPoint ep = new EdECPoint(isOddX, y);
-        EdECPublicKeySpec keySpec = new EdECPublicKeySpec(spec, ep);
-
-        PublicKey publicKey = null;
         try {
-            publicKey = KeyFactory.getInstance(crv).generatePublic(keySpec);
-        } catch (InvalidKeySpecException | NoSuchAlgorithmException e) {
+
+            ECPoint point = new ECPoint(x, y);
+            ECParameterSpec params = CryptoIntegration.getProvider().createECParams(name);
+            ECPublicKeySpec pubKeySpec = new ECPublicKeySpec(point, params);
+
+            KeyFactory kf = CryptoIntegration.getProvider().getKeyFactory("ECDSA");
+            return kf.generatePublic(pubKeySpec);
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return publicKey;
     }
 
-    @Override
+    private static PublicKey createRSAPublicKey(JsonNode jwk) {
+        BigInteger modulus = new BigInteger(1, Base64Url.decode(jwk.path(RSAPublicJWK.MODULUS).asText(null)));
+        BigInteger publicExponent = new BigInteger(1, Base64Url.decode(jwk.path(RSAPublicJWK.PUBLIC_EXPONENT).asText(null)));
+
+        try {
+            KeyFactory kf = KeyFactory.getInstance("RSA");
+            return kf.generatePublic(new RSAPublicKeySpec(modulus, publicExponent));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static PublicKey createAPKPublicKey(JsonNode jwk) {
+        String algorithm = jwk.path(JWK.ALGORITHM).asText();
+        String publicKey = jwk.path(AKPPublicJWK.PUB).asText();
+        return AKPUtils.fromEncodedPub(publicKey, algorithm);
+    }
+
     public boolean isKeyTypeSupported(String keyType) {
-        return (RSAPublicJWK.RSA.equals(keyType) || ECPublicJWK.EC.equals(keyType) || OKPPublicJWK.OKP.equals(keyType));
+        return (RSAPublicJWK.RSA.equals(keyType) || ECPublicJWK.EC.equals(keyType)
+                || (JWKBuilder.EdEC_UTILS.isEdECSupported() && OKPPublicJWK.OKP.equals(keyType)))
+                || KeyType.AKP.equals(keyType);
     }
-
 }

@@ -3,7 +3,8 @@ import { Badge, Chip, ChipGroup } from "@patternfly/react-core";
 import { TableText } from "@patternfly/react-table";
 import { FunctionComponent, PropsWithChildren, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { KeycloakDataTable, LoaderFunction } from "./table/KeycloakDataTable";
+import type { Action, LoaderFunction } from "./table/KeycloakDataTable";
+import { KeycloakDataTable } from "./table/KeycloakDataTable";
 
 type OrgDetailLinkProps = {
   link: FunctionComponent<
@@ -53,7 +54,7 @@ const Domains = (org: OrganizationRepresentation) => {
   );
 };
 
-type OrganizationTableProps = PropsWithChildren & {
+export type OrganizationTableProps = PropsWithChildren & {
   loader:
     | LoaderFunction<OrganizationRepresentation>
     | OrganizationRepresentation[];
@@ -62,20 +63,26 @@ type OrganizationTableProps = PropsWithChildren & {
   >;
   toolbarItem?: ReactNode;
   isPaginated?: boolean;
+  isSearching?: boolean;
+  searchPlaceholderKey?: string;
   onSelect?: (orgs: OrganizationRepresentation[]) => void;
   onDelete?: (org: OrganizationRepresentation) => void;
   deleteLabel?: string;
+  actions?: Action<OrganizationRepresentation>[];
 };
 
 export const OrganizationTable = ({
   loader,
   toolbarItem,
   isPaginated = false,
+  isSearching = false,
+  searchPlaceholderKey,
   onSelect,
   onDelete,
   deleteLabel = "delete",
   link,
   children,
+  actions,
 }: OrganizationTableProps) => {
   const { t } = useTranslation();
 
@@ -83,21 +90,16 @@ export const OrganizationTable = ({
     <KeycloakDataTable
       loader={loader}
       isPaginated={isPaginated}
+      isSearching={isSearching}
       ariaLabelKey="organizationList"
-      searchPlaceholderKey="searchOrganization"
+      searchPlaceholderKey={searchPlaceholderKey}
       toolbarItem={toolbarItem}
       onSelect={onSelect}
       canSelectAll={onSelect !== undefined}
-      actions={
-        onDelete
-          ? [
-              {
-                title: t(deleteLabel),
-                onRowClick: onDelete,
-              },
-            ]
-          : undefined
-      }
+      actions={[
+        ...(onDelete ? [{ title: t(deleteLabel), onRowClick: onDelete }] : []),
+        ...(actions ?? []),
+      ]}
       columns={[
         {
           name: "name",
@@ -114,6 +116,10 @@ export const OrganizationTable = ({
         {
           name: "description",
           displayKey: "description",
+        },
+        {
+          name: "membershipType",
+          displayKey: "membershipType",
         },
       ]}
       emptyState={children}

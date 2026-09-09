@@ -7,7 +7,7 @@
     <#if section="header">
         ${msg("doLogIn")}
     <#elseif section="form">
-        <form id="kc-otp-login-form" class="${properties.kcFormClass!}" action="${url.loginAction}" method="post">
+        <form id="kc-otp-login-form" class="${properties.kcFormClass!}" onsubmit="login.disabled = true; return true;" action="${url.loginAction}" method="post">
             <input id="selectedCredentialId" type="hidden" name="selectedCredentialId" value="${otpLogin.selectedCredentialId!''}">
             <#if otpLogin.userOtpCredentials?size gt 1>
                 <div class="${properties.kcFormGroupClass!}">
@@ -32,14 +32,16 @@
             <@buttons.loginButton />
         </form>
         <script>
+            <#outputformat "JavaScript">
             function toggleOTP(index, value) {
                 // select the clicked OTP credential
                 document.getElementById("selectedCredentialId").value = value;
                 // remove selected class from all OTP credentials
-                Array.from(document.getElementsByClassName("${properties.kcLoginOTPListSelectedClass!}")).map(i => i.classList.remove("${properties.kcLoginOTPListSelectedClass!}"));
+                Array.from(document.getElementsByClassName(${properties.kcLoginOTPListSelectedClass!?c})).map(i => i.classList.remove(${properties.kcLoginOTPListSelectedClass!?c}));
                 // add selected class to the clicked OTP credential
-                document.getElementById("kc-otp-credential-" + index).classList.add("${properties.kcLoginOTPListSelectedClass!}");
+                document.getElementById("kc-otp-credential-" + index).classList.add(${properties.kcLoginOTPListSelectedClass!?c});
             }
+            </#outputformat>
         </script>
     </#if>
 </@layout.registrationLayout>

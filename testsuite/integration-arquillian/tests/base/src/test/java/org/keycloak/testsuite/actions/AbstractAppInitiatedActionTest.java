@@ -16,28 +16,26 @@
  */
 package org.keycloak.testsuite.actions;
 
-import org.apache.http.NameValuePair;
-import org.apache.http.client.utils.URLEncodedUtils;
-import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Rule;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+import jakarta.ws.rs.core.UriBuilder;
+
 import org.keycloak.protocol.oidc.OIDCLoginProtocolService;
-import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
+import org.keycloak.testsuite.AbstractChangeImportedUserPasswordsTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.AppPage.RequestType;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.util.WaitUtils;
 
-import jakarta.ws.rs.core.UriBuilder;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.utils.URLEncodedUtils;
+import org.jboss.arquillian.graphene.page.Page;
+import org.junit.Rule;
 
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.CoreMatchers.not;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.keycloak.OAuth2Constants.REDIRECT_URI;
 import static org.keycloak.OAuth2Constants.RESPONSE_TYPE;
 import static org.keycloak.OAuth2Constants.SCOPE;
@@ -46,10 +44,15 @@ import static org.keycloak.models.Constants.KC_ACTION;
 import static org.keycloak.models.Constants.KC_ACTION_STATUS;
 import static org.keycloak.testsuite.util.ServerURLs.getAuthServerContextRoot;
 
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.MatcherAssert.assertThat;
+
 /**
  * @author Stan Silvert
  */
-public abstract class AbstractAppInitiatedActionTest extends AbstractTestRealmKeycloakTest {
+public abstract class AbstractAppInitiatedActionTest extends AbstractChangeImportedUserPasswordsTest {
 
     protected static final String SUCCESS = "success";
     protected static final String CANCELLED = "cancelled";

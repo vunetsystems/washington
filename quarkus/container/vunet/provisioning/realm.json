@@ -824,6 +824,28 @@
             "claim.name": "clientAddress",
             "jsonType.label": "String"
           }
+        },
+        {
+          "name": "vusmartmaps-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "vusmartmaps",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "denver-orchestration",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ],
       "defaultClientScopes": [
@@ -924,6 +946,28 @@
             "claim.name": "client_id",
             "jsonType.label": "String"
           }
+        },
+        {
+          "name": "vusmartmaps-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "vusmartmaps",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "nairobi",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ],
       "defaultClientScopes": [
@@ -1022,6 +1066,28 @@
             "access.token.claim": "true",
             "claim.name": "clientAddress",
             "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "vusmartmaps-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "vusmartmaps",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "orchestration-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
           }
         }
       ],
@@ -1677,6 +1743,28 @@
             "access.token.claim": "true",
             "claim.name": "client_id",
             "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "vusmartmaps-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "vusmartmaps",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "self-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "omniagent-client",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
           }
         }
       ],

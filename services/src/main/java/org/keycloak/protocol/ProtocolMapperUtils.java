@@ -17,22 +17,26 @@
 
 package org.keycloak.protocol;
 
+import java.lang.reflect.Method;
+import java.util.AbstractMap;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
+
+import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientSessionContext;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.protocol.oidc.OIDCAdvancedConfigWrapper;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.OIDCLoginProtocolFactory;
 import org.keycloak.services.util.DPoPUtil;
-
-import java.lang.reflect.Method;
-import java.util.AbstractMap;
-import java.util.Comparator;
-import java.util.Map.Entry;
-import java.util.Objects;
-import java.util.function.Predicate;
-import java.util.stream.Stream;
+import org.keycloak.services.util.MtlsHoKTokenUtil;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -87,25 +91,42 @@ public class ProtocolMapperUtils {
     // Script mapper goes last, so it can access the roles in the token
     public static final int PRIORITY_SCRIPT_MAPPER = 50;
 
+    private static final HashMap<String, Method> ACCESSORS = new HashMap<>();
+
+    // This caches known methods to avoid generating unnecessary failed lookups and exception at runtime which are expensive
+    static {
+        for (Method method : UserModel.class.getMethods()) {
+            String propertyName;
+            if (method.getName().startsWith("is") && method.getParameterCount() == 0) {
+                propertyName = method.getName().substring(2);
+            } else if (method.getName().startsWith("get") && method.getParameterCount() == 0) {
+                propertyName = method.getName().substring(3);
+            } else {
+                continue;
+            }
+            ACCESSORS.put(getLowerCasedProperty(propertyName), method);
+        }
+    }
+
     public static String getUserModelValue(UserModel user, String propertyName) {
+        // To support existing configurations, we accept property names starting with both upper and lower case
+        // as earlier versions of Keycloak where applying this behavior.
+        Method m = ACCESSORS.get(getLowerCasedProperty(propertyName));
+        if (m == null) {
+            return null;
+        }
 
-        String methodName = "get" + Character.toUpperCase(propertyName.charAt(0)) + propertyName.substring(1);
         try {
-            Method method = UserModel.class.getMethod(methodName);
-            Object val = method.invoke(user);
+            Object val = m.invoke(user);
             if (val != null) return val.toString();
         } catch (Exception ignore) {
-
         }
-        methodName = "is" + Character.toUpperCase(propertyName.charAt(0)) + propertyName.substring(1);
-        try {
-            Method method = UserModel.class.getMethod(methodName);
-            Object val = method.invoke(user);
-            if (val != null) return val.toString();
-        } catch (Exception ignore) {
 
-        }
         return null;
+    }
+
+    private static String getLowerCasedProperty(String propertyName) {
+        return Character.toLowerCase(propertyName.charAt(0)) + propertyName.substring(1);
     }
 
     /**
@@ -144,8 +165,16 @@ public class ProtocolMapperUtils {
                         .filter(Objects::nonNull)
                         .filter(filter);
 
-        return Stream.concat(protocolMapperStream, DPoPUtil.getTransientProtocolMapper())
-                .sorted(Comparator.comparing(ProtocolMapperUtils::compare));
+        ClientModel client = ctx.getClientSession().getClient();
+        if (OIDCLoginProtocol.LOGIN_PROTOCOL.equals(client.getProtocol())) {
+            protocolMapperStream = Stream.concat(protocolMapperStream, DPoPUtil.getTransientProtocolMapper());
+
+            if (OIDCAdvancedConfigWrapper.fromClientModel(client).isUseMtlsHokToken()) {
+                protocolMapperStream = Stream.concat(protocolMapperStream, MtlsHoKTokenUtil.getTransientProtocolMapper());
+            }
+        }
+
+        return protocolMapperStream.sorted(Comparator.comparing(ProtocolMapperUtils::compare));
     }
 
     public static int compare(Entry<ProtocolMapperModel, ProtocolMapper> entry) {

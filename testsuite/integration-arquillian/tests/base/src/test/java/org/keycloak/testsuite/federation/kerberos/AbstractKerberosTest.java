@@ -17,10 +17,6 @@
 
 package org.keycloak.testsuite.federation.kerberos;
 
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
-import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
-
-import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -35,6 +31,38 @@ import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
 import javax.security.sasl.Sasl;
+
+import jakarta.ws.rs.core.Response;
+
+import org.keycloak.OAuth2Constants;
+import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.authentication.authenticators.browser.SpnegoAuthenticatorFactory;
+import org.keycloak.common.constants.KerberosConstants;
+import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.events.Details;
+import org.keycloak.federation.kerberos.CommonKerberosConfig;
+import org.keycloak.models.AuthenticationExecutionModel;
+import org.keycloak.models.LDAPConstants;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.utils.DefaultAuthenticationFlows;
+import org.keycloak.models.utils.ModelToRepresentation;
+import org.keycloak.representations.AccessToken;
+import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
+import org.keycloak.representations.idm.ComponentRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.storage.UserStorageProvider;
+import org.keycloak.storage.UserStorageProviderModel;
+import org.keycloak.testframework.events.EventAssertion;
+import org.keycloak.testsuite.AbstractAuthTest;
+import org.keycloak.testsuite.AssertEvents;
+import org.keycloak.testsuite.admin.AdminApiUtil;
+import org.keycloak.testsuite.admin.ApiUtil;
+import org.keycloak.testsuite.pages.AppPage;
+import org.keycloak.testsuite.pages.LoginPage;
+import org.keycloak.testsuite.util.KerberosRule;
+import org.keycloak.testsuite.util.KerberosUtils;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
 import org.apache.http.NameValuePair;
 import org.apache.http.auth.AuthSchemeProvider;
@@ -56,35 +84,10 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
+import org.junit.jupiter.api.Assertions;
 
-import org.keycloak.OAuth2Constants;
-import org.keycloak.admin.client.resource.RealmResource;
-import org.keycloak.authentication.authenticators.browser.SpnegoAuthenticatorFactory;
-import org.keycloak.common.constants.KerberosConstants;
-import org.keycloak.common.util.MultivaluedHashMap;
-import org.keycloak.events.Details;
-import org.keycloak.federation.kerberos.CommonKerberosConfig;
-import org.keycloak.models.AuthenticationExecutionModel;
-import org.keycloak.models.LDAPConstants;
-import org.keycloak.models.UserModel;
-import org.keycloak.models.utils.DefaultAuthenticationFlows;
-import org.keycloak.models.utils.ModelToRepresentation;
-import org.keycloak.representations.AccessToken;
-import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
-import org.keycloak.representations.idm.ComponentRepresentation;
-import org.keycloak.representations.idm.RealmRepresentation;
-import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.storage.UserStorageProvider;
-import org.keycloak.storage.UserStorageProviderModel;
-import org.keycloak.testsuite.AbstractAuthTest;
-import org.keycloak.testsuite.Assert;
-import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.admin.ApiUtil;
-import org.keycloak.testsuite.pages.AppPage;
-import org.keycloak.testsuite.pages.LoginPage;
-import org.keycloak.testsuite.util.KerberosRule;
-import org.keycloak.testsuite.util.KerberosUtils;
-import org.keycloak.testsuite.util.OAuthClient;
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
+import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 
 /**
  * Contains just helper methods. No test methods.
@@ -160,7 +163,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         initHttpClient(true);
         removeAllUsers();
 
-        oauth.clientId("kerberos-app");
+        oauth.client("kerberos-app", "password");
 
         ComponentRepresentation rep = getUserStorageConfiguration();
         Response resp = testRealmResource().components().add(rep);
@@ -188,32 +191,30 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 //    }
 
 
-    protected OAuthClient.AccessTokenResponse assertSuccessfulSpnegoLogin(String loginUsername, String expectedUsername, String password) throws Exception {
+    protected AccessTokenResponse assertSuccessfulSpnegoLogin(String loginUsername, String expectedUsername, String password) throws Exception {
         return assertSuccessfulSpnegoLogin("kerberos-app", loginUsername, expectedUsername, password);
     }
 
-    protected OAuthClient.AccessTokenResponse assertSuccessfulSpnegoLogin(String clientId, String loginUsername, String expectedUsername, String password) throws Exception {
-        oauth.clientId(clientId);
+    protected AccessTokenResponse assertSuccessfulSpnegoLogin(String clientId, String loginUsername, String expectedUsername, String password) throws Exception {
+        events.clear();
+        oauth.client(clientId, "password");
         Response spnegoResponse = spnegoLogin(loginUsername, password);
-        Assert.assertEquals(302, spnegoResponse.getStatus());
+        Assertions.assertEquals(302, spnegoResponse.getStatus());
 
         List<UserRepresentation> users = testRealmResource().users().search(expectedUsername, 0, 1);
         String userId = users.get(0).getId();
-        events.expectLogin()
-                .client(clientId)
-                .user(userId)
-                .detail(Details.USERNAME, expectedUsername)
-                .assertEvent();
+        EventAssertion.expectLoginSuccess(events.poll())
+                .clientId(clientId)
+                .userId(userId)
+                .details(Details.USERNAME, expectedUsername);
 
         String codeUrl = spnegoResponse.getLocation().toString();
 
-        OAuthClient.AccessTokenResponse tokenResponse = assertAuthenticationSuccess(codeUrl);
+        AccessTokenResponse tokenResponse = assertAuthenticationSuccess(codeUrl);
 
         AccessToken token = oauth.verifyToken(tokenResponse.getAccessToken());
-        Assert.assertEquals(userId, token.getSubject());
-        Assert.assertEquals(expectedUsername, token.getPreferredUsername());
-
-        oauth.idTokenHint(tokenResponse.getIdToken());
+        Assertions.assertEquals(userId, token.getSubject());
+        Assertions.assertEquals(expectedUsername, token.getPreferredUsername());
 
         return tokenResponse;
     }
@@ -242,7 +243,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
 
 
     protected Response spnegoLogin(String username, String password) {
-        String kcLoginPageLocation = oauth.getLoginFormUrl();
+        String kcLoginPageLocation = oauth.loginForm().state("spnegoLogin").build();
 
         // Request for SPNEGO login sent with Resteasy client
         spnegoSchemeFactory.setCredentials(username, password);
@@ -264,7 +265,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         if (client != null) {
             cleanupApacheHttpClient();
         }
-        
+
         HttpClientBuilder httpClientBuilder = HttpClientBuilder.create();
         if (useSpnego) {
             BasicCredentialsProvider credentialsProvider = new BasicCredentialsProvider();
@@ -287,11 +288,11 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
         RealmResource realm = testRealmResource();
         List<UserRepresentation> users = realm.users().search("", 0, -1);
         for (UserRepresentation user : users) {
-            if (!user.getUsername().equals(AssertEvents.DEFAULT_USERNAME)) {
+            if (!user.getUsername().equals("test-user@localhost")) {
                 realm.users().get(user.getId()).remove();
             }
         }
-        Assert.assertEquals(1, realm.users().search("", 0, -1).size());
+        Assertions.assertEquals(1, realm.users().search("", 0, -1).size());
     }
 
 
@@ -299,23 +300,23 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
     protected UserRepresentation assertUser(String expectedUsername, String expectedEmail, String expectedFirstname,
                                             String expectedLastname, String expectedKerberosPrincipal, boolean updateProfileActionExpected) {
         try {
-            UserRepresentation user = ApiUtil.findUserByUsername(testRealmResource(), expectedUsername);
-            Assert.assertNotNull(user);
-            Assert.assertEquals(expectedEmail, user.getEmail());
-            Assert.assertEquals(expectedFirstname, user.getFirstName());
-            Assert.assertEquals(expectedLastname, user.getLastName());
+            UserRepresentation user = AdminApiUtil.findUserByUsername(testRealmResource(), expectedUsername);
+            Assertions.assertNotNull(user);
+            Assertions.assertEquals(expectedEmail, user.getEmail());
+            Assertions.assertEquals(expectedFirstname, user.getFirstName());
+            Assertions.assertEquals(expectedLastname, user.getLastName());
 
             if (expectedKerberosPrincipal == null) {
-                Assert.assertNull(user.getAttributes().get(KerberosConstants.KERBEROS_PRINCIPAL));
+                Assertions.assertNull(user.getAttributes().get(KerberosConstants.KERBEROS_PRINCIPAL));
             } else {
-                Assert.assertEquals(expectedKerberosPrincipal, user.getAttributes().get(KerberosConstants.KERBEROS_PRINCIPAL).get(0));
+                Assertions.assertEquals(expectedKerberosPrincipal, user.getAttributes().get(KerberosConstants.KERBEROS_PRINCIPAL).get(0));
             }
 
             if (updateProfileActionExpected) {
-                Assert.assertEquals(UserModel.RequiredAction.UPDATE_PROFILE.toString(),
+                Assertions.assertEquals(UserModel.RequiredAction.UPDATE_PROFILE.toString(),
                         user.getRequiredActions().iterator().next());
             } else {
-                Assert.assertTrue(user.getRequiredActions().isEmpty());
+                Assertions.assertTrue(user.getRequiredActions().isEmpty());
             }
             return user;
         } finally {
@@ -323,13 +324,13 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
     }
 
     protected void assertUserStorageProvider(UserRepresentation user, String providerName) {
-        if (user.getFederationLink() == null) Assert.fail("Federation link on user " + user.getUsername() + " was null");
+        if (user.getFederationLink() == null) Assertions.fail("Federation link on user " + user.getUsername() + " was null");
         ComponentRepresentation rep = testRealmResource().components().component(user.getFederationLink()).toRepresentation();
-        Assert.assertEquals(providerName, rep.getName());
+        Assertions.assertEquals(providerName, rep.getName());
     }
 
 
-    protected OAuthClient.AccessTokenResponse assertAuthenticationSuccess(String codeUrl) throws Exception {
+    protected AccessTokenResponse assertAuthenticationSuccess(String codeUrl) throws Exception {
         List<NameValuePair> pairs = URLEncodedUtils.parse(new URI(codeUrl), StandardCharsets.UTF_8);
         String code = null;
         String state = null;
@@ -340,10 +341,10 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
                 state = pair.getValue();
             }
         }
-        Assert.assertNotNull(code);
-        Assert.assertNotNull(state);
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
-        Assert.assertNotNull(response.getAccessToken());
+        Assertions.assertNotNull(code);
+        Assertions.assertNotNull(state);
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
+        Assertions.assertNotNull(response.getAccessToken());
         events.clear();
         return response;
     }
@@ -365,7 +366,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
     protected void updateUserStorageProvider(Consumer<ComponentRepresentation> updater) {
         String parentId = testRealmResource().toRepresentation().getId();
         List<ComponentRepresentation> reps = testRealmResource().components().query(parentId, UserStorageProvider.class.getName());
-        Assert.assertEquals(1, reps.size());
+        Assertions.assertEquals(1, reps.size());
         ComponentRepresentation kerberosProvider = reps.get(0);
 
         updater.accept(kerberosProvider);
@@ -386,7 +387,7 @@ public abstract class AbstractKerberosTest extends AbstractAuthTest {
                 .filter(e -> e.getProviderId().equals(SpnegoAuthenticatorFactory.PROVIDER_ID))
                 .findFirst();
 
-        Assert.assertTrue(kerberosAuthExecutionOpt.isPresent());
+        Assertions.assertTrue(kerberosAuthExecutionOpt.isPresent());
 
         AuthenticationExecutionInfoRepresentation kerberosAuthExecution = kerberosAuthExecutionOpt.get();
         String oldRequirementStr = kerberosAuthExecution.getRequirement();

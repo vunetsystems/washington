@@ -16,85 +16,72 @@
  */
 package org.keycloak.testsuite.forms;
 
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_ADMIN;
-import static org.keycloak.userprofile.config.UPConfigUtils.ROLE_USER;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
-import org.apache.commons.lang3.StringUtils;
-import org.jboss.arquillian.graphene.page.Page;
-import org.jboss.arquillian.test.api.ArquillianResource;
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.RealmResource;
-import org.keycloak.admin.client.resource.UserProfileResource;
-import org.keycloak.common.Profile;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserModel.RequiredAction;
 import org.keycloak.representations.idm.AdminEventRepresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.representations.userprofile.config.UPAttribute;
-import org.keycloak.representations.userprofile.config.UPAttributePermissions;
-import org.keycloak.representations.userprofile.config.UPAttributeRequired;
 import org.keycloak.representations.userprofile.config.UPConfig;
-import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
+import org.keycloak.testframework.events.EventAssertion;
+import org.keycloak.testframework.realm.ClientScopeBuilder;
+import org.keycloak.testframework.realm.RealmBuilder;
+import org.keycloak.testframework.realm.UserBuilder;
+import org.keycloak.testframework.remote.providers.runonserver.RunOnServer;
+import org.keycloak.testsuite.AbstractChangeImportedUserPasswordsTest;
 import org.keycloak.testsuite.AssertEvents;
-import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
+import org.keycloak.testsuite.admin.AdminApiUtil;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.AppPage.RequestType;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.pages.VerifyProfilePage;
-import org.keycloak.testsuite.runonserver.RunOnServer;
 import org.keycloak.testsuite.util.AdminEventPaths;
 import org.keycloak.testsuite.util.AssertAdminEvents;
-import org.keycloak.testsuite.util.ClientScopeBuilder;
 import org.keycloak.testsuite.util.JsonTestUtils;
 import org.keycloak.testsuite.util.KeycloakModelUtils;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.keycloak.testsuite.util.RealmBuilder;
-import org.keycloak.testsuite.util.UserBuilder;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
+import org.keycloak.testsuite.util.userprofile.UserProfileUtil;
 import org.keycloak.userprofile.UserProfileContext;
 import org.keycloak.util.JsonSerialization;
+
+import org.apache.commons.lang3.StringUtils;
+import org.jboss.arquillian.graphene.page.Page;
+import org.jboss.arquillian.test.api.ArquillianResource;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
+
+import static org.keycloak.testsuite.util.userprofile.UserProfileUtil.ATTRIBUTE_DEPARTMENT;
+import static org.keycloak.testsuite.util.userprofile.UserProfileUtil.CONFIGURATION_FOR_USER_EDIT;
+import static org.keycloak.testsuite.util.userprofile.UserProfileUtil.PERMISSIONS_ADMIN_EDITABLE;
+import static org.keycloak.testsuite.util.userprofile.UserProfileUtil.PERMISSIONS_ADMIN_ONLY;
+import static org.keycloak.testsuite.util.userprofile.UserProfileUtil.PERMISSIONS_ALL;
+import static org.keycloak.testsuite.util.userprofile.UserProfileUtil.SCOPE_DEPARTMENT;
+import static org.keycloak.testsuite.util.userprofile.UserProfileUtil.VALIDATIONS_LENGTH;
+
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author Vlastimil Elias <velias@redhat.com>
  */
-public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
-
-    public static final String SCOPE_DEPARTMENT = "department";
-    public static final String ATTRIBUTE_DEPARTMENT = "department";
-
-    public static final String PERMISSIONS_ALL = "\"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\", \"user\"]}";
-    public static final String PERMISSIONS_ADMIN_ONLY = "\"permissions\": {\"view\": [\"admin\"], \"edit\": [\"admin\"]}";
-    public static final String PERMISSIONS_ADMIN_EDITABLE = "\"permissions\": {\"view\": [\"admin\", \"user\"], \"edit\": [\"admin\"]}";
-
-    public static String VALIDATIONS_LENGTH = "\"validations\": {\"length\": { \"min\": 3, \"max\": 255 }}";
-
-    public static final String CONFIGURATION_FOR_USER_EDIT = "{\"attributes\": ["
-            + "{\"name\": \"firstName\"," + PERMISSIONS_ALL + "},"
-            + "{\"name\": \"lastName\"," + PERMISSIONS_ALL + "},"
-            + "{\"name\": \"department\"," + PERMISSIONS_ALL + "}"
-            + "]}";
-
+public class VerifyProfileTest extends AbstractChangeImportedUserPasswordsTest {
 
     private static String userId;
 
@@ -121,15 +108,16 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
     @Override
     public void configureTestRealm(RealmRepresentation testRealm) {
-        UserRepresentation user = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test").email("login@test.com").enabled(true).password("password").build();
-        UserRepresentation user2 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test2").email("login2@test.com").enabled(true).password("password").build();
-        UserRepresentation user3 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test3").email("login3@test.com").enabled(true).password("password").lastName("ExistingLast").build();
-        UserRepresentation user4 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test4").email("login4@test.com").enabled(true).password("password").lastName("ExistingLast").build();
-        UserRepresentation user5 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test5").email("login5@test.com").enabled(true).password("password").firstName("ExistingFirst").lastName("ExistingLast").build();
-        UserRepresentation user6 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test6").email("login6@test.com").enabled(true).password("password").firstName("ExistingFirst").lastName("ExistingLast").build();
-        UserRepresentation userWithoutEmail = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-nomail").enabled(true).password("password").firstName("NoMailFirst").lastName("NoMailLast").build();
+        super.configureTestRealm(testRealm);
+        UserRepresentation user = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test").email("login@test.com").enabled(true).password(generatePassword("login-test")).build();
+        UserRepresentation user2 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test2").email("login2@test.com").enabled(true).password(generatePassword("login-test2")).build();
+        UserRepresentation user3 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test3").email("login3@test.com").enabled(true).password(generatePassword("login-test3")).lastName("ExistingLast").build();
+        UserRepresentation user4 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test4").email("login4@test.com").enabled(true).password(generatePassword("login-test4")).lastName("ExistingLast").build();
+        UserRepresentation user5 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test5").email("login5@test.com").enabled(true).password(generatePassword("login-test5")).firstName("ExistingFirst").lastName("ExistingLast").build();
+        UserRepresentation user6 = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-test6").email("login6@test.com").enabled(true).password(generatePassword("login-test6")).firstName("ExistingFirst").lastName("ExistingLast").build();
+        UserRepresentation userWithoutEmail = UserBuilder.create().id(UUID.randomUUID().toString()).username("login-nomail").enabled(true).password(generatePassword("login-nomail")).firstName("NoMailFirst").lastName("NoMailLast").build();
 
-        RealmBuilder.edit(testRealm).user(user).user(user2).user(user3).user(user4).user(user5).user(user6).user(userWithoutEmail);
+        RealmBuilder.update(testRealm).users(user).users(user2).users(user3).users(user4).users(user5).users(user6).users(userWithoutEmail);
 
         testRealm.setClientScopes(new ArrayList<>());
         testRealm.getClientScopes().add(ClientScopeBuilder.create().name(SCOPE_DEPARTMENT).protocol("openid-connect").build());
@@ -184,18 +172,18 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\", \"displayName\" : \"Department\", " + PERMISSIONS_ALL + ", \"required\":{}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
         //assert field names
         // i18n replaced
-        Assert.assertEquals("First name *",verifyProfilePage.getLabelForField("firstName"));
+        Assertions.assertEquals("First name",verifyProfilePage.getLabelForField("firstName"));
         // attribute name used if no display name set
-        Assert.assertEquals("lastName",verifyProfilePage.getLabelForField("lastName"));
+        Assertions.assertEquals("lastName",verifyProfilePage.getLabelForField("lastName"));
         // direct value in display name
-        Assert.assertEquals("Department *",verifyProfilePage.getLabelForField("department"));
+        Assertions.assertEquals("Department",verifyProfilePage.getLabelForField("department"));
     }
 
     @Test
@@ -205,18 +193,18 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         updateUser(user5Id, "ExistingFirst", "ExistingLast", null);
 
         setUserProfileConfiguration("{\"attributes\": ["
-                + "{\"name\": \"lastName\"," + VerifyProfileTest.PERMISSIONS_ALL + "},"
-                + "{\"name\": \"username\", " + VerifyProfileTest.PERMISSIONS_ALL + "},"
-                + "{\"name\": \"firstName\"," + VerifyProfileTest.PERMISSIONS_ALL + ", \"required\": {}},"
-                + "{\"name\": \"department\", " + VerifyProfileTest.PERMISSIONS_ALL + ", \"required\":{}, \"group\": \"company\"},"
-                + "{\"name\": \"email\", " + VerifyProfileTest.PERMISSIONS_ALL + ", \"group\": \"contact\"}"
+                + "{\"name\": \"lastName\"," + PERMISSIONS_ALL + "},"
+                + "{\"name\": \"username\", " + PERMISSIONS_ALL + "},"
+                + "{\"name\": \"firstName\"," + PERMISSIONS_ALL + ", \"required\": {}},"
+                + "{\"name\": \"department\", " + PERMISSIONS_ALL + ", \"required\":{}, \"group\": \"company\"},"
+                + "{\"name\": \"email\", " + PERMISSIONS_ALL + ", \"group\": \"contact\"}"
                 + "], \"groups\": ["
                 + "{\"name\": \"company\", \"displayDescription\": \"Company field desc\" },"
                 + "{\"name\": \"contact\" }"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
@@ -244,19 +232,19 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         updateUser(user5Id, "ExistingFirst", "ExistingLast", null);
 
         setUserProfileConfiguration("{\"attributes\": ["
-                + "{\"name\": \"lastName\"," + VerifyProfileTest.PERMISSIONS_ALL + "},"
-                + "{\"name\": \"department\", " + VerifyProfileTest.PERMISSIONS_ALL + ", \"required\":{}},"
-                + "{\"name\": \"username\", " + VerifyProfileTest.PERMISSIONS_ALL + "},"
-                + "{\"name\": \"firstName\"," + VerifyProfileTest.PERMISSIONS_ALL + ", \"required\": {}},"
-                + "{\"name\": \"email\", " + VerifyProfileTest.PERMISSIONS_ALL + "}"
+                + "{\"name\": \"lastName\"," + PERMISSIONS_ALL + "},"
+                + "{\"name\": \"department\", " + PERMISSIONS_ALL + ", \"required\":{}},"
+                + "{\"name\": \"username\", " + PERMISSIONS_ALL + "},"
+                + "{\"name\": \"firstName\"," + PERMISSIONS_ALL + ", \"required\": {}},"
+                + "{\"name\": \"email\", " + PERMISSIONS_ALL + "}"
                 + "]}");
 
-        RealmRepresentation realm = testRealm().toRepresentation();
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
         realm.setEditUsernameAllowed(true);
-        testRealm().update(realm);
+        managedRealm.admin().update(realm);
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
@@ -277,12 +265,12 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         updateUser(user5Id, "ExistingFirst", "ExistingLast", null);
 
         setUserProfileConfiguration("{\"attributes\": ["
-                + "{\"name\": \"department\", " + VerifyProfileTest.PERMISSIONS_ALL + ", \"required\":{}},"
+                + "{\"name\": \"department\", " + PERMISSIONS_ALL + ", \"required\":{}},"
                 + RegisterWithUserProfileTest.UP_CONFIG_PART_INPUT_TYPES
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
@@ -301,24 +289,22 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\", " + PERMISSIONS_ALL + ", \"required\":{}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
         //event when form is shown
-        events.expectRequiredAction(EventType.VERIFY_PROFILE).user(user5Id)
-                .detail(Details.FIELDS_TO_UPDATE, "department")
-                .assertEvent();
+        EventAssertion.expectRequiredAction(events.poll()).type(EventType.VERIFY_PROFILE).userId(user5Id)
+                .details(Details.FIELDS_TO_UPDATE, "department");
 
         verifyProfilePage.update("First", "Last", "Department");
         //event after profile is updated
         // we also test additional attribute configured to be audited in the event
-        events.expectRequiredAction(EventType.UPDATE_PROFILE).user(user5Id)
-                .detail(Details.CONTEXT, UserProfileContext.UPDATE_PROFILE.name())
-                .detail(Details.PREVIOUS_FIRST_NAME, "ExistingFirst").detail(Details.UPDATED_FIRST_NAME, "First")
-                .detail(Details.PREVIOUS_LAST_NAME, "ExistingLast").detail(Details.UPDATED_LAST_NAME, "Last")
-                .detail(Details.PREF_UPDATED+"department", "Department")
-                .assertEvent();
+        EventAssertion.expectRequiredAction(events.poll()).type(EventType.UPDATE_PROFILE).userId(user5Id)
+                .details(Details.CONTEXT, UserProfileContext.UPDATE_PROFILE.name())
+                .details(Details.PREVIOUS_FIRST_NAME, "ExistingFirst").details(Details.UPDATED_FIRST_NAME, "First")
+                .details(Details.PREVIOUS_LAST_NAME, "ExistingLast").details(Details.UPDATED_LAST_NAME, "Last")
+                .details(Details.PREF_UPDATED+"department", "Department");
     }
 
     @Test
@@ -327,22 +313,22 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
         testingClient.server(TEST_REALM_NAME).run(setEmptyFirstNameAndCustomAttribute());
 
-        loginPage.open();
-        loginPage.login("login-test", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test", getPassword("login-test"));
 
         //submit with error
         verifyProfilePage.assertCurrent();
-        Assert.assertFalse(verifyProfilePage.isDepartmentPresent());
+        Assertions.assertFalse(verifyProfilePage.isDepartmentPresent());
         verifyProfilePage.update("First", " ");
 
         //submit OK
         verifyProfilePage.assertCurrent();
-        Assert.assertFalse(verifyProfilePage.isDepartmentPresent());
+        Assertions.assertFalse(verifyProfilePage.isDepartmentPresent());
         verifyProfilePage.update("First", "Last");
 
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(userId);
         assertEquals("First", user.getFirstName());
@@ -369,7 +355,7 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
     @Test
     public void testUsernameOnlyIfEditAllowed() {
-        RealmRepresentation realm = testRealm().toRepresentation();
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
 
         setUserProfileConfiguration(CONFIGURATION_FOR_USER_EDIT);
         updateUser(user5Id, null, "ExistingLast", null);
@@ -379,29 +365,29 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
             setUserProfileConfiguration(null);
 
             realm.setEditUsernameAllowed(false);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
-            loginPage.open();
-            loginPage.login("login-test5", "password");
+            oauth.openLoginForm();
+            loginPage.login("login-test5", getPassword("login-test5"));
 
             verifyProfilePage.assertCurrent();
             assertFalse(verifyProfilePage.isUsernamePresent());
             assertTrue(verifyProfilePage.isEmailPresent());
 
             realm.setEditUsernameAllowed(true);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
             driver.navigate().refresh();
             assertTrue(verifyProfilePage.isUsernamePresent());
         } finally {
             realm.setEditUsernameAllowed(r);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
         }
     }
 
     @Test
     public void testUsernameOnlyIfEmailAsUsernameIsDisabled() {
-        RealmRepresentation realm = testRealm().toRepresentation();
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
 
         setUserProfileConfiguration(CONFIGURATION_FOR_USER_EDIT);
         updateUser(user5Id, null, "ExistingLast", null);
@@ -411,10 +397,10 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
             realm.setEditUsernameAllowed(true);
             realm.setRegistrationEmailAsUsername(true);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
-            loginPage.open();
-            loginPage.login("login-test5", "password");
+            oauth.openLoginForm();
+            loginPage.login("login-test5", getPassword("login-test5"));
 
             verifyProfilePage.assertCurrent();
             assertFalse(verifyProfilePage.isUsernamePresent());
@@ -422,7 +408,7 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
             realm.setEditUsernameAllowed(false);
             realm.setRegistrationEmailAsUsername(true);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
             driver.navigate().refresh();
             verifyProfilePage.assertCurrent();
@@ -431,7 +417,7 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
             realm.setEditUsernameAllowed(true);
             realm.setRegistrationEmailAsUsername(false);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
             driver.navigate().refresh();
             verifyProfilePage.assertCurrent();
@@ -440,28 +426,29 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         } finally {
             realm.setEditUsernameAllowed(false);
             realm.setRegistrationEmailAsUsername(false);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
         }
     }
 
     @Test
-    @EnableFeature(Profile.Feature.UPDATE_EMAIL)
     public void testUsernameOnlyIfEmailAsUsernameIsDisabledWithUpdateEmailFeature() throws Exception {
         reconnectAdminClient();
-        RealmRepresentation realm = testRealm().toRepresentation();
+        RealmRepresentation realm = managedRealm.admin().toRepresentation();
 
         setUserProfileConfiguration(CONFIGURATION_FOR_USER_EDIT);
         updateUser(user5Id, null, "ExistingLast", null);
+
+        AdminApiUtil.enableRequiredAction(managedRealm.admin(), RequiredAction.UPDATE_EMAIL, true);
 
         try {
             setUserProfileConfiguration(null);
 
             realm.setEditUsernameAllowed(true);
             realm.setRegistrationEmailAsUsername(true);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
-            loginPage.open();
-            loginPage.login("login-test5", "password");
+            oauth.openLoginForm();
+            loginPage.login("login-test5", getPassword("login-test5"));
 
             verifyProfilePage.assertCurrent();
             assertFalse(verifyProfilePage.isUsernamePresent());
@@ -469,7 +456,7 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
             realm.setEditUsernameAllowed(false);
             realm.setRegistrationEmailAsUsername(true);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
             driver.navigate().refresh();
             verifyProfilePage.assertCurrent();
@@ -478,16 +465,17 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
             realm.setEditUsernameAllowed(true);
             realm.setRegistrationEmailAsUsername(false);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
 
             driver.navigate().refresh();
             verifyProfilePage.assertCurrent();
             assertTrue(verifyProfilePage.isUsernamePresent());
             assertFalse(verifyProfilePage.isEmailPresent());
         } finally {
+            AdminApiUtil.enableRequiredAction(managedRealm.admin(), RequiredAction.UPDATE_EMAIL, false);
             realm.setEditUsernameAllowed(false);
             realm.setRegistrationEmailAsUsername(false);
-            testRealm().update(realm);
+            managedRealm.admin().update(realm);
         }
     }
 
@@ -498,14 +486,14 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"lastName\"," + PERMISSIONS_ALL + "}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test2", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test2", getPassword("login-test2"));
 
         verifyProfilePage.assertCurrent();
         verifyProfilePage.update("First", "");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user2Id);
         assertEquals("First", user.getFirstName());
@@ -524,8 +512,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ADMIN_ONLY + "}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
         //submit with error
@@ -535,8 +523,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         //submit OK
         verifyProfilePage.update("First", "Last");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("First", user.getFirstName());
@@ -556,16 +544,16 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"lastName\"," + PERMISSIONS_ALL +","+VALIDATIONS_LENGTH + "}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
     }
 
     @Test
     public void testDoNotValidateUsernameWhenRegistrationAsEmailEnabled() {
-        RealmResource realmResource = testRealm();
+        RealmResource realmResource = managedRealm.admin();
         RealmRepresentation realm = realmResource.toRepresentation();
 
         try {
@@ -581,11 +569,11 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                     + "{\"name\": \"lastName\"," + PERMISSIONS_ALL +","+VALIDATIONS_LENGTH + "}"
                     + "]}");
 
-            loginPage.open();
-            loginPage.login("login6@test.com", "password");
+            oauth.openLoginForm();
+            loginPage.login("login6@test.com", getPassword("login-test6"));
 
-            Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-            Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+            Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+            Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
         } finally {
             realm.setRegistrationEmailAsUsername(false);
             realmResource.update(realm);
@@ -601,18 +589,18 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ADMIN_EDITABLE + ", \"required\":{}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test3", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test3", getPassword("login-test3"));
 
         verifyProfilePage.assertCurrent();
-        Assert.assertEquals("ExistingLast", verifyProfilePage.getLastName());
-        Assert.assertFalse(verifyProfilePage.isDepartmentEnabled());
+        Assertions.assertEquals("ExistingLast", verifyProfilePage.getLastName());
+        Assertions.assertFalse(verifyProfilePage.isDepartmentEnabled());
 
         //update of the other attributes must be successful in this case
         verifyProfilePage.update("First", "Last");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user3Id);
         assertEquals("First", user.getFirstName());
@@ -629,12 +617,12 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"requiredAttrToTriggerVerifyPage\"," + PERMISSIONS_ALL + ", \"required\": {}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test6", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test6", getPassword("login-test6"));
 
         verifyProfilePage.assertCurrent();
-        Assert.assertEquals("ExistingLast", verifyProfilePage.getLastName());
-        Assert.assertFalse("Admin-only attribute should not be visible for user", verifyProfilePage.isDepartmentPresent());
+        Assertions.assertEquals("ExistingLast", verifyProfilePage.getLastName());
+        Assertions.assertFalse(verifyProfilePage.isDepartmentPresent(), "Admin-only attribute should not be visible for user");
     }
 
 
@@ -648,13 +636,13 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"requiredAttrToTriggerVerifyPage\"," + PERMISSIONS_ALL + ", \"required\": {}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test6", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test6", getPassword("login-test6"));
 
         verifyProfilePage.assertCurrent();
-        Assert.assertEquals("ExistingLast", verifyProfilePage.getLastName());
+        Assertions.assertEquals("ExistingLast", verifyProfilePage.getLastName());
 
-        Assert.assertFalse("username should not be editable by user", verifyProfilePage.isUsernameEnabled());
+        Assertions.assertFalse(verifyProfilePage.isUsernameEnabled(), "username should not be editable by user");
     }
 
     @Test
@@ -667,13 +655,13 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"requiredAttrToTriggerVerifyPage\"," + PERMISSIONS_ALL + ", \"required\": {}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test6", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test6", getPassword("login-test6"));
 
         verifyProfilePage.assertCurrent();
-        Assert.assertEquals("ExistingLast", verifyProfilePage.getLastName());
+        Assertions.assertEquals("ExistingLast", verifyProfilePage.getLastName());
 
-        Assert.assertFalse("username should not be shown to user", verifyProfilePage.isUsernamePresent());
+        Assertions.assertFalse(verifyProfilePage.isUsernamePresent(), "username should not be shown to user");
     }
 
     @Test
@@ -686,8 +674,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"email\"," + PERMISSIONS_ALL + ", \"required\":{\"roles\":[\"user\"]}, \"validations\": {\"email\": {\"max-local-length\": \"16\"}}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-nomail", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-nomail", getPassword("login-nomail"));
 
         // no email is set => expect verify profile page to be displayed
         verifyProfilePage.assertCurrent();
@@ -699,8 +687,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         // set e-mail, update firstname/lastname and complete login
         verifyProfilePage.updateEmail("abcdef0123456789@bar.com", "HasNowMailFirst", "HasNowMailLast");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(userWithoutEmailId);
         assertEquals("HasNowMailFirst", user.getFirstName());
@@ -717,18 +705,18 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ADMIN_ONLY + ", \"required\":{}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test4", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test4", getPassword("login-test4"));
 
         verifyProfilePage.assertCurrent();
-        Assert.assertEquals("ExistingLast", verifyProfilePage.getLastName());
-        Assert.assertFalse("'department' field is visible" , verifyProfilePage.isDepartmentPresent());
+        Assertions.assertEquals("ExistingLast", verifyProfilePage.getLastName());
+        Assertions.assertFalse(verifyProfilePage.isDepartmentPresent(), "'department' field is visible" );
 
         //update of the other attributes must be successful in this case
         verifyProfilePage.update("First", "Last");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user4Id);
         assertEquals("First", user.getFirstName());
@@ -747,8 +735,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ALL + ", \"required\":{}}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
@@ -759,8 +747,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         //submit OK
         verifyProfilePage.update("FirstCC", "LastCC", "DepartmentCC");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstCC", user.getFirstName());
@@ -780,8 +768,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         updateUser(user5Id, "ExistingFirst", "ExistingLast", null);
 
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
@@ -793,8 +781,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         verifyProfilePage.update("FirstCC", "LastCC", "DepartmentCC");
 
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstCC", user.getFirstName());
@@ -813,12 +801,12 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
         updateUser(user5Id, "ExistingFirst", "ExistingLast", null);
 
-        oauth.clientId(client_scope_optional.getClientId()).openLoginForm();
+        oauth.client(client_scope_optional.getClientId()).openLoginForm();
 
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("ExistingFirst", user.getFirstName());
@@ -836,17 +824,17 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
         updateUser(user5Id, "ExistingFirst", "ExistingLast", null);
 
-        oauth.scope(SCOPE_DEPARTMENT).clientId(client_scope_optional.getClientId()).openLoginForm();
+        oauth.scope(SCOPE_DEPARTMENT).client(client_scope_optional.getClientId()).openLoginForm();
 
         loginPage.assertCurrent();
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
         verifyProfilePage.update("FirstAA", "LastAA", "DepartmentAA");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstAA", user.getFirstName());
@@ -865,10 +853,10 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
         updateUser(user5Id, "ExistingFirst", "ExistingLast", null);
 
-        oauth.clientId(client_scope_default.getClientId()).openLoginForm();
+        oauth.client(client_scope_default.getClientId()).openLoginForm();
 
         loginPage.assertCurrent();
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
@@ -879,8 +867,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         //submit OK
         verifyProfilePage.update("FirstBB", "LastBB", "DepartmentBB");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstBB", user.getFirstName());
@@ -899,13 +887,13 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
         updateUser(user5Id, "ExistingFirst", "ExistingLast", "ExistingDepartment");
 
-        oauth.clientId(client_scope_default.getClientId()).openLoginForm();
+        oauth.client(client_scope_default.getClientId()).openLoginForm();
 
         loginPage.assertCurrent();
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("ExistingFirst", user.getFirstName());
@@ -925,13 +913,13 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ALL + ", \"required\":{}, \"selector\":{\"scopes\":[\""+SCOPE_DEPARTMENT+"\"]}}"
                 + "]}");
 
-        oauth.clientId(client_scope_optional.getClientId()).openLoginForm();
+        oauth.client(client_scope_optional.getClientId()).openLoginForm();
 
         loginPage.assertCurrent();
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
     }
 
     @Test
@@ -946,17 +934,17 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ALL + ", \"required\":{}, \"selector\":{\"scopes\":[\""+SCOPE_DEPARTMENT+"\"]}}"
                 + "]}");
 
-        oauth.scope(SCOPE_DEPARTMENT).clientId(client_scope_optional.getClientId()).openLoginForm();
+        oauth.scope(SCOPE_DEPARTMENT).client(client_scope_optional.getClientId()).openLoginForm();
 
         loginPage.assertCurrent();
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
         verifyProfilePage.update("FirstAA", "LastAA", "DepartmentAA");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstAA", user.getFirstName());
@@ -976,18 +964,18 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ALL + ", \"selector\":{\"scopes\":[\""+SCOPE_DEPARTMENT+"\"]}}"
                 + "]}");
 
-        oauth.scope(SCOPE_DEPARTMENT).clientId(client_scope_optional.getClientId()).openLoginForm();
+        oauth.scope(SCOPE_DEPARTMENT).client(client_scope_optional.getClientId()).openLoginForm();
 
         loginPage.assertCurrent();
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
-        Assert.assertTrue(verifyProfilePage.isDepartmentPresent());
+        Assertions.assertTrue(verifyProfilePage.isDepartmentPresent());
         verifyProfilePage.update("FirstAA", "LastAA", "Department AA");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstAA", user.getFirstName());
@@ -1007,18 +995,18 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ALL + ", \"required\":{}, \"selector\":{\"scopes\":[\""+SCOPE_DEPARTMENT+"\"]}}"
                 + "]}");
 
-        oauth.clientId(client_scope_optional.getClientId()).openLoginForm();
+        oauth.client(client_scope_optional.getClientId()).openLoginForm();
 
         loginPage.assertCurrent();
-        loginPage.login("login-test5", "password");
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
-        Assert.assertFalse(verifyProfilePage.isDepartmentPresent());
+        Assertions.assertFalse(verifyProfilePage.isDepartmentPresent());
         verifyProfilePage.update("FirstAA", "LastAA");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstAA", user.getFirstName());
@@ -1038,8 +1026,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ALL + ", "+VALIDATIONS_LENGTH+"}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
@@ -1051,8 +1039,8 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
         verifyProfilePage.update("FirstCC", "LastCC", "DepartmentCC");
 
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("FirstCC", user.getFirstName());
@@ -1070,16 +1058,16 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"lastName\"," + PERMISSIONS_ALL + "}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
         verifyProfilePage.assertCurrent();
 
         //submit OK
         verifyProfilePage.updateEmail("newemail@test.org","FirstCC", "LastCC");
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
 
         UserRepresentation user = getUser(user5Id);
         assertEquals("newemail@test.org", user.getEmail());
@@ -1098,11 +1086,11 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
                 + "{\"name\": \"department\"," + PERMISSIONS_ALL + ", "+VALIDATIONS_LENGTH+"}"
                 + "]}");
 
-        loginPage.open();
-        loginPage.login("login-test5", "password");
+        oauth.openLoginForm();
+        loginPage.login("login-test5", getPassword("login-test5"));
 
-        Assert.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assertions.assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+        Assertions.assertTrue(oauth.parseLoginResponse().isSuccess());
     }
 
     @Test
@@ -1115,67 +1103,34 @@ public class VerifyProfileTest extends AbstractTestRealmKeycloakTest {
 
         UPConfig persistedConfig = setUserProfileConfiguration(customConfig);
 
-        JsonTestUtils.assertJsonEquals(JsonSerialization.writeValueAsString(persistedConfig), testRealm().users().userProfile().getConfiguration());
+        JsonTestUtils.assertJsonEquals(JsonSerialization.writeValueAsString(persistedConfig), managedRealm.admin().users().userProfile().getConfiguration());
     }
 
     protected UserRepresentation getUser(String userId) {
-        return getUser(testRealm(), userId);
+        return getUser(managedRealm.admin(), userId);
     }
 
     protected void updateUser(String userId, String firstName, String lastName, String department) {
-        updateUser(testRealm(), userId, firstName, lastName, department);
+        updateUser(managedRealm.admin(), userId, firstName, lastName, department);
     }
 
     protected void updateUser(String userId, boolean emailVerified, String firstName, String lastName) {
-        UserRepresentation ur = getUser(testRealm(), userId);
+        UserRepresentation ur = getUser(managedRealm.admin(), userId);
         ur.setFirstName(firstName);
         ur.setLastName(lastName);
         ur.setEmailVerified(emailVerified);
-        testRealm().users().get(userId).update(ur);
+        managedRealm.admin().users().get(userId).update(ur);
     }
 
     protected UPConfig setUserProfileConfiguration(String configuration) {
         assertAdminEvents.clear();
-        UPConfig result = setUserProfileConfiguration(testRealm(), configuration);
+        UPConfig result = UserProfileUtil.setUserProfileConfiguration(managedRealm.admin(), configuration);
         AdminEventRepresentation adminEvent = assertAdminEvents.assertEvent(TEST_REALM_NAME,
                 OperationType.UPDATE, AdminEventPaths.userProfilePath(), ResourceType.USER_PROFILE);
-        Assert.assertTrue("Incorrect representation in event", StringUtils.isBlank(configuration)
+        Assertions.assertTrue(StringUtils.isBlank(configuration)
                 ? StringUtils.isBlank(adminEvent.getRepresentation())
-                : StringUtils.isNotBlank(adminEvent.getRepresentation()));
+                : StringUtils.isNotBlank(adminEvent.getRepresentation()), "Incorrect representation in event");
         return result;
-    }
-
-    public static UPConfig setUserProfileConfiguration(RealmResource testRealm, String configuration) {
-        try {
-            UPConfig config = configuration == null ? null : JsonSerialization.readValue(configuration, UPConfig.class);
-
-            if (config != null) {
-                UPAttribute username = config.getAttribute(UserModel.USERNAME);
-
-                if (username == null) {
-                    config.addOrReplaceAttribute(new UPAttribute(UserModel.USERNAME));
-                }
-
-                UPAttribute email = config.getAttribute(UserModel.EMAIL);
-
-                if (email == null) {
-                    config.addOrReplaceAttribute(new UPAttribute(UserModel.EMAIL, new UPAttributePermissions(Set.of(ROLE_USER, ROLE_ADMIN), Set.of(ROLE_USER, ROLE_ADMIN)), new UPAttributeRequired(Set.of(ROLE_USER), Set.of())));
-                }
-            }
-
-            testRealm.users().userProfile().update(config);
-
-            return config;
-        } catch (IOException ioe) {
-            throw new RuntimeException("Failed to read configuration", ioe);
-        }
-    }
-
-    public static UPConfig enableUnmanagedAttributes(UserProfileResource upResource) {
-        UPConfig cfg = upResource.getConfiguration();
-        cfg.setUnmanagedAttributePolicy(UPConfig.UnmanagedAttributePolicy.ENABLED);
-        upResource.update(cfg);
-        return cfg;
     }
 
     public static UserRepresentation getUser(RealmResource testRealm, String userId) {

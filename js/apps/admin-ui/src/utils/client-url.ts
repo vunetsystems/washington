@@ -1,5 +1,5 @@
 import ClientRepresentation from "@keycloak/keycloak-admin-client/lib/defs/clientRepresentation";
-import type { Environment } from "../environment";
+import type { Environment } from "../environment-types";
 import { joinPath } from "./joinPath";
 
 export const convertClientToUrl = (
@@ -12,7 +12,10 @@ export const convertClientToUrl = (
   }
 
   if (rootUrl === "${authAdminUrl}") {
-    return rootUrl.replace(/\$\{(authAdminUrl)\}/, environment.adminBaseUrl);
+    return joinPath(
+      rootUrl.replace(/\$\{(authAdminUrl)\}/, environment.adminBaseUrl),
+      baseUrl || "",
+    );
   }
 
   if (rootUrl === "${authBaseUrl}") {

@@ -34,7 +34,7 @@
             <unpack>false</unpack>
             <scope>runtime</scope>
             <includes>
-                <include>com.github.penggle:kaptcha</include>
+                <include>net.logicsquad:nanocaptcha</include>
             </includes>
         </dependencySet>
 
