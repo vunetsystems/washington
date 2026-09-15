@@ -22,7 +22,7 @@ export default function NewOrganization() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { realm } = useRealm();
-  const form = useForm();
+  const form = useForm({ mode: "onChange" });
   const { handleSubmit, formState } = form;
 
   const save = async (org: OrganizationFormType) => {
@@ -44,7 +44,11 @@ export default function NewOrganization() {
           <FormProvider {...form}>
             <OrganizationForm />
             <ActionGroup>
-              <FormSubmitButton formState={formState} data-testid="save">
+              <FormSubmitButton
+                formState={formState}
+                allowNonDirty
+                data-testid="save"
+              >
                 {t("save")}
               </FormSubmitButton>
               <Button

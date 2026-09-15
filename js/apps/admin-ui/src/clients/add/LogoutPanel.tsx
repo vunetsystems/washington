@@ -3,6 +3,7 @@ import { Controller, useFormContext } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { HelpItem, TextControl } from "@keycloak/keycloak-ui-shared";
 
+import { DefaultSwitchControl } from "../../components/SwitchControl";
 import { FixedButtonsGroup } from "../../components/form/FixedButtonGroup";
 import { FormAccess } from "../../components/form/FormAccess";
 import { useAccess } from "../../context/access/Access";
@@ -29,6 +30,10 @@ export const LogoutPanel = ({
 
   const protocol = watch("protocol");
   const frontchannelLogout = watch("frontchannelLogout");
+  const frontchannelLogoutTooltip =
+    protocol === "openid-connect"
+      ? "frontchannelLogoutOIDCHelp"
+      : "frontchannelLogoutHelp";
 
   return (
     <FormAccess
@@ -40,7 +45,7 @@ export const LogoutPanel = ({
         label={t("frontchannelLogout")}
         labelIcon={
           <HelpItem
-            helpText={t("frontchannelLogoutHelp")}
+            helpText={t(frontchannelLogoutTooltip)}
             fieldLabelId="frontchannelLogout"
           />
         }
@@ -73,12 +78,22 @@ export const LogoutPanel = ({
           label={t("frontchannelLogoutUrl")}
           labelIcon={t("frontchannelLogoutUrlHelp")}
           rules={{
-            validate: (uri) =>
-              validateUrl(uri, t("frontchannelUrlInvalid").toString()),
+            validate: (uri) => validateUrl(uri, t("frontchannelUrlInvalid")),
           }}
         />
       )}
-      {protocol === "openid-connect" && (
+      {protocol === "openid-connect" && frontchannelLogout && (
+        <DefaultSwitchControl
+          name={convertAttributeNameToForm<FormFields>(
+            "attributes.frontchannel.logout.session.required",
+          )}
+          defaultValue="true"
+          label={t("frontchannelLogoutSessionRequired")}
+          labelIcon={t("frontchannelLogoutSessionRequiredHelp")}
+          stringify
+        />
+      )}
+      {protocol === "openid-connect" && !frontchannelLogout && (
         <>
           <TextControl
             data-testid="backchannelLogoutUrl"
@@ -89,8 +104,7 @@ export const LogoutPanel = ({
             label={t("backchannelLogoutUrl")}
             labelIcon={t("backchannelLogoutUrlHelp")}
             rules={{
-              validate: (uri) =>
-                validateUrl(uri, t("backchannelUrlInvalid").toString()),
+              validate: (uri) => validateUrl(uri, t("backchannelUrlInvalid")),
             }}
           />
           <FormGroup
@@ -108,7 +122,7 @@ export const LogoutPanel = ({
               name={convertAttributeNameToForm<FormFields>(
                 "attributes.backchannel.logout.session.required",
               )}
-              defaultValue="true"
+              defaultValue="false"
               control={control}
               render={({ field }) => (
                 <Switch
@@ -152,6 +166,17 @@ export const LogoutPanel = ({
             />
           </FormGroup>
         </>
+      )}
+      {protocol === "openid-connect" && (
+        <DefaultSwitchControl
+          name={convertAttributeNameToForm<FormFields>(
+            "attributes.logout.confirmation.enabled",
+          )}
+          defaultValue="false"
+          label={t("logoutConfirmation")}
+          labelIcon={t("logoutConfirmationHelp")}
+          stringify
+        />
       )}
       <FixedButtonsGroup
         name="settings"

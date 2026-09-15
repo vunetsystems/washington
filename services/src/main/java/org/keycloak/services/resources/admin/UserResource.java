@@ -16,13 +16,43 @@
  */
 package org.keycloak.services.resources.admin;
 
-import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
-import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
-import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
-import org.eclipse.microprofile.openapi.annotations.tags.Tag;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.NoCache;
+import java.net.URI;
+import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
+import jakarta.ws.rs.core.UriBuilder;
+
+import org.keycloak.authentication.AuthenticatorUtil;
 import org.keycloak.authentication.RequiredActionProvider;
 import org.keycloak.authentication.actiontoken.execactions.ExecuteActionsActionToken;
 import org.keycloak.authentication.actiontoken.verifyemail.VerifyEmailActionToken;
@@ -60,7 +90,9 @@ import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.models.utils.RepresentationToModel;
 import org.keycloak.models.utils.RoleUtils;
 import org.keycloak.models.utils.SystemClientUtil;
+import org.keycloak.organization.utils.Organizations;
 import org.keycloak.policy.PasswordPolicyNotMetException;
+import org.keycloak.protocol.oid4vc.resources.admin.UserVerifiableCredentialResource;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.utils.RedirectUtils;
 import org.keycloak.provider.ProviderFactory;
@@ -82,53 +114,30 @@ import org.keycloak.services.managers.UserSessionManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.services.resources.KeycloakOpenAPI;
 import org.keycloak.services.resources.LoginActionsService;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
 import org.keycloak.services.validation.Validation;
 import org.keycloak.storage.ReadOnlyException;
 import org.keycloak.userprofile.UserProfile;
 import org.keycloak.userprofile.UserProfileProvider;
 import org.keycloak.userprofile.ValidationException;
 import org.keycloak.utils.ProfileHelper;
-
-import jakarta.ws.rs.BadRequestException;
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.DELETE;
-import jakarta.ws.rs.DefaultValue;
-import jakarta.ws.rs.ForbiddenException;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.PUT;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
-import jakarta.ws.rs.core.HttpHeaders;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.Response.Status;
-import jakarta.ws.rs.core.UriBuilder;
 import org.keycloak.utils.StringUtil;
 
-import java.net.URI;
-import java.text.MessageFormat;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Objects;
-import java.util.Properties;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.NoCache;
 
 import static java.util.Collections.emptyList;
 import static java.util.Optional.ofNullable;
+
 import static org.keycloak.models.ImpersonationSessionNote.IMPERSONATOR_ID;
 import static org.keycloak.models.ImpersonationSessionNote.IMPERSONATOR_USERNAME;
 import static org.keycloak.userprofile.UserProfileContext.USER_API;
@@ -176,7 +185,14 @@ public class UserResource {
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Update the user")
+    @Operation(summary = "Update the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "409", description = "Conflict", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class))),
+        @APIResponse(responseCode = "500", description = "Internal Server Error", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class)))
+    })
     public Response updateUser(final UserRepresentation rep) {
 
         auth.users().requireManage(user);
@@ -233,7 +249,7 @@ public class UserResource {
             throw ErrorResponse.exists("User exists with same username or email");
         } catch (ReadOnlyException re) {
             session.getTransactionManager().setRollbackOnly();
-            throw ErrorResponse.error("User is read only!", Status.BAD_REQUEST);
+            throw ErrorResponse.error(re.getMessage() == null ? "User is read only!" : re.getMessage(), Status.BAD_REQUEST);
         } catch (PasswordPolicyNotMetException e) {
             logger.warn("Password policy not met for user " + e.getUsername(), e);
             session.getTransactionManager().setRollbackOnly();
@@ -268,6 +284,7 @@ public class UserResource {
                     case Messages.MISSING_USERNAME -> throw ErrorResponse.error("User name is missing", Response.Status.BAD_REQUEST);
                     case Messages.USERNAME_EXISTS -> throw ErrorResponse.exists("User exists with same username");
                     case Messages.EMAIL_EXISTS -> throw ErrorResponse.exists("User exists with same email");
+                    case Messages.DID_EXISTS -> throw ErrorResponse.exists("User exists with same DID");
                 }
                 errors.add(new ErrorRepresentation(error.getAttribute(), error.getMessage(), error.getMessageParameters()));
             }
@@ -315,7 +332,6 @@ public class UserResource {
         }
     }
 
-
     /**
      * Get representation of the user
      *
@@ -325,7 +341,11 @@ public class UserResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Get representation of the user")
+    @Operation(summary = "Get representation of the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public UserRepresentation getUser(
             @Parameter(description = "Indicates if the user profile metadata should be added to the response") @QueryParam("userProfileMetadata") boolean userProfileMetadata
     ) {
@@ -340,9 +360,6 @@ public class UserResource {
             rep.setFederatedIdentities(reps);
         }
 
-        if (session.getProvider(BruteForceProtector.class).isTemporarilyDisabled(session, realm, user)) {
-            rep.setEnabled(false);
-        }
         rep.setAccess(auth.users().getAccess(user));
 
         if (!userProfileMetadata) {
@@ -362,7 +379,12 @@ public class UserResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Impersonate the user")
+    @Operation(summary = "Impersonate the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK"),
+        @APIResponse(responseCode = "400", description = "Bad Request", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Map<String, Object> impersonate() {
         ProfileHelper.requireFeature(Profile.Feature.IMPERSONATION);
 
@@ -389,7 +411,7 @@ public class UserResource {
         }
         EventBuilder event = new EventBuilder(realm, session, clientConnection);
 
-        UserSessionModel userSession = new UserSessionManager(session).createUserSession(realm, user, user.getUsername(), clientConnection.getRemoteAddr(), "impersonate", false, null, null);
+        UserSessionModel userSession = new UserSessionManager(session).createUserSession(realm, user, user.getUsername(), clientConnection.getRemoteHost(), "impersonate", false, null, null);
 
         UserModel adminUser = auth.adminAuth().getUser();
         String impersonatorId = adminUser.getId();
@@ -422,7 +444,11 @@ public class UserResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Get sessions associated with the user")
+    @Operation(summary = "Get sessions associated with the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserSessionRepresentation.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Stream<UserSessionRepresentation> getSessions() {
         auth.users().requireView(user);
         return session.sessions().getUserSessionsStream(realm, user).map(ModelToRepresentation::toRepresentation);
@@ -438,7 +464,12 @@ public class UserResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Get offline sessions associated with the user and client")
+    @Operation(summary = "Get offline sessions associated with the user and client")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserSessionRepresentation.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public Stream<UserSessionRepresentation> getOfflineSessions(final @PathParam("clientUuid") String clientUuid) {
         auth.users().requireView(user);
         ClientModel client = realm.getClientById(clientUuid);
@@ -460,7 +491,11 @@ public class UserResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Get social logins associated with the user")
+    @Operation(summary = "Get social logins associated with the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = FederatedIdentityRepresentation.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Stream<FederatedIdentityRepresentation> getFederatedIdentity() {
         auth.users().requireView(user);
         return getFederatedIdentities(user);
@@ -482,12 +517,22 @@ public class UserResource {
     @Path("federated-identity/{provider}")
     @POST
     @NoCache
+    @Consumes(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Add a social login provider to the user")
+    @Operation(summary = "Add a social login provider to the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "409", description = "Conflict", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class)))
+    })
     public Response addFederatedIdentity(final @Parameter(description = "Social login provider id") @PathParam("provider") String provider, FederatedIdentityRepresentation rep) {
         auth.users().requireManage(user);
         if (session.users().getFederatedIdentity(realm, user, provider) != null) {
             throw ErrorResponse.exists("User is already linked with provider");
+        }
+
+        if (!Organizations.resolveHomeBroker(session, user).isEmpty()) {
+            throw ErrorResponse.error("Cannot add identity provider link to a managed organization member.", Status.BAD_REQUEST);
         }
 
         FederatedIdentityModel socialLink = new FederatedIdentityModel(provider, rep.getUserId(), rep.getUserName());
@@ -505,7 +550,12 @@ public class UserResource {
     @DELETE
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Remove a social login provider from user")
+    @Operation(summary = "Remove a social login provider from user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void removeFederatedIdentity(final @Parameter(description = "Social login provider id") @PathParam("provider") String provider) {
         auth.users().requireManage(user);
         if (!session.users().removeFederatedIdentity(realm, user, provider)) {
@@ -524,7 +574,11 @@ public class UserResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Get consents granted by the user")
+    @Operation(summary = "Get consents granted by the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Stream<Map<String, Object>> getConsents() {
         auth.users().requireView(user);
 
@@ -594,7 +648,12 @@ public class UserResource {
     @DELETE
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Revoke consent and offline tokens for particular client from user")
+    @Operation(summary = "Revoke consent and offline tokens for particular client from user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void revokeConsent(final @Parameter(description = "Client id") @PathParam("client") String clientId) {
         auth.users().requireManage(user);
 
@@ -610,6 +669,11 @@ public class UserResource {
         adminEvent.operation(OperationType.ACTION).resourcePath(session.getContext().getUri()).success();
     }
 
+    @Path("vc")
+    public UserVerifiableCredentialResource verifiableCredentials() {
+        return new UserVerifiableCredentialResource(session, realm, user, auth, adminEvent);
+    }
+
     /**
      * Remove all user sessions associated with the user
      *
@@ -619,8 +683,11 @@ public class UserResource {
     @Path("logout")
     @POST
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Remove all user sessions associated with the user Also send notification to all clients that have an admin URL to invalidate the sessions for the particular user.")
-    @APIResponse(responseCode = "204", description = "No Content")
+    @Operation(summary = "Remove all user sessions associated with the user Also send notification to all clients that have an admin URL to invalidate the sessions for the particular user.")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public void logout() {
         auth.users().requireManage(user);
 
@@ -641,13 +708,22 @@ public class UserResource {
     @DELETE
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Delete the user")
+    @Operation(summary = "Delete the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Response deleteUser() {
         auth.users().requireManage(user);
 
+        UserRepresentation userRepresentation = new UserRepresentation();
+        userRepresentation.setId(user.getId());
+        userRepresentation.setUsername(user.getUsername());
+
         boolean removed = new UserManager(session).removeUser(realm, user);
         if (removed) {
-            adminEvent.operation(OperationType.DELETE).resourcePath(session.getContext().getUri()).success();
+            adminEvent.operation(OperationType.DELETE).representation(userRepresentation).resourcePath(session.getContext().getUri()).success();
             return Response.noContent().build();
         } else {
             throw ErrorResponse.error("User couldn't be deleted", Status.BAD_REQUEST);
@@ -670,7 +746,11 @@ public class UserResource {
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Disable all credentials for a user of a specific type")
+    @Operation(summary = "Disable all credentials for a user of a specific type")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public void disableCredentialType(List<String> credentialTypes) {
         auth.users().requireManage(user);
         if (credentialTypes == null) return;
@@ -689,9 +769,15 @@ public class UserResource {
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Set up a new password for the user.")
+    @Operation(summary = "Set up a new password for the user.")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "500", description = "Internal Server Error", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class)))
+    })
     public void resetPassword(@Parameter(description = "The representation must contain a rawPassword with the plain-text password") CredentialRepresentation cred) {
-        auth.users().requireManage(user);
+        auth.users().requireResetPassword(user);
         if (cred == null || cred.getValue() == null) {
             throw new BadRequestException("No password provided");
         }
@@ -714,7 +800,11 @@ public class UserResource {
             logger.error(e.getMessage(), e);
             throw ErrorResponse.error(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
         } catch (ModelException e) {
-            logger.warn("Could not update user password.", e);
+            String exceptionMessage = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+            logger.warnf("Could not update password for user %s. Reason: %s", user.getUsername(), exceptionMessage);
+            if (logger.isTraceEnabled()) {
+                logger.trace("Could not update user password.", e);
+            }
             Properties messages = AdminRoot.getMessages(session, realm, auth.adminAuth().getToken().getLocale());
             throw new ErrorResponseException(e.getMessage(), MessageFormat.format(messages.getProperty(e.getMessage(), e.getMessage()), e.getParameters()),
                     Status.BAD_REQUEST);
@@ -729,20 +819,32 @@ public class UserResource {
         adminEvent.operation(OperationType.ACTION).resourcePath(session.getContext().getUri()).success();
     }
 
-
     @GET
     @Path("credentials")
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
     @Operation()
-    public Stream<CredentialRepresentation> credentials(){
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = CredentialRepresentation.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
+    public Stream<CredentialRepresentation> credentials() {
         auth.users().requireView(user);
-        return user.credentialManager().getStoredCredentialsStream()
+
+        return user.credentialManager().getCredentials()
+                .map(this::decorateCredentialForPresentation)
                 .map(ModelToRepresentation::toRepresentation)
                 .peek(credentialRepresentation -> credentialRepresentation.setSecretData(null));
     }
 
+    private CredentialModel decorateCredentialForPresentation(CredentialModel credential) {
+        return AuthenticatorUtil.getCredentialProviders(session)
+                .filter(p -> p.supportsCredentialType(credential.getType()))
+                .findFirst()
+                .map(p -> p.getCredentialForPresentationFromModel(credential))
+                .orElse(credential);
+    }
 
     /**
      * Return credential types, which are provided by the user storage where user is stored. Returned values can contain for example "password", "otp" etc.
@@ -755,7 +857,11 @@ public class UserResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Return credential types, which are provided by the user storage where user is stored.", description = "Returned values can contain for example \"password\", \"otp\" etc. This will always return empty list for \"local\" users, which are not backed by any user storage")
+    @Operation(summary = "Return credential types, which are provided by the user storage where user is stored.", description = "Returned values can contain for example \"password\", \"otp\" etc. This will always return empty list for \"local\" users, which are not backed by any user storage")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = String.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Stream<String> getConfiguredUserStorageCredentialTypes() {
         // changed to "requireView" as per issue #20783
         auth.users().requireView(user);
@@ -771,7 +877,12 @@ public class UserResource {
     @DELETE
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Remove a credential for a user")
+    @Operation(summary = "Remove a credential for a user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void removeCredential(final @PathParam("credentialId") String credentialId) {
         auth.users().requireManage(user);
         CredentialModel credential = user.credentialManager().getStoredCredentialById(credentialId);
@@ -781,7 +892,11 @@ public class UserResource {
             else throw new ForbiddenException();
         }
         user.credentialManager().removeStoredCredentialById(credentialId);
-        adminEvent.operation(OperationType.ACTION).resourcePath(session.getContext().getUri()).success();
+        adminEvent.operation(OperationType.ACTION).resourcePath(session.getContext().getUri())
+                .detail(Details.CREDENTIAL_ID, credentialId)
+                .detail(Details.CREDENTIAL_TYPE, credential.getType())
+                .detail(Details.CREDENTIAL_USER_LABEL, credential.getUserLabel())
+                .success();
     }
 
     /**
@@ -791,15 +906,26 @@ public class UserResource {
     @Consumes(MediaType.TEXT_PLAIN)
     @Path("credentials/{credentialId}/userLabel")
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Update a credential label for a user")
+    @Operation(summary = "Update a credential label for a user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void setCredentialUserLabel(final @PathParam("credentialId") String credentialId, String userLabel) {
-        auth.users().requireManage(user);
+        auth.users().requireResetPassword(user);
         CredentialModel credential = user.credentialManager().getStoredCredentialById(credentialId);
         if (credential == null) {
             // we do this to make sure somebody can't phish ids
             if (auth.users().canQuery()) throw new NotFoundException("Credential not found");
             else throw new ForbiddenException();
         }
+
+        if (userLabel == null || userLabel.trim().isEmpty()) {
+            throw new ErrorResponseException("missingCredentialLabel", "Credential label must not be empty", Status.BAD_REQUEST);
+
+        }
+
         user.credentialManager().updateCredentialLabel(credentialId, userLabel);
     }
 
@@ -810,8 +936,12 @@ public class UserResource {
     @Path("credentials/{credentialId}/moveToFirst")
     @POST
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Move a credential to a first position in the credentials list of the user")
-    @APIResponse(responseCode = "204", description = "No Content")
+    @Operation(summary = "Move a credential to a first position in the credentials list of the user")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void moveCredentialToFirst(final @Parameter(description = "The credential to move") @PathParam("credentialId") String credentialId){
         moveCredentialAfter(credentialId, null);
     }
@@ -824,8 +954,12 @@ public class UserResource {
     @Path("credentials/{credentialId}/moveAfter/{newPreviousCredentialId}")
     @POST
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
-    @Operation( summary = "Move a credential to a position behind another credential")
-    @APIResponse(responseCode = "204", description = "No Content")
+    @Operation(summary = "Move a credential to a position behind another credential")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void moveCredentialAfter(final @Parameter(description = "The credential to move") @PathParam("credentialId") String credentialId,
                                     final @Parameter(description = "The credential that will be the previous element in the list. If set to null, the moved credential will be the first element in the list.") @PathParam("newPreviousCredentialId") String newPreviousCredentialId){
         auth.users().requireManage(user);
@@ -859,6 +993,13 @@ public class UserResource {
             summary = "Send an email to the user with a link they can click to reset their password.",
             description = "The redirectUri and clientId parameters are optional. The default for the redirect is the account client. This endpoint has been deprecated.  Please use the execute-actions-email passing a list with UPDATE_PASSWORD within it.",
             deprecated = true)
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found"),
+        @APIResponse(responseCode = "500", description = "Internal Server Error", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class)))
+    })
     public Response resetPasswordEmail(@Parameter(description = "redirect uri") @QueryParam(OIDCLoginProtocol.REDIRECT_URI_PARAM) String redirectUri,
                                        @Parameter(description = "client id") @QueryParam(OIDCLoginProtocol.CLIENT_ID_PARAM) String clientId) {
         List<String> actions = new LinkedList<>();
@@ -889,6 +1030,13 @@ public class UserResource {
             summary = "Send an email to the user with a link they can click to execute particular actions.",
             description = "An email contains a link the user can click to perform a set of required actions. The redirectUri and clientId parameters are optional. If no redirect is given, then there will be no link back to click after actions have completed. Redirect uri must be a valid uri for the particular clientId."
     )
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found"),
+        @APIResponse(responseCode = "500", description = "Internal Server Error", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class)))
+    })
     public Response executeActionsEmail(@Parameter(description = "Redirect uri") @QueryParam(OIDCLoginProtocol.REDIRECT_URI_PARAM) String redirectUri,
                                         @Parameter(description = "Client id") @QueryParam(OIDCLoginProtocol.CLIENT_ID_PARAM) String clientId,
                                         @Parameter(description = "Number of seconds after which the generated token expires") @QueryParam("lifespan") Integer lifespan,
@@ -909,12 +1057,13 @@ public class UserResource {
             builder.queryParam("key", token.serialize(session, realm, session.getContext().getUri()));
 
             String link = builder.build(realm.getName()).toString();
-
+            
             this.session.getProvider(EmailTemplateProvider.class)
-              .setAttribute(Constants.TEMPLATE_ATTR_REQUIRED_ACTIONS, token.getRequiredActions())
-              .setRealm(realm)
-              .setUser(user)
-              .sendExecuteActions(link, TimeUnit.SECONDS.toMinutes(result.lifespan));
+                    .setAttribute(Constants.TEMPLATE_ATTR_REQUIRED_ACTIONS, token.getRequiredActions())
+                    .setAttribute(Constants.IGNORE_ACCEPT_LANGUAGE_HEADER, true)
+                    .setRealm(realm)
+                    .setUser(user)
+                    .sendExecuteActions(link, TimeUnit.SECONDS.toMinutes(result.lifespan));
 
             //audit.user(user).detail(Details.EMAIL, user.getEmail()).detail(Details.CODE_ID, accessCode.getCodeId()).success();
 
@@ -947,6 +1096,12 @@ public class UserResource {
             summary = "Send an email-verification email to the user An email contains a link the user can click to verify their email address.",
             description = "The redirectUri, clientId and lifespan parameters are optional. The default for the redirect is the account client. The default for the lifespan is 12 hours"
     )
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class))),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "500", description = "Internal Server Error", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class)))
+    })
     public Response sendVerifyEmail(
             @Parameter(description = "Redirect uri") @QueryParam(OIDCLoginProtocol.REDIRECT_URI_PARAM) String redirectUri,
             @Parameter(description = "Client id") @QueryParam(OIDCLoginProtocol.CLIENT_ID_PARAM) String clientId,
@@ -985,12 +1140,16 @@ public class UserResource {
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
     @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupRepresentation.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Stream<GroupRepresentation> groupMembership(@QueryParam("search") String search,
                                                        @QueryParam("first") Integer firstResult,
                                                        @QueryParam("max") Integer maxResults,
                                                        @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation) {
         auth.users().requireView(user);
-        return user.getGroupsStream(search, firstResult, maxResults).map(g -> ModelToRepresentation.toRepresentation(g, !briefRepresentation));
+        return user.getGroupsStream(search, firstResult, maxResults).filter(auth.groups()::canView).map(g -> ModelToRepresentation.toRepresentation(g, !briefRepresentation));
     }
 
     @GET
@@ -999,6 +1158,10 @@ public class UserResource {
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
     @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Map<String, Long> getGroupMembershipCount(@QueryParam("search") String search) {
         auth.users().requireView(user);
         Long results;
@@ -1018,6 +1181,13 @@ public class UserResource {
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
     @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found"),
+        @APIResponse(responseCode = "500", description = "Internal Server Error", content = @Content(schema = @Schema(implementation = ErrorRepresentation.class)))
+    })
     public void removeMembership(@PathParam("groupId") String groupId) {
         auth.users().requireManageGroupMembership(user);
 
@@ -1025,12 +1195,21 @@ public class UserResource {
         if (group == null) {
             throw new NotFoundException("Group not found");
         }
+        if (Organizations.isOrganizationGroup(group)) {
+            throw ErrorResponse.error("Cannot access organization related group via non Organization API.", Status.BAD_REQUEST);
+        }
         auth.groups().requireManageMembership(group);
 
         try {
             if (user.isMemberOf(group)){
                 user.leaveGroup(group);
-                adminEvent.operation(OperationType.DELETE).resource(ResourceType.GROUP_MEMBERSHIP).representation(ModelToRepresentation.toRepresentation(group, true)).resourcePath(session.getContext().getUri()).success();
+                adminEvent.operation(OperationType.DELETE)
+                        .resource(ResourceType.GROUP_MEMBERSHIP)
+                        .representation(ModelToRepresentation.toRepresentation(group, true))
+                        .resourcePath(session.getContext().getUri())
+                        .detail(UserModel.USERNAME, user.getUsername())
+                        .detail(UserModel.EMAIL, user.getEmail())
+                        .success();
             }
         } catch (ModelIllegalStateException e) {
             logger.error(e.getMessage(), e);
@@ -1047,17 +1226,31 @@ public class UserResource {
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
     @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void joinGroup(@PathParam("groupId") String groupId) {
         auth.users().requireManageGroupMembership(user);
         GroupModel group = session.groups().getGroupById(realm, groupId);
         if (group == null) {
             throw new NotFoundException("Group not found");
         }
+        if (Organizations.isOrganizationGroup(group)) {
+            throw ErrorResponse.error("Cannot access organization related group via non Organization API.", Status.BAD_REQUEST);
+        }
         auth.groups().requireManageMembership(group);
 
         if (!RoleUtils.isDirectMember(user.getGroupsStream(),group)){
             user.joinGroup(group);
-            adminEvent.operation(OperationType.CREATE).resource(ResourceType.GROUP_MEMBERSHIP).representation(ModelToRepresentation.toRepresentation(group, true)).resourcePath(session.getContext().getUri()).success();
+            adminEvent.operation(OperationType.CREATE)
+                    .resource(ResourceType.GROUP_MEMBERSHIP)
+                    .representation(ModelToRepresentation.toRepresentation(group, true))
+                    .resourcePath(session.getContext().getUri())
+                    .detail(UserModel.USERNAME, user.getUsername())
+                    .detail(UserModel.EMAIL, user.getEmail())
+                    .success();
         }
     }
 
@@ -1067,21 +1260,16 @@ public class UserResource {
     @Produces(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.USERS)
     @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Map<String, List<String>> getUnmanagedAttributes() {
         auth.users().requireView(user);
         UserProfileProvider provider = session.getProvider(UserProfileProvider.class);
-
         UserProfile profile = provider.create(USER_API, user);
-        Map<String, List<String>> managedAttributes = profile.getAttributes().getReadable();
-        Map<String, List<String>> unmanagedAttributes = profile.getAttributes().getUnmanagedAttributes();
-        managedAttributes.entrySet().removeAll(unmanagedAttributes.entrySet());
-        Map<String, List<String>> attributes = new HashMap<>(user.getAttributes());
-        attributes.entrySet().removeAll(managedAttributes.entrySet());
 
-        attributes.remove(UserModel.USERNAME);
-        attributes.remove(UserModel.EMAIL);
-
-        return attributes.entrySet().stream()
+        return profile.getAttributes().getUnmanagedAttributes().entrySet().stream()
                 .filter(entry -> ofNullable(entry.getValue()).orElse(emptyList()).stream().anyMatch(StringUtil::isNotBlank))
                 .collect(Collectors.toMap(Entry::getKey, Entry::getValue));
     }
@@ -1106,6 +1294,11 @@ public class UserResource {
     }
 
     private SendEmailParams verifySendEmailParams(String redirectUri, String clientId, Integer lifespan) {
+        return verifySendEmailParams(session, realm, user, redirectUri, clientId, lifespan);
+    }
+
+    public static SendEmailParams verifySendEmailParams(KeycloakSession session, RealmModel realm, UserModel user,
+                                                        String redirectUri, String clientId, Integer lifespan) {
         if (user.getEmail() == null) {
             throw ErrorResponse.error("User email missing", Status.BAD_REQUEST);
         }
@@ -1125,7 +1318,7 @@ public class UserResource {
             throw ErrorResponse.error("Client doesn't exist", Status.BAD_REQUEST);
         }
         if (!client.isEnabled()) {
-            logger.debugf("Client %s is not enabled", clientId);
+            logger.debugf("Client %s is not enabled", client.getClientId());
             throw ErrorResponse.error("Client is not enabled", Status.BAD_REQUEST);
         }
 
@@ -1140,18 +1333,30 @@ public class UserResource {
             lifespan = realm.getActionTokenGeneratedByAdminLifespan();
         }
 
-        return new SendEmailParams(redirectUri, clientId, lifespan);
+        return new SendEmailParams(redirectUri, client.getClientId(), lifespan);
     }
 
-    private static class SendEmailParams {
-        final String redirectUri;
-        final String clientId;
-        final int lifespan;
+    public static class SendEmailParams {
+        private final String redirectUri;
+        private final String clientId;
+        private final int lifespan;
 
         public SendEmailParams(String redirectUri, String clientId, Integer lifespan) {
             this.redirectUri = redirectUri;
             this.clientId = clientId;
             this.lifespan = lifespan;
+        }
+
+        public String getRedirectUri() {
+            return redirectUri;
+        }
+
+        public String getClientId() {
+            return clientId;
+        }
+
+        public int getLifespan() {
+            return lifespan;
         }
     }
 }

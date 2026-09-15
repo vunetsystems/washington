@@ -16,6 +16,11 @@
  */
 package org.keycloak.keys;
 
+import java.security.KeyPair;
+import java.security.cert.X509Certificate;
+import java.util.Optional;
+import java.util.stream.Stream;
+
 import org.keycloak.common.util.KeyUtils;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.crypto.KeyStatus;
@@ -23,9 +28,6 @@ import org.keycloak.crypto.KeyType;
 import org.keycloak.crypto.KeyUse;
 import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.models.RealmModel;
-
-import java.security.KeyPair;
-import java.util.stream.Stream;
 
 public abstract class AbstractEcKeyProvider implements KeyProvider {
 
@@ -54,7 +56,8 @@ public abstract class AbstractEcKeyProvider implements KeyProvider {
         return Stream.of(key);
     }
 
-    protected KeyWrapper createKeyWrapper(KeyPair keyPair, String algorithm, KeyUse keyUse) {
+    protected KeyWrapper createKeyWrapper(KeyPair keyPair, String algorithm, KeyUse keyUse,
+                                          X509Certificate selfSignedCertificate) {
         KeyWrapper key = new KeyWrapper();
 
         key.setProviderId(model.getId());
@@ -67,6 +70,7 @@ public abstract class AbstractEcKeyProvider implements KeyProvider {
         key.setStatus(status);
         key.setPrivateKey(keyPair.getPrivate());
         key.setPublicKey(keyPair.getPublic());
+        Optional.ofNullable(selfSignedCertificate).ifPresent(key::setCertificate);
 
         return key;
     }

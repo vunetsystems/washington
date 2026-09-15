@@ -35,7 +35,7 @@ Or if you just want to clear the data so you can start fresh without downloading
 pnpm delete-data
 ```
 
-If you want to run with a local Quarkus distribution of Keycloak for development purposes, you can do so by running this command instead: 
+If you want to run with a local Quarkus distribution of Keycloak for development purposes, you can do so by running this command instead:
 
 ```sh
 pnpm start --local
@@ -46,12 +46,9 @@ If you want to run Keycloak standalone (without the script) against the Vite dev
 ```sh
 KC_ACCOUNT_VITE_URL=http://localhost:5173
 KC_ADMIN_VITE_URL=http://localhost:5174
-KC_FEATURES=login2,account3,admin-fine-grained-authz,transient-users,oid4vc-vci
+KC_FEATURES=login:v2,account:v3,admin-fine-grained-authz,transient-users,oid4vc-vci
 ```
 
 **All other arguments will be passed through to the underlying Keycloak server.**
 
-In order for the development version of the Admin UI to work you will have to import a custom client to the Keycloak server. This is only required during development as the development server for the Admin UI runs on a different port. This client will be imported automatically under the name `security-admin-console-v2` when the Keycloak server starts.
-
-This client only allows redirects from/to "localhost:8080" so be sure either modify the client json in `./scripts` or only attempt to authenticate and redirect from that address
 

@@ -36,6 +36,13 @@ data:
         metrics:
           namesAsTags: true
           histograms: false
+          legacy: true
+        tracing:
+          enabled: true
+          collector-endpoint: "http://tempo-tempo.monitoring.svc:4318"
+          exporter-protocol: "OTLP"
+          service-name: "infinispan-server"
+          security: false
       server:
         endpoints:
           - securityRealm: default
@@ -100,7 +107,11 @@ metadata:
   name: crossdc-push-state-status
   namespace: keycloak
 data:
-  batch: site push-site-status --all-caches --site=site-a
+  batch: |-
+    site push-site-status --cache=actionTokens
+    site push-site-status --cache=authenticationSessions
+    site push-site-status --cache=loginFailures
+    site push-site-status --cache=work
 # end::infinispan-crossdc-push-state-status[]
 ---
 # Source: ispn-helm/templates/infinispan.yaml
@@ -111,7 +122,11 @@ metadata:
   name: crossdc-reset-push-state-status
   namespace: keycloak
 data:
-  batch: site clear-push-state-status --all-caches --site=site-a
+  batch: |-
+    site clear-push-site-status --cache=actionTokens
+    site clear-push-site-status --cache=authenticationSessions
+    site clear-push-site-status --cache=loginFailures
+    site clear-push-site-status --cache=work
 # end::infinispan-crossdc-reset-push-state-status[]
 ---
 # Source: ispn-helm/templates/infinispan.yaml
@@ -122,12 +137,11 @@ metadata:
   name: crossdc-clear-caches
   namespace: keycloak
 data:
-  batch: |+
+  batch: |-
     clearcache actionTokens
     clearcache authenticationSessions
     clearcache loginFailures
     clearcache work
-    
 # end::infinispan-crossdc-clear-caches[]
 ---
 # Source: ispn-helm/templates/infinispan-alerts.yaml
@@ -165,7 +179,7 @@ spec:
 ---
 # Source: ispn-helm/templates/infinispan.yaml
 # tag::infinispan-cache-actionTokens[]
-apiVersion: infinispan.org/v2alpha1
+apiVersion: infinispan.org/v2beta1
 kind: Cache
 metadata:
   name: actiontokens
@@ -184,7 +198,7 @@ spec:
       locking:
         acquireTimeout: "4000"
       transaction:
-        mode: "NON_XA" # <1>
+        mode: "NON_DURABLE_XA" # <1>
         locking: "PESSIMISTIC" # <2>
       stateTransfer:
         chunkSize: "16"
@@ -200,7 +214,7 @@ spec:
 ---
 # Source: ispn-helm/templates/infinispan.yaml
 # tag::infinispan-cache-authenticationSessions[]
-apiVersion: infinispan.org/v2alpha1
+apiVersion: infinispan.org/v2beta1
 kind: Cache
 metadata:
   name: authenticationsessions
@@ -219,10 +233,15 @@ spec:
       locking:
         acquireTimeout: "4000"
       transaction:
-        mode: "NON_XA" # <1>
+        mode: "NON_DURABLE_XA" # <1>
         locking: "PESSIMISTIC" # <2>
       stateTransfer:
         chunkSize: "16"
+      indexing:
+        enabled: true
+        indexed-entities:
+        - keycloak.RootAuthenticationSessionEntity
+        startupMode: NONE
       backups:
         site-a: # <3>
           backup:
@@ -235,7 +254,7 @@ spec:
 ---
 # Source: ispn-helm/templates/infinispan.yaml
 # tag::infinispan-cache-loginFailures[]
-apiVersion: infinispan.org/v2alpha1
+apiVersion: infinispan.org/v2beta1
 kind: Cache
 metadata:
   name: loginfailures
@@ -254,10 +273,15 @@ spec:
       locking:
         acquireTimeout: "4000"
       transaction:
-        mode: "NON_XA" # <1>
+        mode: "NON_DURABLE_XA" # <1>
         locking: "PESSIMISTIC" # <2>
       stateTransfer:
         chunkSize: "16"
+      indexing:
+        enabled: true
+        indexed-entities:
+        - keycloak.LoginFailureEntity
+        startupMode: NONE
       backups:
         site-a: # <3>
           backup:
@@ -270,7 +294,7 @@ spec:
 ---
 # Source: ispn-helm/templates/infinispan.yaml
 # tag::infinispan-cache-work[]
-apiVersion: infinispan.org/v2alpha1
+apiVersion: infinispan.org/v2beta1
 kind: Cache
 metadata:
   name: work
@@ -289,7 +313,7 @@ spec:
       locking:
         acquireTimeout: "4000"
       transaction:
-        mode: "NON_XA" # <1>
+        mode: "NON_DURABLE_XA" # <1>
         locking: "PESSIMISTIC" # <2>
       stateTransfer:
         chunkSize: "16"
@@ -324,12 +348,14 @@ spec:
   expose:
     type: Route
   configMapName: "cluster-config"
-  image: quay.io/infinispan-test/server:15.0.x
-  version: 15.0.4
+  image:
+  version: 16.0.14
   configListener:
     enabled: false
   container:
-    extraJvmOpts: '-Dorg.infinispan.openssl=false -Dinfinispan.cluster.name=ISPN  -Djgroups.xsite.fd.interval=2000 -Djgroups.xsite.fd.timeout=10000'
+    extraJvmOpts: '-Dorg.infinispan.openssl=false -Dorg.infinispan.threads.virtual=true -Dinfinispan.cluster.name=ISPN  -Djgroups.xsite.fd.interval=2000 -Djgroups.xsite.fd.timeout=10000 -Dotel.traces.sampler=parentbased_always_off'
+    cpu: 4:2
+    memory: 2Gi:1Gi
   logging:
     categories:
       org.infinispan: info
@@ -373,6 +399,8 @@ spec:
           url: openshift://api.site-a # <13>
           secretName: xsite-token-secret # <14>
           
+  upgrades:
+    type: InPlaceRolling
     # end::infinispan-crossdc[]
 ---
 # Source: ispn-helm/templates/infinispan-alerts.yaml

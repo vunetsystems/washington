@@ -21,29 +21,32 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
+
 import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.OrganizationDomainModel;
 import org.keycloak.models.OrganizationModel;
 import org.keycloak.models.UserModel;
-import org.keycloak.models.cache.CacheRealmProvider;
+import org.keycloak.models.cache.infinispan.LazyModel;
 import org.keycloak.organization.OrganizationProvider;
+import org.keycloak.organization.utils.Organizations;
 
 public class OrganizationAdapter implements OrganizationModel {
 
     private volatile boolean invalidated;
     private volatile OrganizationModel updated;
     private final Supplier<OrganizationModel> modelSupplier;
-    private final CacheRealmProvider realmCache;
+    private final KeycloakSession session;
     private final CachedOrganization cached;
-    private final OrganizationProvider delegate;
+    private final Supplier<OrganizationProvider> delegate;
     private final InfinispanOrganizationProvider organizationCache;
 
-    public OrganizationAdapter(CachedOrganization cached, CacheRealmProvider realmCache, OrganizationProvider delegate, InfinispanOrganizationProvider organizationCache) {
+    public OrganizationAdapter(KeycloakSession session, CachedOrganization cached, Supplier<OrganizationProvider> delegate, InfinispanOrganizationProvider organizationCache) {
+        this.session = session;
         this.cached = cached;
-        this.realmCache = realmCache;
         this.delegate = delegate;
         this.organizationCache = organizationCache;
-        this.modelSupplier = this::getOrganizationModel;
+        this.modelSupplier = new LazyModel<>(this::getOrganizationModel);
     }
 
     void invalidate() {
@@ -51,7 +54,7 @@ public class OrganizationAdapter implements OrganizationModel {
     }
 
     private OrganizationModel getOrganizationModel() {
-        return delegate.getById(cached.getId());
+        return delegate.get().getById(cached.getId());
     }
 
     private boolean isUpdated() {
@@ -125,9 +128,21 @@ public class OrganizationAdapter implements OrganizationModel {
     }
 
     @Override
+    public String getRedirectUrl() {
+        if (isUpdated()) return updated.getRedirectUrl();
+        return cached.getRedirectUrl();
+    }
+
+    @Override
+    public void setRedirectUrl(String redirectUrl) {
+        getDelegateForUpdate();
+        updated.setRedirectUrl(redirectUrl);
+    }
+
+    @Override
     public Map<String, List<String>> getAttributes() {
         if (isUpdated()) return updated.getAttributes();
-        return cached.getAttributes(modelSupplier);
+        return cached.getAttributes(session, modelSupplier);
     }
 
     @Override
@@ -145,6 +160,7 @@ public class OrganizationAdapter implements OrganizationModel {
     @Override
     public void setDomains(Set<OrganizationDomainModel> domains) {
         getDelegateForUpdate();
+        invalidateDomains(domains);
         updated.setDomains(domains);
     }
 
@@ -156,12 +172,14 @@ public class OrganizationAdapter implements OrganizationModel {
 
     @Override
     public boolean isManaged(UserModel user) {
-        return delegate.isManagedMember(this, user);
+        if (isUpdated()) delegate.get().isManagedMember(this, user);
+        return organizationCache.isManagedMember(this, user);
     }
 
     @Override
     public boolean isMember(UserModel user) {
-        return delegate.isMember(this, user);
+        if (isUpdated()) delegate.get().isMember(this, user);
+        return organizationCache.isMember(this, user);
     }
 
     @Override
@@ -176,5 +194,24 @@ public class OrganizationAdapter implements OrganizationModel {
     @Override
     public int hashCode() {
         return getId().hashCode();
+    }
+
+    CachedOrganization getCached() {
+        return cached;
+    }
+
+    private void invalidateDomains(Set<OrganizationDomainModel> domains) {
+        for (OrganizationDomainModel domain : domains) {
+            String name = domain.getName();
+            OrganizationModel org = organizationCache.getByDomainName(name);
+
+            if (org == null && name.startsWith("*.")) {
+                org = Organizations.resolveOrganization(session, null, name);
+            }
+
+            if (org != null && !this.equals(org)) {
+                organizationCache.registerOrganizationInvalidation(org);
+            }
+        }
     }
 }

@@ -16,29 +16,38 @@
  */
 package org.keycloak.services.resources.admin;
 
-import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
-import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
-import org.eclipse.microprofile.openapi.annotations.tags.Tag;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.NoCache;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+
 import org.keycloak.broker.provider.IdentityProvider;
 import org.keycloak.broker.provider.IdentityProviderFactory;
 import org.keycloak.broker.provider.IdentityProviderMapper;
 import org.keycloak.broker.social.SocialIdentityProvider;
+import org.keycloak.common.Profile;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
-import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderMapperModel;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.models.utils.RepresentationToModel;
 import org.keycloak.models.utils.StripSecretsUtils;
@@ -50,29 +59,21 @@ import org.keycloak.representations.idm.ManagementPermissionReference;
 import org.keycloak.services.ErrorResponse;
 import org.keycloak.services.resources.IdentityBrokerService;
 import org.keycloak.services.resources.KeycloakOpenAPI;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionManagement;
-import org.keycloak.services.resources.admin.permissions.AdminPermissions;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionManagement;
+import org.keycloak.services.resources.admin.fgap.AdminPermissions;
+import org.keycloak.utils.ProfileHelper;
 
-import jakarta.ws.rs.Consumes;
-import jakarta.ws.rs.DELETE;
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.POST;
-import jakarta.ws.rs.PUT;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.PathParam;
-import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.QueryParam;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.NoCache;
 
-import java.util.Collections;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 
 /**
  * @resource Identity Providers
@@ -114,7 +115,7 @@ public class IdentityProviderResource {
             throw new jakarta.ws.rs.NotFoundException();
         }
 
-        return StripSecretsUtils.stripSecrets(session, ModelToRepresentation.toRepresentation(realm, this.identityProviderModel));
+        return StripSecretsUtils.stripSecrets(session, ModelToRepresentation.toRepresentation(session, realm, this.identityProviderModel));
     }
 
     /**
@@ -156,6 +157,11 @@ public class IdentityProviderResource {
     @NoCache
     @Tag(name = KeycloakOpenAPI.Admin.Tags.IDENTITY_PROVIDERS)
     @Operation( summary = "Update the identity provider")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "409", description = "Conflict")
+    })
     public Response update(IdentityProviderRepresentation providerRep) {
         this.auth.realm().requireManageIdentityProviders();
 
@@ -183,9 +189,14 @@ public class IdentityProviderResource {
     }
 
     private void updateIdpFromRep(IdentityProviderRepresentation providerRep, RealmModel realm, KeycloakSession session) {
-        
+
         if (!identityProviderModel.getInternalId().equals(providerRep.getInternalId())) {
             providerRep.setInternalId(identityProviderModel.getInternalId());
+        }
+
+        String oldProviderAlias = identityProviderModel.getAlias();
+        if (providerRep.getAlias() != null && !oldProviderAlias.equals(providerRep.getAlias())) {
+            throw new IllegalArgumentException("Identity Provider alias cannot be changed");
         }
 
         IdentityProviderModel updated = RepresentationToModel.toModel(realm, providerRep, session);
@@ -197,32 +208,6 @@ public class IdentityProviderResource {
         session.identityProviders().update(updated);
         // update in case of legacy hide on login attr was used.
         providerRep.setHideOnLogin(updated.isHideOnLogin());
-
-        String newProviderAlias = providerRep.getAlias();
-        String oldProviderAlias = identityProviderModel.getAlias();
-        if (!oldProviderAlias.equals(newProviderAlias)) {
-
-            // Admin changed the ID (alias) of identity provider. We must update all clients and users
-            logger.debug("Changing providerId in all clients and linked users. oldProviderId=" + oldProviderAlias + ", newProviderId=" + newProviderAlias);
-
-            updateUsersAfterProviderAliasChange(session.users().searchForUserStream(realm, Collections.singletonMap(UserModel.INCLUDE_SERVICE_ACCOUNT, Boolean.FALSE.toString())),
-                    oldProviderAlias, newProviderAlias, realm, session);
-        }
-    }
-
-    private static void updateUsersAfterProviderAliasChange(Stream<UserModel> users, String oldProviderId, String newProviderId, RealmModel realm, KeycloakSession session) {
-        users.forEach(user -> {
-            FederatedIdentityModel federatedIdentity = session.users().getFederatedIdentity(realm, user, oldProviderId);
-            if (federatedIdentity != null) {
-                // Remove old link first
-                session.users().removeFederatedIdentity(realm, user, oldProviderId);
-
-                // And create new
-                FederatedIdentityModel newFederatedIdentity = new FederatedIdentityModel(newProviderId, federatedIdentity.getUserId(), federatedIdentity.getUserName(),
-                        federatedIdentity.getToken());
-                session.users().addFederatedIdentity(realm, user, newFederatedIdentity);
-            }
-        });
     }
 
 
@@ -339,6 +324,7 @@ public class IdentityProviderResource {
         }
 
         IdentityProviderMapperModel model = RepresentationToModel.toModel(mapper);
+
         try {
 //            model = realm.addIdentityProviderMapper(model);
             model = session.identityProviders().createMapper(model);
@@ -399,6 +385,7 @@ public class IdentityProviderResource {
         IdentityProviderMapperModel model = session.identityProviders().getMapperById(id);
         if (model == null) throw new NotFoundException("Model not found");
         model = RepresentationToModel.toModel(rep);
+
         session.identityProviders().updateMapper(model);
         adminEvent.operation(OperationType.UPDATE).resource(ResourceType.IDENTITY_PROVIDER_MAPPER).resourcePath(session.getContext().getUri()).representation(rep).success();
 
@@ -440,7 +427,12 @@ public class IdentityProviderResource {
     @Tag(name = KeycloakOpenAPI.Admin.Tags.IDENTITY_PROVIDERS)
     @Operation( summary = "Return object stating whether client Authorization permissions have been initialized or not and a reference")
     public ManagementPermissionReference getManagementPermissions() {
+        ProfileHelper.requireFeature(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ);
         this.auth.realm().requireViewIdentityProviders();
+
+        if (identityProviderModel == null) {
+            throw new jakarta.ws.rs.NotFoundException();
+        }
 
         AdminPermissionManagement permissions = AdminPermissions.management(session, realm);
         if (!permissions.idps().isPermissionsEnabled(identityProviderModel)) {
@@ -449,7 +441,7 @@ public class IdentityProviderResource {
         return toMgmtRef(identityProviderModel, permissions);
     }
 
-    public static ManagementPermissionReference toMgmtRef(IdentityProviderModel model, AdminPermissionManagement permissions) {
+    private ManagementPermissionReference toMgmtRef(IdentityProviderModel model, AdminPermissionManagement permissions) {
         ManagementPermissionReference ref = new ManagementPermissionReference();
         ref.setEnabled(true);
         ref.setResource(permissions.idps().resource(model).getId());
@@ -472,8 +464,14 @@ public class IdentityProviderResource {
     @Tag(name = KeycloakOpenAPI.Admin.Tags.IDENTITY_PROVIDERS)
     @Operation( summary = "Return object stating whether client Authorization permissions have been initialized or not and a reference")
     public ManagementPermissionReference setManagementPermissionsEnabled(ManagementPermissionReference ref) {
+        ProfileHelper.requireFeature(Profile.Feature.ADMIN_FINE_GRAINED_AUTHZ);
         this.auth.realm().requireManageIdentityProviders();
         AdminPermissionManagement permissions = AdminPermissions.management(session, realm);
+
+        if (identityProviderModel == null) {
+            throw new jakarta.ws.rs.NotFoundException();
+        }
+
         permissions.idps().setPermissionsEnabled(identityProviderModel, ref.isEnabled());
         if (ref.isEnabled()) {
             return toMgmtRef(identityProviderModel, permissions);
@@ -490,8 +488,13 @@ public class IdentityProviderResource {
     @Operation(summary = "Reaload keys for the identity provider if the provider supports it, \"true\" is returned if reload was performed, \"false\" if not.")
     public boolean reloadKeys() {
         this.auth.realm().requireManageIdentityProviders();
-        IdentityProviderFactory<?> providerFactory = IdentityBrokerService.getIdentityProviderFactory(session, identityProviderModel);
-        IdentityProvider provider = providerFactory.create(session, identityProviderModel);
+
+        if (identityProviderModel == null) {
+            throw new jakarta.ws.rs.NotFoundException();
+        }
+
+        IdentityProvider<?> provider = IdentityBrokerService.getIdentityProvider(session, identityProviderModel.getAlias());
         return provider.reloadKeys();
     }
+
 }

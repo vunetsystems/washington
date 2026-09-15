@@ -1,8 +1,8 @@
-import type ComponentRepresentation from "@keycloak/keycloak-admin-client/lib/defs/componentRepresentation";
 import type { UserProfileConfig } from "@keycloak/keycloak-admin-client/lib/defs/userProfileMetadata";
 import type UserRepresentation from "@keycloak/keycloak-admin-client/lib/defs/userRepresentation";
 import {
   KeycloakDataTable,
+  KeycloakSpinner,
   ListEmptyState,
   useAlerts,
   useFetch,
@@ -29,19 +29,26 @@ import {
   WarningTriangleIcon,
 } from "@patternfly/react-icons";
 import type { IRowData } from "@patternfly/react-table";
-import { useState } from "react";
+import { JSX, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { useAdminClient } from "../../admin-client";
+import { fetchRealmInfo } from "../../context/auth/admin-ui-endpoint";
+import { UiRealmInfo } from "../../context/auth/uiRealmInfo";
 import { useRealm } from "../../context/realm-context/RealmContext";
 import { SearchType } from "../../user/details/SearchFilter";
 import { toAddUser } from "../../user/routes/AddUser";
 import { toUser } from "../../user/routes/User";
 import { emptyFormatter } from "../../util";
 import { useConfirmDialog } from "../confirm-dialog/ConfirmDialog";
-import { KeycloakSpinner } from "@keycloak/keycloak-ui-shared";
 import { BruteUser, findUsers } from "../role-mapping/resource";
 import { UserDataTableToolbarItems } from "./UserDataTableToolbarItems";
+import { NetworkError } from "@keycloak/keycloak-admin-client";
+
+export type UserFilter = {
+  exact: boolean;
+  userAttribute: UserAttribute[];
+};
 
 export type UserAttribute = {
   name: string;
@@ -58,7 +65,7 @@ const UserDetailLink = (user: BruteUser) => {
         {user.username}
         <StatusRow user={user} />
       </Link>
-      {user.attributes?.["is_temporary_admin"][0] === "true" && (
+      {user.attributes?.["is_temporary_admin"]?.[0] === "true" && (
         <Tooltip content={t("temporaryAdmin")}>
           <WarningTriangleIcon
             className="pf-v5-u-ml-sm"
@@ -101,7 +108,7 @@ const ValidatedEmail = (user: UserRepresentation) => {
           <ExclamationCircleIcon className="keycloak__user-section__email-verified" />
         </Tooltip>
       )}{" "}
-      {emptyFormatter()(user.email)}
+      {emptyFormatter()(user.email) as JSX.Element}
     </>
   );
 };
@@ -113,12 +120,15 @@ export function UserDataTable() {
   const { addAlert, addError } = useAlerts();
   const { realm: realmName, realmRepresentation: realm } = useRealm();
   const navigate = useNavigate();
-  const [userStorage, setUserStorage] = useState<ComponentRepresentation[]>();
+  const [uiRealmInfo, setUiRealmInfo] = useState<UiRealmInfo>({});
   const [searchUser, setSearchUser] = useState("");
   const [selectedRows, setSelectedRows] = useState<UserRepresentation[]>([]);
   const [searchType, setSearchType] = useState<SearchType>("default");
   const [searchDropdownOpen, setSearchDropdownOpen] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<UserAttribute[]>([]);
+  const [activeFilters, setActiveFilters] = useState<UserFilter>({
+    exact: false,
+    userAttribute: [],
+  });
   const [profile, setProfile] = useState<UserProfileConfig>({});
   const [query, setQuery] = useState("");
 
@@ -127,30 +137,29 @@ export function UserDataTable() {
 
   useFetch(
     async () => {
-      const testParams = {
-        type: "org.keycloak.storage.UserStorageProvider",
-      };
-
       try {
         return await Promise.all([
-          adminClient.components.find(testParams),
+          fetchRealmInfo(adminClient),
           adminClient.users.getProfile(),
         ]);
-      } catch {
-        return [[], {}] as [ComponentRepresentation[], UserProfileConfig];
+      } catch (error) {
+        if (error instanceof NetworkError && error.response.status === 403) {
+          // "User Profile" attributes not available for Users Attribute search, when admin user does not have view- or manage-realm realm-management role
+          return [{}, {}] as [UiRealmInfo, UserProfileConfig];
+        } else {
+          throw error;
+        }
       }
     },
-    ([storageProviders, profile]) => {
-      setUserStorage(
-        storageProviders.filter((p) => p.config?.enabled?.[0] === "true"),
-      );
+    ([uiRealmInfo, profile]) => {
+      setUiRealmInfo(uiRealmInfo);
       setProfile(profile);
     },
     [],
   );
 
   const loader = async (first?: number, max?: number, search?: string) => {
-    const params: { [name: string]: string | number } = {
+    const params: { [name: string]: string | number | boolean } = {
       first: first!,
       max: max!,
       q: query!,
@@ -160,6 +169,8 @@ export function UserDataTable() {
     if (searchParam) {
       params.search = searchParam;
     }
+
+    if (activeFilters.exact) params.exact = true;
 
     if (!listUsers && !(params.search || params.q)) {
       return [];
@@ -171,7 +182,7 @@ export function UserDataTable() {
         ...params,
       });
     } catch (error) {
-      if (userStorage?.length) {
+      if (uiRealmInfo.userProfileProvidersEnabled) {
         addError("noUsersFoundErrorStorage", error);
       } else {
         addError("noUsersFoundError", error);
@@ -196,7 +207,10 @@ export function UserDataTable() {
   });
 
   const [toggleDeleteDialog, DeleteConfirm] = useConfirmDialog({
-    titleKey: "deleteConfirmUsers",
+    titleKey: t("deleteConfirmUsers", {
+      count: selectedRows.length,
+      name: selectedRows[0]?.username,
+    }),
     messageKey: t("deleteConfirmDialog", { count: selectedRows.length }),
     continueButtonLabel: "delete",
     continueButtonVariant: ButtonVariant.danger,
@@ -216,25 +230,24 @@ export function UserDataTable() {
 
   const goToCreate = () => navigate(toAddUser({ realm: realmName }));
 
-  if (!userStorage || !realm) {
+  if (uiRealmInfo.userProfileProvidersEnabled === undefined) {
     return <KeycloakSpinner />;
   }
 
   //should *only* list users when no user federation is configured
-  const listUsers = !(userStorage.length > 0);
+  const listUsers = !uiRealmInfo.userProfileProvidersEnabled;
 
   const clearAllFilters = () => {
-    const filtered = [...activeFilters].filter(
-      (chip) => chip.name !== chip.name,
-    );
-    setActiveFilters(filtered);
+    setActiveFilters({ exact: false, userAttribute: [] });
     setSearchUser("");
     setQuery("");
     refresh();
   };
 
-  const createQueryString = (filters: UserAttribute[]) => {
-    return filters.map((filter) => `${filter.name}:${filter.value}`).join(" ");
+  const createQueryString = (filters: UserFilter) => {
+    return filters.userAttribute
+      .map((filter) => `${filter.name}:${filter.value}`)
+      .join(" ");
   };
 
   const searchUserWithAttributes = () => {
@@ -246,12 +259,13 @@ export function UserDataTable() {
   const createAttributeSearchChips = () => {
     return (
       <FlexItem>
-        {activeFilters.length > 0 && (
+        {activeFilters.userAttribute.length > 0 && (
           <>
-            {Object.values(activeFilters).map((entry) => {
+            {Object.values(activeFilters.userAttribute).map((entry) => {
               return (
                 <ChipGroup
                   className="pf-v5-u-mt-md pf-v5-u-mr-md"
+                  data-testid="user-attribute-search-chips-group"
                   key={entry.name}
                   categoryName={
                     entry.displayName.length ? entry.displayName : entry.name
@@ -260,13 +274,16 @@ export function UserDataTable() {
                   onClick={(event) => {
                     event.stopPropagation();
 
-                    const filtered = [...activeFilters].filter(
+                    const filtered = [...activeFilters.userAttribute].filter(
                       (chip) => chip.name !== entry.name,
                     );
-                    const attributes = createQueryString(filtered);
+                    const active = {
+                      userAttribute: filtered,
+                      exact: activeFilters.exact,
+                    };
 
-                    setActiveFilters(filtered);
-                    setQuery(attributes);
+                    setActiveFilters(active);
+                    setQuery(createQueryString(active));
                     refresh();
                   }}
                 >
@@ -308,7 +325,7 @@ export function UserDataTable() {
   };
 
   const subtoolbar = () => {
-    if (!activeFilters.length) {
+    if (!activeFilters.userAttribute.length) {
       return;
     }
     return (
@@ -333,7 +350,9 @@ export function UserDataTable() {
       <DeleteConfirm />
       <UnlockUsersConfirm />
       <KeycloakDataTable
-        isSearching={searchUser !== "" || activeFilters.length !== 0}
+        isSearching={
+          searchUser !== "" || activeFilters.userAttribute.length !== 0
+        }
         key={key}
         loader={loader}
         isPaginated
@@ -363,20 +382,16 @@ export function UserDataTable() {
         }
         toolbarItem={toolbar()}
         subToolbar={subtoolbar()}
-        actionResolver={(rowData: IRowData) => {
-          const user: UserRepresentation = rowData.data;
-          if (!user.access?.manage) return [];
-
-          return [
-            {
-              title: t("delete"),
-              onClick: () => {
-                setSelectedRows([user]);
-                toggleDeleteDialog();
-              },
+        actionResolver={(rowData: IRowData) => [
+          {
+            title: t("delete"),
+            onClick: () => {
+              setSelectedRows([rowData.data]);
+              toggleDeleteDialog();
             },
-          ];
-        }}
+          },
+        ]}
+        isRowDisabled={(user: UserRepresentation) => !user.access?.manage}
         columns={[
           {
             name: "username",

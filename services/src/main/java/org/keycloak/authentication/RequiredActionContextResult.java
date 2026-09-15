@@ -17,11 +17,16 @@
 
 package org.keycloak.authentication;
 
-import org.keycloak.http.HttpRequest;
+import java.net.URI;
+
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
+
 import org.keycloak.common.ClientConnection;
 import org.keycloak.common.util.Time;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.forms.login.LoginFormsProvider;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
@@ -31,10 +36,6 @@ import org.keycloak.models.UserModel;
 import org.keycloak.services.managers.ClientSessionCode;
 import org.keycloak.services.resources.LoginActionsService;
 import org.keycloak.sessions.AuthenticationSessionModel;
-
-import jakarta.ws.rs.core.Response;
-import jakarta.ws.rs.core.UriInfo;
-import java.net.URI;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -46,6 +47,7 @@ public class RequiredActionContextResult implements RequiredActionContext {
     protected EventBuilder eventBuilder;
     protected KeycloakSession session;
     protected Status status;
+    protected String errorMessage;
     protected Response challenge;
     protected HttpRequest httpRequest;
     protected UserModel user;
@@ -66,6 +68,7 @@ public class RequiredActionContextResult implements RequiredActionContext {
         this.config = realm.getRequiredActionConfigByAlias(factory.getId());
     }
 
+    @Override
     public RequiredActionConfigModel getConfig() {
         return config;
     }
@@ -120,6 +123,11 @@ public class RequiredActionContextResult implements RequiredActionContext {
     }
 
     @Override
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    @Override
     public void challenge(Response response) {
         status = Status.CHALLENGE;
         challenge = response;
@@ -127,7 +135,8 @@ public class RequiredActionContextResult implements RequiredActionContext {
     }
 
     @Override
-    public void failure() {
+    public void failure(String errorMessage) {
+        this.errorMessage = errorMessage;
         status = Status.FAILURE;
     }
 
@@ -135,6 +144,11 @@ public class RequiredActionContextResult implements RequiredActionContext {
     public void success() {
         status = Status.SUCCESS;
 
+    }
+
+    @Override
+    public void cancel() {
+        status = Status.CANCELLED;
     }
 
     @Override

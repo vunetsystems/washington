@@ -26,6 +26,8 @@ import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.organization.protocol.mappers.oidc.OrganizationScope;
+import org.keycloak.organization.utils.Organizations;
 import org.keycloak.protocol.LoginProtocol;
 import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.messages.Messages;
@@ -51,12 +53,12 @@ public class CookieAuthenticator implements Authenticator {
         } else {
             AuthenticationSessionModel authSession = context.getAuthenticationSession();
             LoginProtocol protocol = context.getSession().getProvider(LoginProtocol.class, authSession.getProtocol());
-            authSession.setAuthNote(Constants.LOA_MAP, authResult.getSession().getNote(Constants.LOA_MAP));
-            context.setUser(authResult.getUser());
+            authSession.setAuthNote(Constants.LOA_MAP, authResult.session().getNote(Constants.LOA_MAP));
+            context.setUser(authResult.user());
             AcrStore acrStore = new AcrStore(context.getSession(), authSession);
 
             // Cookie re-authentication is skipped if re-authentication is required
-            if (protocol.requireReauthentication(authResult.getSession(), authSession)) {
+            if (protocol.requireReauthentication(authResult.session(), authSession)) {
                 // Full re-authentication, so we start with no loa
                 acrStore.setLevelAuthenticatedToCurrentRequest(Constants.NO_LOA);
                 authSession.setAuthNote(AuthenticationManager.FORCED_REAUTHENTICATION, "true");
@@ -65,8 +67,9 @@ public class CookieAuthenticator implements Authenticator {
             } else if(AuthenticatorUtil.isForkedFlow(authSession)){
                 context.attempted();
             } else {
-                int previouslyAuthenticatedLevel = acrStore.getHighestAuthenticatedLevelFromPreviousAuthentication();
-                AuthenticatorUtils.updateCompletedExecutions(context.getAuthenticationSession(), authResult.getSession(), context.getExecution().getId());
+                String topLevelFlowId = context.getTopLevelFlow().getId();
+                int previouslyAuthenticatedLevel = acrStore.getHighestAuthenticatedLevelFromPreviousAuthentication(topLevelFlowId);
+                AuthenticatorUtils.updateCompletedExecutions(context.getAuthenticationSession(), authResult.session(), context.getExecution().getId());
 
                 if (acrStore.getRequestedLevelOfAuthentication(context.getTopLevelFlow()) > previouslyAuthenticatedLevel) {
                     // Step-up authentication, we keep the loa from the existing user session.
@@ -82,8 +85,14 @@ public class CookieAuthenticator implements Authenticator {
                     // Cookie only authentication
                     acrStore.setLevelAuthenticatedToCurrentRequest(previouslyAuthenticatedLevel);
                     authSession.setAuthNote(AuthenticationManager.SSO_AUTH, "true");
-                    context.attachUserSession(authResult.getSession());
-                    context.success();
+                    context.attachUserSession(authResult.session());
+
+                    if (isOrganizationContext(context)) {
+                        // if re-authenticating in the scope of an organization, an organization must be resolved prior to authenticating the user
+                        context.attempted();
+                    } else {
+                        context.success();
+                    }
                 }
             }
         }
@@ -107,5 +116,15 @@ public class CookieAuthenticator implements Authenticator {
     @Override
     public void close() {
 
+    }
+
+    private boolean isOrganizationContext(AuthenticationFlowContext context) {
+        KeycloakSession session = context.getSession();
+
+        if (Organizations.isEnabledAndOrganizationsPresent(session)) {
+            return OrganizationScope.valueOfScope(session) != null;
+        }
+
+        return false;
     }
 }

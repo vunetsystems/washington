@@ -37,7 +37,6 @@ import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.PSSParameterSpec;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
 import javax.crypto.Cipher;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKeyFactory;
@@ -70,6 +69,11 @@ public class WildFlyElytronProvider implements CryptoProvider {
     @Override
     public Provider getBouncyCastleProvider() {
         return null;
+    }
+
+    @Override
+    public int order() {
+        return 200;
     }
 
     @Override

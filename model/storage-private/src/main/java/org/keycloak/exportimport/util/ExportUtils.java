@@ -17,45 +17,6 @@
 
 package org.keycloak.exportimport.util;
 
-import com.fasterxml.jackson.core.JsonEncoding;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import org.keycloak.common.Profile;
-import org.keycloak.common.Profile.Feature;
-import org.keycloak.common.Version;
-import org.keycloak.common.util.MultivaluedHashMap;
-import org.keycloak.credential.CredentialModel;
-import org.keycloak.exportimport.ExportOptions;
-import org.keycloak.models.ClientModel;
-import org.keycloak.models.ClientScopeModel;
-import org.keycloak.models.FederatedIdentityModel;
-import org.keycloak.models.GroupModel;
-import org.keycloak.models.GroupModel.Type;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.OrganizationModel;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.RoleContainerModel;
-import org.keycloak.models.RoleModel;
-import org.keycloak.models.UserModel;
-import org.keycloak.models.utils.ModelToRepresentation;
-import org.keycloak.organization.OrganizationProvider;
-import org.keycloak.representations.idm.ClientRepresentation;
-import org.keycloak.representations.idm.ComponentExportRepresentation;
-import org.keycloak.representations.idm.CredentialRepresentation;
-import org.keycloak.representations.idm.FederatedIdentityRepresentation;
-import org.keycloak.representations.idm.IdentityProviderRepresentation;
-import org.keycloak.representations.idm.OrganizationDomainRepresentation;
-import org.keycloak.representations.idm.OrganizationRepresentation;
-import org.keycloak.representations.idm.RealmRepresentation;
-import org.keycloak.representations.idm.RoleRepresentation;
-import org.keycloak.representations.idm.RolesRepresentation;
-import org.keycloak.representations.idm.ScopeMappingRepresentation;
-import org.keycloak.representations.idm.UserConsentRepresentation;
-import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.storage.federated.UserFederatedStorageProvider;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -68,8 +29,49 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.keycloak.common.Profile;
+import org.keycloak.common.Profile.Feature;
+import org.keycloak.common.Version;
+import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.credential.CredentialModel;
+import org.keycloak.exportimport.ExportOptions;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.ClientScopeModel;
+import org.keycloak.models.FederatedIdentityModel;
+import org.keycloak.models.GroupModel;
+import org.keycloak.models.GroupModel.Type;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.RoleContainerModel;
+import org.keycloak.models.RoleModel;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.utils.ModelToRepresentation;
+import org.keycloak.organization.OrganizationProvider;
+import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ComponentExportRepresentation;
+import org.keycloak.representations.idm.CredentialRepresentation;
+import org.keycloak.representations.idm.FederatedIdentityRepresentation;
+import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.MemberRepresentation;
 import org.keycloak.representations.idm.MembershipType;
+import org.keycloak.representations.idm.OrganizationRepresentation;
+import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.RolesRepresentation;
+import org.keycloak.representations.idm.ScopeMappingRepresentation;
+import org.keycloak.representations.idm.UserConsentRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.representations.idm.oid4vc.IssuedVerifiableCredentialRepresentation;
+import org.keycloak.representations.idm.oid4vc.UserVerifiableCredentialRepresentation;
+import org.keycloak.storage.UserStoragePrivateUtil;
+import org.keycloak.storage.federated.UserFederatedStorageProvider;
+
+import com.fasterxml.jackson.core.JsonEncoding;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -130,7 +132,7 @@ public class ExportUtils {
                     List<RoleRepresentation> currentAppRoleReps = exportRoles(currentAppRoles);
                     clientRolesReps.put(client.getClientId(), currentAppRoleReps);
                 }
-                if (clientRolesReps.size() > 0) {
+                if (!clientRolesReps.isEmpty()) {
                     rolesRep.setClient(clientRolesReps);
                 }
             }
@@ -156,11 +158,7 @@ public class ExportUtils {
                     } else {
                         ClientModel app = (ClientModel) scope.getContainer();
                         String appName = app.getClientId();
-                        List<ScopeMappingRepresentation> currentAppScopes = clientScopeReps.get(appName);
-                        if (currentAppScopes == null) {
-                            currentAppScopes = new ArrayList<>();
-                            clientScopeReps.put(appName, currentAppScopes);
-                        }
+                        List<ScopeMappingRepresentation> currentAppScopes = clientScopeReps.computeIfAbsent(appName, k -> new ArrayList<>());
 
                         ScopeMappingRepresentation currentClientScope = null;
                         for (ScopeMappingRepresentation scopeMapping : currentAppScopes) {
@@ -193,11 +191,7 @@ public class ExportUtils {
                 } else {
                     ClientModel app = (ClientModel)scope.getContainer();
                     String appName = app.getClientId();
-                    List<ScopeMappingRepresentation> currentAppScopes = clientScopeReps.get(appName);
-                    if (currentAppScopes == null) {
-                        currentAppScopes = new ArrayList<>();
-                        clientScopeReps.put(appName, currentAppScopes);
-                    }
+                    List<ScopeMappingRepresentation> currentAppScopes = clientScopeReps.computeIfAbsent(appName, k -> new ArrayList<>());
 
                     ScopeMappingRepresentation currentClientTemplateScope = null;
                     for (ScopeMappingRepresentation scopeMapping : currentAppScopes) {
@@ -216,17 +210,17 @@ public class ExportUtils {
             }
         });
 
-        if (clientScopeReps.size() > 0) {
+        if (!clientScopeReps.isEmpty()) {
             rep.setClientScopeMappings(clientScopeReps);
         }
 
         // Finally users if needed
         if (options.isUsersIncluded()) {
-            List<UserRepresentation> users = session.users().searchForUserStream(realm, Collections.emptyMap())
+            List<UserRepresentation> users = UserStoragePrivateUtil.userLocalStorage(session).searchForUserStream(realm, Collections.emptyMap())
                     .map(user -> exportUser(session, realm, user, options, internal))
                     .collect(Collectors.toList());
 
-            if (users.size() > 0) {
+            if (!users.isEmpty()) {
                 rep.setUsers(users);
             }
 
@@ -234,7 +228,7 @@ public class ExportUtils {
             if (userFederatedStorageProvider != null) {
                 List<UserRepresentation> federatedUsers = userFederatedStorage(session).getStoredUsersStream(realm, 0, -1)
                         .map(user -> exportFederatedUser(session, realm, user, options)).collect(Collectors.toList());
-                if (federatedUsers.size() > 0) {
+                if (!federatedUsers.isEmpty()) {
                     rep.setFederatedUsers(federatedUsers);
                 }
             }
@@ -251,7 +245,7 @@ public class ExportUtils {
                 }
             }
 
-            if (users.size() > 0) {
+            if (!users.isEmpty()) {
                 rep.setUsers(users);
             }
         }
@@ -265,37 +259,34 @@ public class ExportUtils {
 
         if (Profile.isFeatureEnabled(Feature.ORGANIZATION) && !options.isPartial()) {
             OrganizationProvider orgProvider = session.getProvider(OrganizationProvider.class);
-            orgProvider.getAllStream().map(m -> {
-                OrganizationRepresentation org = new OrganizationRepresentation();
+            orgProvider.getAllStream().map(model -> {
+                OrganizationRepresentation org = ModelToRepresentation.toRepresentation(model, false);
 
-                org.setName(m.getName());
-                org.setAlias(m.getAlias());
-                org.setEnabled(m.isEnabled());
-                org.setDescription(m.getDescription());
-                m.getDomains().map(d -> {
-                    OrganizationDomainRepresentation domain = new OrganizationDomainRepresentation();
-
-                    domain.setName(d.getName());
-                    domain.setVerified(d.isVerified());
-
-                    return domain;
-                }).forEach(org::addDomain);
-
-                orgProvider.getMembersStream(m, null, null, null, null)
+                orgProvider.getMembersStream(model, (Map<String, String>) null, null, null, null)
                         .forEach(user -> {
                             MemberRepresentation member = new MemberRepresentation();
                             member.setUsername(user.getUsername());
-                            member.setMembershipType(orgProvider.isManagedMember(m, user) ? MembershipType.MANAGED : MembershipType.UNMANAGED);
+                            member.setMembershipType(orgProvider.isManagedMember(model, user) ? MembershipType.MANAGED : MembershipType.UNMANAGED);
+
+                            // Export organization group memberships
+                            List<String> groupIds = orgProvider.getOrganizationGroupsByMember(model, user).map(GroupModel::getId).collect(Collectors.toList());
+                            if (!groupIds.isEmpty()) {
+                                member.setGroups(groupIds);
+                            }
 
                             org.addMember(member);
                         });
 
-                orgProvider.getIdentityProviders(m)
+                orgProvider.getIdentityProviders(model)
                         .map(b -> {
                             IdentityProviderRepresentation broker = new IdentityProviderRepresentation();
                             broker.setAlias(b.getAlias());
                             return broker;
                         }).forEach(org::addIdentityProvider);
+
+                orgProvider.getTopLevelGroups(model, null, null)
+                        .map(group -> ModelToRepresentation.toGroupHierarchy(group, true))
+                        .forEach(org::addGroup);
 
                 return org;
             }).forEach(rep::addOrganization);
@@ -452,6 +443,22 @@ public class ExportUtils {
         // Not Before
         int notBefore = session.users().getNotBeforeOfUser(realm, user);
         userRep.setNotBefore(notBefore);
+
+        // Verifiable credentials
+        List<UserVerifiableCredentialRepresentation> verifiableCredentialReps = session.users().getVerifiableCredentialsByUser(user.getId())
+                .map(model -> ModelToRepresentation.toRepresentation(model, realm))
+                .toList();
+        if (!verifiableCredentialReps.isEmpty()) {
+            userRep.setVerifiableCredentials(verifiableCredentialReps);
+        }
+
+        // Issued verifiable credentials
+        List<IssuedVerifiableCredentialRepresentation> issuedCredentialReps = session.users().getIssuedVerifiableCredentialsStreamByUser(user.getId())
+                .map(model -> ModelToRepresentation.toRepresentation(model, session, realm))
+                .toList();
+        if (!issuedCredentialReps.isEmpty()) {
+            userRep.setIssuedVerifiableCredentials(issuedCredentialReps);
+        }
 
         // Service account
         if (user.getServiceAccountClientLink() != null) {

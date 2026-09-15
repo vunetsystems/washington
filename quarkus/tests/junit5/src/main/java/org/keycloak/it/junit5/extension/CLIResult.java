@@ -17,20 +17,25 @@
 
 package org.keycloak.it.junit5.extension;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
-import static org.testcontainers.shaded.org.hamcrest.MatcherAssert.assertThat;
-import static org.testcontainers.shaded.org.hamcrest.Matchers.*;
-
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.main.LaunchResult;
+import org.awaitility.Awaitility;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public interface CLIResult extends LaunchResult {
 
@@ -42,8 +47,17 @@ public interface CLIResult extends LaunchResult {
             }
 
             @Override
+            public String getOutput() {
+                synchronized (outputStream) {
+                    return String.join("\n", outputStream);            
+                }
+            }
+
+            @Override
             public String getErrorOutput() {
-                return String.join("\n", errStream).replace("\r","");
+                synchronized (errStream) {
+                    return String.join("\n", errStream).replace("\r","");            
+                }
             }
 
             @Override
@@ -58,38 +72,60 @@ public interface CLIResult extends LaunchResult {
         };
     }
 
+    private static void awaitOutput(String reason, String message, Supplier<String> supplier, CLIResult result) {
+        if (result.exitCode() == -1) {
+            Awaitility.await(reason)
+                .atMost(5, TimeUnit.SECONDS)
+                .untilAsserted(() -> assertThat(reason, supplier.get(), containsString(message)));
+        } else {
+            assertThat(reason, supplier.get(), containsString(message));
+        }
+    }
+    
+    private static void noOutput(String reason, String message, Supplier<String> supplier, CLIResult result) {
+        assertThat(reason, supplier.get(), not(containsString(message)));
+    }
+    
     default void assertStarted() {
-        assertFalse(getOutput().contains("The delayed handler's queue was overrun and log record(s) were lost (Did you forget to configure logging?)"), () -> "The standard Output:\n" + getOutput() + "should not contain a warning about log queue overrun.");
-        assertTrue(getOutput().contains("Listening on:"), () -> "The standard output:\n" + getOutput() + "does include \"Listening on:\"");
+        assertThat("The standard output should not contain a warning about log queue overrun.",
+                getOutput(), not(containsString("The delayed handler's queue was overrun and log record(s) were lost (Did you forget to configure logging?)")));
+        assertThat("The standard output does not include \"Listening on:\"",
+                getOutput(), containsString("Listening on:"));
         assertNotDevMode();
     }
 
     default void assertNotDevMode() {
-        assertFalse(getOutput().contains("Running the server in development mode."),
-                () -> "The standard output:\n" + getOutput() + "\ndoes include the Start Dev output");
+        assertThat("The standard output does include the Start Dev output",
+                getOutput(), not(containsString("Running the server in development mode.")));
     }
 
     default void assertStartedDevMode() {
-        assertTrue(getOutput().contains("Running the server in development mode."),
-                () -> "The standard output:\n" + getOutput() + "\ndoesn't include the Start Dev output");
+        assertThat("The standard output does not include the Start Dev output",
+                getOutput(), containsString("Running the server in development mode."));
     }
 
     default void assertError(String msg) {
-        assertTrue(getErrorOutput().contains(msg),
-                () -> "The Error Output:\n " + getErrorOutput() + "\ndoesn't contains " + msg);
+        awaitOutput("The error output does not contain: " + msg, msg, this::getErrorOutput, this);
     }
 
     default void assertNoError(String msg) {
-        assertFalse(getErrorOutput().contains(msg),
-                () -> "The Error Output:\n " + getErrorOutput() + "\n contains " + msg);
+        noOutput("The error output contains: " + msg, msg, this::getErrorOutput, this);
+    }
+
+    default void assertWarning(String msg) {
+        assertError(msg); //seems that warnings are printed on stderr
+    }
+
+    default void assertExitCode(int code) {
+        assertThat("Exit codes do not match: ", exitCode(), is(code));
     }
 
     default void assertMessage(String message) {
-        assertThat(getOutput(), containsString(message));
+        awaitOutput("The standard output does not contain: " + message, message, this::getOutput, this);
     }
 
     default void assertNoMessage(String message) {
-        assertThat(getOutput(), not(containsString(message)));
+        noOutput("The standard output contains: " + message, message, this::getOutput, this);
     }
 
     default void assertMessageWasShownExactlyNumberOfTimes(String message, long numberOfShownTimes) {
@@ -102,11 +138,7 @@ public interface CLIResult extends LaunchResult {
     }
 
     default void assertNoBuild() {
-        assertFalse(getOutput().contains("Server configuration updated and persisted"));
-    }
-
-    default void assertBuildRuntimeMismatchWarning(String quarkusBuildtimePropKey) {
-        assertTrue(getOutput().contains(" - " + quarkusBuildtimePropKey + " is set to 'true' but it is build time fixed to 'false'. Did you change the property " + quarkusBuildtimePropKey + " after building the application?"));
+        assertNoMessage("Server configuration updated and persisted");
     }
 
     default boolean isClustered() {
@@ -148,6 +180,6 @@ public interface CLIResult extends LaunchResult {
 
     default void assertStringCount(String msg, int count) {
         Pattern pattern = Pattern.compile(msg);
-        assertEquals(count, pattern.matcher(getOutput()).results().count());
+        assertThat((int) pattern.matcher(getOutput()).results().count(), is(count));
     }
 }

@@ -1,6 +1,7 @@
 package org.keycloak.testsuite.pages;
 
 import org.keycloak.testsuite.util.UIUtils;
+
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebElement;
@@ -21,7 +22,7 @@ public class LoginUsernameOnlyPage extends LoginPage {
         usernameInput.clear();
         usernameInput.sendKeys(username);
 
-        submitButton.click();
+        UIUtils.clickLink(submitButton);
     }
 
     public String getUsernameError() {
@@ -34,7 +35,7 @@ public class LoginUsernameOnlyPage extends LoginPage {
 
     // Click button without fill anything
     public void clickSubmitButton() {
-        submitButton.click();
+        UIUtils.clickLink(submitButton);
     }
 
     /**

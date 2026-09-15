@@ -17,9 +17,13 @@
 
 package org.keycloak.testsuite.webauthn.pages;
 
-import org.hamcrest.CoreMatchers;
+import java.time.Duration;
+
 import org.keycloak.testsuite.pages.LogoutSessionsPage;
+import org.keycloak.testsuite.util.UIUtils;
 import org.keycloak.testsuite.util.WaitUtils;
+
+import org.hamcrest.CoreMatchers;
 import org.openqa.selenium.Alert;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
@@ -29,10 +33,9 @@ import org.openqa.selenium.support.FindBy;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
-import java.time.Duration;
+import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
 
 /**
  * WebAuthnRegisterPage, which is displayed when WebAuthnRegister required action is triggered. It is useful with Chrome testing API.
@@ -56,14 +59,12 @@ public class WebAuthnRegisterPage extends LogoutSessionsPage {
     private WebElement formTitle;
 
     public void clickRegister() {
-        WaitUtils.waitUntilElement(registerButton).is().clickable();
-        registerButton.click();
+        UIUtils.clickLinkWithoutWait(registerButton);
     }
 
     public void cancelAIA() {
         assertThat("It only works with AIA", isAIA(), CoreMatchers.is(true));
-        WaitUtils.waitUntilElement(cancelAIAButton).is().clickable();
-        cancelAIAButton.click();
+        UIUtils.clickLink(cancelAIAButton);
     }
 
     public void registerWebAuthnCredential(String authenticatorLabel) {
@@ -117,11 +118,6 @@ public class WebAuthnRegisterPage extends LogoutSessionsPage {
         final String formTitle = getFormTitle();
         return formTitle != null && formTitle.equals("Passkey Registration") &&
                 driver.findElement(By.id("registerWebAuthn")).isDisplayed();
-    }
-
-    @Override
-    public void open() {
-        throw new UnsupportedOperationException();
     }
 
 }

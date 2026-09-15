@@ -22,13 +22,18 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import org.keycloak.provider.ProviderEvent;
+
 public interface OrganizationModel {
 
     String ORGANIZATION_ATTRIBUTE = "kc.org";
+    String ORGANIZATION_SWITCHABLE_ATTRIBUTE = "kc.org.switchable";
     String ORGANIZATION_NAME_ATTRIBUTE = "kc.org.name";
     String ORGANIZATION_DOMAIN_ATTRIBUTE = "kc.org.domain";
-    String BROKER_PUBLIC = "kc.org.broker.public";
+    String ORGANIZATION_EXCLUDED_DOMAIN_ATTRIBUTE = "kc.org.excluded.domains";
     String ALIAS = "alias";
+    String HIDE_IDP_ON_LOGIN_WHEN_ORGANIZATION_UNKNOWN = "kc.org.broker.login.hide-when-org-unknown";
+    String SHOW_IDP_ON_LOGIN_WHEN_LINKED_ELSEWHERE = "kc.org.broker.login.show-when-linked-elsewhere";
 
     enum IdentityProviderRedirectMode {
         EMAIL_MATCH("kc.org.broker.redirect.mode.email-matches");
@@ -45,6 +50,73 @@ public interface OrganizationModel {
 
         public String getKey() {
             return key;
+        }
+    }
+
+    interface OrganizationMembershipEvent extends ProviderEvent {
+        OrganizationModel getOrganization();
+        UserModel getUser();
+        KeycloakSession getSession();
+    }
+
+    interface OrganizationMemberJoinEvent extends OrganizationMembershipEvent {
+        static void fire(OrganizationModel organization, UserModel user, KeycloakSession session) {
+            session.getKeycloakSessionFactory().publish(new OrganizationModel.OrganizationMemberJoinEvent() {
+                @Override
+                public UserModel getUser() {
+                    return user;
+                }
+
+                @Override
+                public OrganizationModel getOrganization() {
+                    return organization;
+                }
+
+                @Override
+                public KeycloakSession getSession() {
+                    return session;
+                }
+            });
+        }
+    }
+
+    interface OrganizationMemberLeaveEvent extends OrganizationMembershipEvent {
+        static void fire(OrganizationModel organization, UserModel user, KeycloakSession session) {
+            session.getKeycloakSessionFactory().publish(new OrganizationModel.OrganizationMemberLeaveEvent() {
+                @Override
+                public UserModel getUser() {
+                    return user;
+                }
+
+                @Override
+                public OrganizationModel getOrganization() {
+                    return organization;
+                }
+
+                @Override
+                public KeycloakSession getSession() {
+                    return session;
+                }
+            });
+        }
+    }
+
+    interface OrganizationRemovedEvent extends ProviderEvent {
+        OrganizationModel getOrganization();
+        KeycloakSession getKeycloakSession();
+
+        static void fire(OrganizationModel organization, KeycloakSession session) {
+            session.getKeycloakSessionFactory().publish(new OrganizationRemovedEvent() {
+                @Override
+                public OrganizationModel getOrganization() {
+                    return organization;
+                }
+
+                @Override
+                public KeycloakSession getKeycloakSession() {
+                    return session;
+                }
+            });
         }
     }
 
@@ -65,6 +137,10 @@ public interface OrganizationModel {
     String getDescription();
 
     void setDescription(String description);
+
+    String getRedirectUrl();
+
+    void setRedirectUrl(String redirectUrl);
 
     Map<String, List<String>> getAttributes();
 

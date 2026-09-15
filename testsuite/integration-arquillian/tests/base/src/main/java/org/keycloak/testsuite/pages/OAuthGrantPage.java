@@ -18,10 +18,9 @@ package org.keycloak.testsuite.pages;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedList;
 import java.util.List;
 
-import org.junit.Assert;
+import org.junit.jupiter.api.Assertions;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
@@ -41,9 +40,9 @@ public class OAuthGrantPage extends LanguageComboboxAwarePage {
     public static final String OFFLINE_ACCESS_CONSENT_TEXT = "Offline Access";
     public static final String ROLES_CONSENT_TEXT = "User roles";
 
-    @FindBy(css = "button[name=\"accept\"]")
+    @FindBy(css = "[name=\"accept\"]")
     private WebElement acceptButton;
-    @FindBy(css = "button[name=\"cancel\"]")
+    @FindBy(css = "[name=\"cancel\"]")
     private WebElement cancelButton;
 
 
@@ -60,10 +59,6 @@ public class OAuthGrantPage extends LanguageComboboxAwarePage {
         return PageUtils.getPageTitle(driver).contains("Grant Access to ");
     }
 
-    @Override
-    public void open() {
-    }
-
     public List<String> getDisplayedGrants() {
         List<String> table = new ArrayList<>();
         WebElement divKcOauth = driver.findElement(By.id("kc-oauth"));
@@ -78,8 +73,8 @@ public class OAuthGrantPage extends LanguageComboboxAwarePage {
     public void assertGrants(String... expectedGrants) {
         List<String> displayed = getDisplayedGrants();
         List<String> expected = Arrays.asList(expectedGrants);
-        Assert.assertTrue("Not matched grants. Displayed grants: " + displayed + ", expected grants: " + expected,
-                displayed.containsAll(expected) && expected.containsAll(displayed));
+        Assertions.assertTrue(displayed.containsAll(expected) && expected.containsAll(displayed),
+                "Not matched grants. Displayed grants: " + displayed + ", expected grants: " + expected);
     }
 
 }

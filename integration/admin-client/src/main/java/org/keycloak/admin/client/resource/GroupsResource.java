@@ -17,13 +17,21 @@
 
 package org.keycloak.admin.client.resource;
 
-import org.keycloak.representations.idm.GroupRepresentation;
-
-import jakarta.ws.rs.*;
-import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Map;
+
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+
+import org.keycloak.representations.idm.GroupRepresentation;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -81,6 +89,29 @@ public interface GroupsResource {
                                      @QueryParam("first") Integer first,
                                      @QueryParam("max") Integer max,
                                      @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation);
+
+    /**
+     * Get groups by pagination params.
+     * @param search A {@code String} representing either an exact or partial group name.
+     * @param exact if {@code true}, the groups will be searched using exact match for the {@code search} param. If false,
+     *      *              the method returns all groups that partially match the specified name.
+     * @param first index of the first element (pagination offset).
+     * @param max the maximum number of results.
+     * @param briefRepresentation if {@code true}, each returned group representation will only contain basic information
+     *                            (id, name, path, and parentId). If {@code false}, the complete representations of the groups
+     *                            are returned (including role mappings and attributes).
+     * @param subGroupsCount if {@code true}, the count of subgroups is returned for each subgroup. Defaults to true. Parameter supported since Keycloak 26.3. For older versions, it is always true.
+     * @return A list containing the slice of all groups.
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> groups(@QueryParam("search") String search,
+                                     @QueryParam("exact") Boolean exact,
+                                     @QueryParam("first") Integer first,
+                                     @QueryParam("max") Integer max,
+                                     @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation,
+                                     @QueryParam("subGroupsCount") @DefaultValue("true") Boolean subGroupsCount);
 
     /**
      * Get groups by pagination params.

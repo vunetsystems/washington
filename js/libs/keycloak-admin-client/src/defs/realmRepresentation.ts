@@ -24,6 +24,8 @@ export default interface RealmRepresentation {
   actionTokenGeneratedByUserLifespan?: number;
   adminEventsDetailsEnabled?: boolean;
   adminEventsEnabled?: boolean;
+  adminPermissionsClient?: ClientRepresentation;
+  adminPermissionsEnabled?: boolean;
   adminTheme?: string;
   attributes?: Record<string, any>;
   // AuthenticationFlowRepresentation
@@ -61,6 +63,7 @@ export default interface RealmRepresentation {
   eventsExpiration?: number;
   eventsListeners?: string[];
   failureFactor?: number;
+  maxSecondaryAuthFailures?: number;
   federatedUsers?: UserRepresentation[];
   groups?: GroupRepresentation[];
   id?: string;
@@ -74,6 +77,7 @@ export default interface RealmRepresentation {
   maxDeltaTimeSeconds?: number;
   maxFailureWaitSeconds?: number;
   maxTemporaryLockouts?: number;
+  bruteForceStrategy?: "MULTIPLE" | "LINEAR";
   minimumQuickLoginWaitSeconds?: number;
   notBefore?: number;
   oauth2DeviceCodeLifespan?: number;
@@ -82,6 +86,7 @@ export default interface RealmRepresentation {
   offlineSessionMaxLifespan?: number;
   offlineSessionMaxLifespanEnabled?: boolean;
   organizationsEnabled?: boolean;
+  verifiableCredentialsEnabled?: boolean;
   otpPolicyAlgorithm?: string;
   otpPolicyDigits?: number;
   otpPolicyInitialCounter?: number;
@@ -116,6 +121,8 @@ export default interface RealmRepresentation {
   ssoSessionMaxLifespanRememberMe?: number;
   clientSessionIdleTimeout?: number;
   clientSessionMaxLifespan?: number;
+  clientOfflineSessionIdleTimeout?: number;
+  clientOfflineSessionMaxLifespan?: number;
   supportedLocales?: string[];
   // UserFederationMapperRepresentation
   userFederationMappers?: any[];
@@ -125,6 +132,8 @@ export default interface RealmRepresentation {
   users?: UserRepresentation[];
   verifyEmail?: boolean;
   waitIncrementSeconds?: number;
+  webAuthnPolicyPasswordlessPasskeysEnabled?: boolean;
+  scimApiEnabled?: boolean;
 }
 
 export type PartialImportRealmRepresentation = RealmRepresentation & {

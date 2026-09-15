@@ -1,28 +1,29 @@
 package org.keycloak.testsuite.broker;
 
-import org.apache.http.client.utils.URIBuilder;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.testsuite.pages.PageUtils;
+
+import org.apache.http.client.utils.URIBuilder;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedCondition;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
-import java.io.UnsupportedEncodingException;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.time.Duration;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_PROVIDER_ID;
 import static org.keycloak.testsuite.util.ServerURLs.AUTH_SERVER_HOST2;
-import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
 import static org.keycloak.testsuite.util.ServerURLs.getAuthServerContextRoot;
+import static org.keycloak.testsuite.util.WaitUtils.waitForPageToLoad;
 
 /**
  *
@@ -101,14 +102,7 @@ public class BrokerTestTools {
     }
 
     public static String encodeUrl(String url) {
-        String result;
-        try {
-            result = URLEncoder.encode(url, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            result = url;
-        }
-
-        return result;
+        return URLEncoder.encode(url, StandardCharsets.UTF_8);
     }
 
     /**

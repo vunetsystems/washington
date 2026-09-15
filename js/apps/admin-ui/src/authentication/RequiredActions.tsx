@@ -20,7 +20,7 @@ type DataType = RequiredActionProviderRepresentation &
   };
 
 type Row = {
-  name: string;
+  name?: string;
   enabled: boolean;
   defaultAction: boolean;
   data: DataType;
@@ -160,7 +160,7 @@ export const RequiredActions = () => {
           if (!dragged.alias) return;
 
           const times = newIndex - oldIndex;
-          executeMove(dragged, times);
+          await executeMove(dragged, times);
         }}
         columns={[
           {
@@ -173,14 +173,14 @@ export const RequiredActions = () => {
             displayKey: "enabled",
             cellRenderer: (row) => (
               <Switch
-                id={`enable-${toKey(row.name)}`}
+                id={`enable-${toKey(row.name || "")}`}
                 label={t("on")}
                 labelOff={t("off")}
                 isChecked={row.enabled}
-                onChange={() => {
-                  updateAction(row.data, "enabled");
+                onChange={async () => {
+                  await updateAction(row.data, "enabled");
                 }}
-                aria-label={toKey(row.name)}
+                aria-label={row.name}
               />
             ),
             width: 20,
@@ -191,15 +191,15 @@ export const RequiredActions = () => {
             thTooltipText: "authDefaultActionTooltip",
             cellRenderer: (row) => (
               <Switch
-                id={`default-${toKey(row.name)}`}
+                id={`default-${toKey(row.name || "")}`}
                 label={t("on")}
                 isDisabled={!row.enabled}
                 labelOff={!row.enabled ? t("disabledOff") : t("off")}
                 isChecked={row.defaultAction}
-                onChange={() => {
-                  updateAction(row.data, "defaultAction");
+                onChange={async () => {
+                  await updateAction(row.data, "defaultAction");
                 }}
-                aria-label={toKey(row.name)}
+                aria-label={row.name}
               />
             ),
             width: 20,

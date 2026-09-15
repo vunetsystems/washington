@@ -21,10 +21,22 @@ import java.io.Serializable;
 
 /**
  * Model implementation of an organization internet domain.
+ * 
+ * <p>Supports pattern-based domain matching:
+ * <ul>
+ *   <li><code>example.com</code> - exact match only</li>
+ *   <li><code>*.example.com</code> - matches example.com and all subdomains</li>
+ * </ul>
  *
  * @author <a href="mailto:sguilhen@redhat.com">Stefan Guilhen</a>
  */
 public class OrganizationDomainModel implements Serializable {
+
+    /**
+     * Value used to link an identity provider with all domains from the organization. If the user's email domain matches
+     * any of the organization domains, automatic redirection to the identity will be performed.
+     */
+    public static final String ANY_DOMAIN = "ANY";
 
     private final String name;
     private final boolean verified;

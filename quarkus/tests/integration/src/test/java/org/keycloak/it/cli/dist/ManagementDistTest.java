@@ -16,18 +16,21 @@
  */
 package org.keycloak.it.cli.dist;
 
+import java.io.IOException;
+
+import org.keycloak.it.junit5.extension.CLIResult;
+import org.keycloak.it.junit5.extension.DistributionTest;
+import org.keycloak.it.junit5.extension.DistributionType;
+import org.keycloak.it.junit5.extension.KeycloakRunner;
+import org.keycloak.it.junit5.extension.StopServer.Mode;
+
 import io.quarkus.test.junit.main.Launch;
 import io.quarkus.test.junit.main.LaunchResult;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.keycloak.it.junit5.extension.CLIResult;
-import org.keycloak.it.junit5.extension.DistributionTest;
-import org.keycloak.it.junit5.extension.DistributionType;
-import org.keycloak.it.utils.KeycloakDistribution;
-
-import java.io.IOException;
 
 import static io.restassured.RestAssured.given;
 import static io.restassured.RestAssured.when;
@@ -35,11 +38,12 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@DistributionTest(keepAlive = true,
-        defaultOptions = {"--health-enabled=true", "--metrics-enabled=true"},
+@DistributionTest(stopServer = Mode.MANUAL,
+        defaultOptions = {"--db=dev-file", "--health-enabled=true", "--metrics-enabled=true"},
         requestPort = 9000,
         containerExposedPorts = {9000, 8080, 9005})
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Tag(DistributionTest.SLOW)
 public class ManagementDistTest {
 
     @Test
@@ -48,20 +52,20 @@ public class ManagementDistTest {
     void testManagementNoHttps(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
         cliResult.assertNoMessage("Management interface listening on");
-        cliResult.assertError("Key material not provided to setup HTTPS. Please configure your keys/certificates or start the server in development mode.");
+        cliResult.assertError("Key material not provided to setup HTTPS.");
     }
 
     @Test
     @Order(2)
     @Launch({"start-dev", "--legacy-observability-interface=true"})
-    void testManagementDisabled(LaunchResult result, KeycloakDistribution distribution) {
+    void testManagementDisabled(LaunchResult result, KeycloakRunner runner) {
         CLIResult cliResult = (CLIResult) result;
         cliResult.assertNoMessage("Management interface listening on");
 
         assertThrows(IOException.class, () -> when().get("/"), "Connection refused must be thrown");
         assertThrows(IOException.class, () -> when().get("/health"), "Connection refused must be thrown");
 
-        distribution.setRequestPort(8080);
+        runner.setRequestPort(8080);
 
         when().get("/health").then()
                 .statusCode(200);
@@ -77,7 +81,9 @@ public class ManagementDistTest {
         when().get("/").then()
                 .statusCode(200)
                 .and()
-                .body(is("Keycloak Management Interface"));
+                .body(containsString("Keycloak Management Interface"),
+                        containsString("/health</a> - Health endpoint"),
+                        containsString("/metrics</a> - Metrics endpoint"));
         when().get("/health").then()
                 .statusCode(200);
         when().get("/health/live").then()
@@ -89,17 +95,46 @@ public class ManagementDistTest {
     }
 
     @Test
-    @Launch({"start-dev", "--http-management-port=9005"})
-    void testManagementDifferentPort(LaunchResult result, KeycloakDistribution distribution) {
+    @Launch({"start-dev", "--features=openapi,client-admin-api:v2", "--openapi-enabled=true", "--openapi-ui-enabled=true"})
+    void testManagementMultipleEndpoints(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertMessage("Management interface listening on http://0.0.0.0:9005");
-
-        distribution.setRequestPort(9005);
+        cliResult.assertMessage("Management interface listening on http://0.0.0.0:9000");
 
         when().get("/").then()
                 .statusCode(200)
                 .and()
-                .body(is("Keycloak Management Interface"));
+                .body(containsString("Keycloak Management Interface"),
+                        containsString("/health</a> - Health endpoint"),
+                        containsString("/metrics</a> - Metrics endpoint"),
+                        containsString("/openapi</a> - OpenAPI specification"),
+                        containsString("/openapi/ui</a> - OpenAPI UI specification (Swagger)")
+                );
+        when().get("/health").then()
+                .statusCode(200);
+        when().get("/health/live").then()
+                .statusCode(200);
+        when().get("/health/ready").then()
+                .statusCode(200);
+        when().get("/metrics").then()
+                .statusCode(200);
+        when().get("/openapi.json").then()
+                .statusCode(200);
+        when().get("/openapi/ui").then()
+                .statusCode(200);
+    }
+
+    @Test
+    @Launch({"start-dev", "--http-management-port=9005"})
+    void testManagementDifferentPort(LaunchResult result, KeycloakRunner runner) {
+        CLIResult cliResult = (CLIResult) result;
+        cliResult.assertMessage("Management interface listening on http://0.0.0.0:9005");
+
+        runner.setRequestPort(9005);
+
+        when().get("/").then()
+                .statusCode(200)
+                .and()
+                .body(containsString("Keycloak Management Interface"));
         when().get("/health").then()
                 .statusCode(200);
         when().get("/health/live").then()
@@ -124,10 +159,10 @@ public class ManagementDistTest {
 
     @Test
     @Launch({"start-dev", "--http-relative-path=/auth", "--http-management-relative-path=/management"})
-    void testManagementRootRedirects(LaunchResult result, KeycloakDistribution distribution) {
+    void testManagementRootRedirects(LaunchResult result, KeycloakRunner runner) {
         assertRelativePath(result, "/management");
 
-        distribution.setRequestPort(8080);
+        runner.setRequestPort(8080);
 
         given().redirects().follow(false).when().get("/").then().statusCode(302).header("Location", is("/auth"));
         when().get("/").then().statusCode(200).body(containsString("Welcome to Keycloak"));
@@ -145,11 +180,11 @@ public class ManagementDistTest {
         when().get("/").then()
                 .statusCode(200)
                 .and()
-                .body(is("Keycloak Management Interface"));
+                .body(containsString("Keycloak Management Interface"));
         when().get(relativePath).then()
                 .statusCode(200)
                 .and()
-                .body(is("Keycloak Management Interface"));
+                .body(containsString("Keycloak Management Interface"));
         when().get(relativePath + "/health").then()
                 .statusCode(200);
         when().get("/health").then()
@@ -171,12 +206,14 @@ public class ManagementDistTest {
         cliResult.assertMessage("Management interface listening on http://localhost:9000");
 
         // If running in container, we cannot access the localhost due to network host settings
-        if (DistributionType.isContainerDist()) return;
+        if (DistributionType.isContainerDist()) {
+            return;
+        }
 
         when().get("/").then()
                 .statusCode(200)
                 .and()
-                .body(is("Keycloak Management Interface"));
+                .body(containsString("Keycloak Management Interface"));
         when().get("/health").then()
                 .statusCode(200);
         when().get("/health/live").then()

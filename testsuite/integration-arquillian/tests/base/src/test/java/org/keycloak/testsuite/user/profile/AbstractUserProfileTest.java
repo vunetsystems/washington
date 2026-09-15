@@ -33,12 +33,12 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.representations.userprofile.config.UPAttribute;
+import org.keycloak.representations.userprofile.config.UPConfig;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.sessions.RootAuthenticationSessionModel;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.userprofile.UserProfileProvider;
-import org.keycloak.representations.userprofile.config.UPAttribute;
-import org.keycloak.representations.userprofile.config.UPConfig;
 import org.keycloak.userprofile.config.UPConfigUtils;
 import org.keycloak.util.JsonSerialization;
 
@@ -58,7 +58,9 @@ public abstract class AbstractUserProfileTest extends AbstractTestRealmKeycloakT
     protected static void configureAuthenticationSession(KeycloakSession session, String clientId, Set<String> requestedScopes) {
         RealmModel realm = session.getContext().getRealm();
 
-        session.getContext().setAuthenticationSession(createAuthenticationSession(realm.getClientByClientId(clientId), requestedScopes));
+        ClientModel client = realm.getClientByClientId(clientId);
+        session.getContext().setAuthenticationSession(createAuthenticationSession(client, requestedScopes));
+        session.getContext().setClient(client);
     }
 
     protected static Optional<ComponentModel> setAndGetDefaultConfiguration(KeycloakSession session) {

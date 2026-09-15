@@ -16,38 +16,8 @@
  */
 package org.keycloak.services.resources.admin;
 
-import org.eclipse.microprofile.openapi.annotations.Operation;
-import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
-import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
-import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
-import org.eclipse.microprofile.openapi.annotations.tags.Tag;
-import org.jboss.logging.Logger;
-import org.jboss.resteasy.reactive.NoCache;
-import org.keycloak.authorization.admin.AuthorizationService;
-import org.keycloak.client.clienttype.ClientTypeException;
-import org.keycloak.common.Profile;
-import org.keycloak.events.Errors;
-import org.keycloak.events.admin.OperationType;
-import org.keycloak.events.admin.ResourceType;
-import org.keycloak.models.ClientModel;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.ModelDuplicateException;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel;
-import org.keycloak.models.utils.ModelToRepresentation;
-import org.keycloak.representations.idm.ClientRepresentation;
-import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
-import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.ErrorResponseException;
-import org.keycloak.services.clientpolicy.ClientPolicyException;
-import org.keycloak.services.clientpolicy.context.AdminClientRegisterContext;
-import org.keycloak.services.clientpolicy.context.AdminClientRegisteredContext;
-import org.keycloak.services.managers.ClientManager;
-import org.keycloak.services.managers.RealmManager;
-import org.keycloak.services.resources.KeycloakOpenAPI;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
-import org.keycloak.utils.SearchQueryUtils;
-import org.keycloak.validation.ValidationUtil;
+import java.util.Map;
+import java.util.stream.Stream;
 
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DefaultValue;
@@ -61,10 +31,46 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import java.util.Map;
-import java.util.stream.Stream;
+
+import org.keycloak.authorization.admin.AuthorizationService;
+import org.keycloak.authorization.fgap.AdminPermissionsSchema;
+import org.keycloak.client.clienttype.ClientTypeException;
+import org.keycloak.common.Profile;
+import org.keycloak.events.Errors;
+import org.keycloak.events.admin.OperationType;
+import org.keycloak.events.admin.ResourceType;
+import org.keycloak.models.ClientModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ModelDuplicateException;
+import org.keycloak.models.ModelException;
+import org.keycloak.models.ModelValidationException;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.utils.ModelToRepresentation;
+import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
+import org.keycloak.services.ErrorResponse;
+import org.keycloak.services.ErrorResponseException;
+import org.keycloak.services.clientpolicy.ClientPolicyException;
+import org.keycloak.services.clientpolicy.context.AdminClientRegisterContext;
+import org.keycloak.services.clientpolicy.context.AdminClientRegisteredContext;
+import org.keycloak.services.managers.ClientManager;
+import org.keycloak.services.managers.RealmManager;
+import org.keycloak.services.resources.KeycloakOpenAPI;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
+import org.keycloak.utils.SearchQueryUtils;
+import org.keycloak.validation.ValidationUtil;
+
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.NoCache;
 
 import static java.lang.Boolean.TRUE;
+
 import static org.keycloak.utils.StreamsUtil.paginatedStream;
 
 /**
@@ -116,46 +122,54 @@ public class ClientsResource {
                                                  @QueryParam("q") String searchQuery,
                                                  @Parameter(description = "the first result") @QueryParam("first") Integer firstResult,
                                                  @Parameter(description = "the max results to return") @QueryParam("max") Integer maxResults) {
-        auth.clients().requireList();
-
-        boolean canView = auth.clients().canView();
-        Stream<ClientModel> clientModels = Stream.empty();
-
-        if (searchQuery != null) {
-            Map<String, String> attributes = SearchQueryUtils.getFields(searchQuery);
-            clientModels = canView
-                    ? realm.searchClientByAttributes(attributes, firstResult, maxResults)
-                    : realm.searchClientByAttributes(attributes, -1, -1);
-        } else if (clientId == null || clientId.trim().equals("")) {
-            clientModels = canView
-                    ? realm.getClientsStream(firstResult, maxResults)
-                    : realm.getClientsStream();
-        } else if (search) {
-            clientModels = canView
-                    ? realm.searchClientByClientIdStream(clientId, firstResult, maxResults)
-                    : realm.searchClientByClientIdStream(clientId, -1, -1);
-        } else {
-            ClientModel client = realm.getClientByClientId(clientId);
-            if (client != null) {
-                clientModels = Stream.of(client);
-            }
-        }
-
-        Stream<ClientRepresentation> s = ModelToRepresentation.filterValidRepresentations(clientModels,
-                c -> {
-                    ClientRepresentation representation = null;
-                    if (canView || auth.clients().canView(c)) {
-                        representation = ModelToRepresentation.toRepresentation(c, session);
-                        representation.setAccess(auth.clients().getAccess(c));
-                    } else if (!viewableOnly && auth.clients().canView(c)) {
-                        representation = new ClientRepresentation();
-                        representation.setId(c.getId());
-                        representation.setClientId(c.getClientId());
-                        representation.setDescription(c.getDescription());
-                    }
-
+        return ModelToRepresentation.filterValidRepresentations(
+                getClientModels(clientId, viewableOnly, search, searchQuery, firstResult, maxResults), c -> {
+                    ClientRepresentation representation = ModelToRepresentation.toRepresentation(c, session);
+                    representation.setAccess(auth.clients().getAccess(c));
                     return representation;
                 });
+    }
+
+    public Stream<ClientModel> getClientModels(String clientId,
+            boolean viewableOnly,
+            boolean search,
+            String searchQuery,
+            Integer firstResult,
+            Integer maxResults) {
+        auth.clients().requireList();
+
+        boolean canView = AdminPermissionsSchema.SCHEMA.isAdminPermissionsEnabled(realm) || auth.clients().canView();
+        Stream<ClientModel> clientModels = Stream.empty();
+        try {
+            if (searchQuery != null) {
+                Map<String, String> attributes = SearchQueryUtils.getFields(searchQuery);
+                clientModels = canView
+                        ? realm.searchClientByAttributes(attributes, firstResult, maxResults)
+                        : realm.searchClientByAttributes(attributes, -1, -1);
+            } else if (clientId == null || clientId.trim().equals("")) {
+                clientModels = canView
+                        ? realm.getClientsStream(firstResult, maxResults)
+                        : realm.getClientsStream();
+            } else if (search) {
+                clientModels = canView
+                        ? realm.searchClientByClientIdStream(clientId, firstResult, maxResults)
+                        : realm.searchClientByClientIdStream(clientId, -1, -1);
+            } else {
+                ClientModel client = realm.getClientByClientId(clientId);
+                if (client != null) {
+                    if (AdminPermissionsSchema.SCHEMA.isAdminPermissionsEnabled(realm)) {
+                        clientModels = Stream.of(client).filter(auth.clients()::canView);
+                    } else {
+                        clientModels = Stream.of(client);
+                    }
+                }
+            }
+        }
+        catch (ModelException e) {
+            throw new ErrorResponseException(Errors.INVALID_REQUEST, e.getMessage(), Response.Status.BAD_REQUEST);
+        }
+
+        Stream<ClientModel> s = clientModels.filter(m -> canView || auth.clients().canView(m));
 
         if (!canView) {
             s = paginatedStream(s, firstResult, maxResults);
@@ -180,8 +194,16 @@ public class ClientsResource {
     @Consumes(MediaType.APPLICATION_JSON)
     @Tag(name = KeycloakOpenAPI.Admin.Tags.CLIENTS)
     @Operation( summary = "Create a new client Client’s client_id must be unique!")
-    @APIResponse(responseCode = "201", description = "Created")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "201", description = "Created"),
+        @APIResponse(responseCode = "409", description = "Conflict")
+    })
     public Response createClient(final ClientRepresentation rep) {
+        var created = createClientModel(rep);
+        return Response.created(session.getContext().getUri().getAbsolutePathBuilder().path(created.getId()).build()).build();
+    }
+
+    public ClientModel createClientModel(final ClientRepresentation rep) {
         auth.clients().requireManage();
 
         try {
@@ -190,11 +212,7 @@ public class ClientsResource {
             ClientModel clientModel = ClientManager.createClient(session, realm, rep);
 
             if (TRUE.equals(rep.isServiceAccountsEnabled())) {
-                UserModel serviceAccount = session.users().getServiceAccount(clientModel);
-
-                if (serviceAccount == null) {
-                    new ClientManager(new RealmManager(session)).enableServiceAccount(clientModel);
-                }
+                new ClientManager(new RealmManager(session)).enableServiceAccount(clientModel);
             }
 
             adminEvent.operation(OperationType.CREATE).resourcePath(session.getContext().getUri(), clientModel.getId()).representation(rep).success();
@@ -222,11 +240,13 @@ public class ClientsResource {
             session.getContext().setClient(clientModel);
             session.clientPolicy().triggerOnEvent(new AdminClientRegisteredContext(clientModel, auth.adminAuth()));
 
-            return Response.created(session.getContext().getUri().getAbsolutePathBuilder().path(clientModel.getId()).build()).build();
+            return clientModel;
         } catch (ModelDuplicateException e) {
             throw ErrorResponse.exists("Client " + rep.getClientId() + " already exists");
         } catch (ClientPolicyException cpe) {
             throw new ErrorResponseException(cpe.getError(), cpe.getErrorDetail(), Response.Status.BAD_REQUEST);
+        } catch (ModelValidationException e) {
+            throw new ErrorResponseException(Errors.INVALID_INPUT, e.getMessage(), Response.Status.BAD_REQUEST);
         }
         catch (ClientTypeException cte) {
             throw ErrorResponse.error(cte.getMessage(), cte.getParameters(), Response.Status.BAD_REQUEST);

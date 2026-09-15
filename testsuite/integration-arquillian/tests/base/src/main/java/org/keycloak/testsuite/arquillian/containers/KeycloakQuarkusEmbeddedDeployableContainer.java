@@ -1,15 +1,20 @@
 package org.keycloak.testsuite.arquillian.containers;
 
 import java.util.List;
-import org.jboss.arquillian.container.spi.client.container.LifecycleException;
+
 import org.keycloak.Keycloak;
 import org.keycloak.common.Version;
+
+import org.jboss.arquillian.container.spi.client.container.LifecycleException;
+import org.jboss.logging.Logger;
 
 /**
  * @author mhajas
  */
 public class KeycloakQuarkusEmbeddedDeployableContainer extends AbstractQuarkusDeployableContainer {
 
+    private static final Logger log = Logger.getLogger(KeycloakQuarkusEmbeddedDeployableContainer.class);
+    
     private static final String KEYCLOAK_VERSION = Version.VERSION;
 
     private Keycloak keycloak;
@@ -17,7 +22,9 @@ public class KeycloakQuarkusEmbeddedDeployableContainer extends AbstractQuarkusD
     @Override
     public void start() throws LifecycleException {
         try {
-            keycloak = configure().start(getArgs());
+            List<String> args = getArgs();
+            log.debugf("Quarkus process arguments: %s", args);
+            keycloak = configure().start(args);
             waitForReadiness();
         } catch (Exception e) {
             throw new RuntimeException(e);

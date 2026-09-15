@@ -16,8 +16,10 @@
  */
 package org.keycloak.testsuite.authz;
 
-import org.junit.Assert;
-import org.junit.Test;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.AuthorizationProviderFactory;
@@ -40,9 +42,8 @@ import org.keycloak.representations.idm.authorization.PolicyEvaluationResponse;
 import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.representations.idm.authorization.ScopePermissionRepresentation;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import org.junit.Test;
+import org.junit.jupiter.api.Assertions;
 
 import static org.keycloak.testsuite.auth.page.AuthRealm.TEST;
 
@@ -111,6 +112,7 @@ public class PolicyEvaluationCompositeRoleTest extends AbstractAuthzTest {
         String roleValues = "[{\"id\":\"" + role.getId() + "\",\"required\": true}]";
         Map<String, String> config = new HashMap<>();
         config.put("roles", roleValues);
+        config.put("fetchRoles", Boolean.TRUE.toString());
         representation.setConfig(config);
 
         return authz.getStoreFactory().getPolicyStore().create(resourceServer, representation);
@@ -130,7 +132,7 @@ public class PolicyEvaluationCompositeRoleTest extends AbstractAuthzTest {
         request.setClientId(resourceServerId);
         request.addResource("myresource", "myscope");
         PolicyEvaluationResponse result = realm.clients().get(resourceServerId).authorization().policies().evaluate(request);
-        Assert.assertEquals(result.getStatus(), DecisionEffect.PERMIT);
+        Assertions.assertEquals(DecisionEffect.PERMIT, result.getStatus());
     }
 
 

@@ -1,10 +1,6 @@
 import { lazy } from "react";
 import type { IndexRouteObject, RouteObject } from "react-router-dom";
-
-import { environment } from "./environment";
 import { Organizations } from "./organizations/Organizations";
-import { ErrorPage } from "./root/ErrorPage";
-import { Root } from "./root/Root";
 
 const DeviceActivity = lazy(() => import("./account-security/DeviceActivity"));
 const LinkedAccounts = lazy(() => import("./account-security/LinkedAccounts"));
@@ -13,8 +9,10 @@ const Applications = lazy(() => import("./applications/Applications"));
 const Groups = lazy(() => import("./groups/Groups"));
 const PersonalInfo = lazy(() => import("./personal-info/PersonalInfo"));
 const Resources = lazy(() => import("./resources/Resources"));
+const VerifiableCredentials = lazy(
+  () => import("./verifiable-credentials/VerifiableCredentials"),
+);
 const ContentComponent = lazy(() => import("./content/ContentComponent"));
-const Oid4Vci = lazy(() => import("./oid4vci/Oid4Vci"));
 
 export const DeviceActivityRoute: RouteObject = {
   path: "account-security/device-activity",
@@ -29,6 +27,11 @@ export const LinkedAccountsRoute: RouteObject = {
 export const SigningInRoute: RouteObject = {
   path: "account-security/signing-in",
   element: <SigningIn />,
+};
+
+export const VerifiableCredentialsRoute: RouteObject = {
+  path: "verifiable-credentials",
+  element: <VerifiableCredentials />,
 };
 
 export const ApplicationsRoute: RouteObject = {
@@ -58,6 +61,7 @@ export const ContentRoute: RouteObject = {
 export const PersonalInfoRoute: IndexRouteObject = {
   index: true,
   element: <PersonalInfo />,
+  path: "",
 };
 
 export const OrganizationsRoute: RouteObject = {
@@ -65,28 +69,15 @@ export const OrganizationsRoute: RouteObject = {
   element: <Organizations />,
 };
 
-export const Oid4VciRoute: RouteObject = {
-  path: "oid4vci",
-  element: <Oid4Vci />,
-};
-
-export const RootRoute: RouteObject = {
-  path: decodeURIComponent(new URL(environment.baseUrl).pathname),
-  element: <Root />,
-  errorElement: <ErrorPage />,
-  children: [
-    PersonalInfoRoute,
-    DeviceActivityRoute,
-    LinkedAccountsRoute,
-    SigningInRoute,
-    ApplicationsRoute,
-    GroupsRoute,
-    OrganizationsRoute,
-    PersonalInfoRoute,
-    ResourcesRoute,
-    ContentRoute,
-    Oid4VciRoute,
-  ],
-};
-
-export const routes: RouteObject[] = [RootRoute];
+export const routes: RouteObject[] = [
+  PersonalInfoRoute,
+  DeviceActivityRoute,
+  LinkedAccountsRoute,
+  SigningInRoute,
+  VerifiableCredentialsRoute,
+  ApplicationsRoute,
+  GroupsRoute,
+  OrganizationsRoute,
+  ResourcesRoute,
+  ContentRoute,
+];

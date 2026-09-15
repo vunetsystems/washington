@@ -13,7 +13,7 @@ image:images/keycloak-sssd-freeipa-integration-overview.png[]
 
 [NOTE]
 ====
-{project_name} registers groups and roles automatically but does not synchronize them. Any changes made by the {project_name} administrator in {project_name} do not synchronize with SSSD.
+{project_name} registers groups and roles automatically but does not synchronize them. The groups are imported from SSSD the first time the user is accessed and then they are managed entirely inside {project_name}. Any changes made by the administrator in {project_name} do not synchronize with SSSD or vice-versa.
 ====
 
 ==== FreeIPA/IdM server
@@ -156,7 +156,7 @@ ipaapi:x:992:988:IPA Framework User:/:/sbin/nologin
 
 {project_name} uses https://github.com/hypfvieh/dbus-java[DBus-Java] project to communicate at a low level with D-Bus and https://github.com/java-native-access/jna[JNA] to authenticate via Operating System Pluggable Authentication Modules (PAM).
 
-Although now {project_name} contains all the needed libraries to run the `SSSD` provider, JDK version 21 is needed. Therefore the `SSSD` provider will only be displayed when the host configuration is correct and JDK 21 is used to run {project_name}.
+Although now {project_name} contains all the needed libraries to run the `SSSD` provider, JDK version 21 or later is needed. Therefore the `SSSD` provider will only be displayed when the host configuration is correct and JDK 21 or later is used to run {project_name}.
 
 ==== Configuring a federated SSSD store
 

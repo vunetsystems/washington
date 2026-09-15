@@ -111,7 +111,6 @@ export const EventsTab = ({ realm }: EventsTabProps) => {
         },
       );
     }
-    refreshRealm();
 
     try {
       await adminClient.realms.updateConfigEvents(
@@ -133,6 +132,8 @@ export const EventsTab = ({ realm }: EventsTabProps) => {
         error,
       );
     }
+
+    refreshRealm();
   };
 
   const addEventTypes = async (eventTypes: EventType[]) => {
@@ -146,6 +147,15 @@ export const EventsTab = ({ realm }: EventsTabProps) => {
     await save(eventConfig);
     setAddEventType(false);
     refresh();
+  };
+
+  const removeEvents = async (eventTypes: EventType[] = []) => {
+    const values = eventTypes.map((type) => type.id);
+    const enabledEventTypes = events?.enabledEventTypes?.filter(
+      (e) => !values.includes(e),
+    );
+    await addEvents(enabledEventTypes);
+    setEvents({ ...events, enabledEventTypes });
   };
 
   return (
@@ -201,13 +211,8 @@ export const EventsTab = ({ realm }: EventsTabProps) => {
               key={tableKey}
               addTypes={() => setAddEventType(true)}
               eventTypes={events?.enabledEventTypes || []}
-              onDelete={(value) => {
-                const enabledEventTypes = events?.enabledEventTypes?.filter(
-                  (e) => e !== value.id,
-                );
-                addEvents(enabledEventTypes);
-                setEvents({ ...events, enabledEventTypes });
-              }}
+              onDelete={(value) => removeEvents([value])}
+              onDeleteAll={removeEvents}
             />
           </PageSection>
         </Tab>

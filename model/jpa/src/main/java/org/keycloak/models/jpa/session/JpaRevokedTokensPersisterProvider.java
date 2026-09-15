@@ -17,18 +17,19 @@
 
 package org.keycloak.models.jpa.session;
 
+import java.util.stream.Stream;
+
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaDelete;
 import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Root;
+
 import org.keycloak.common.util.Time;
 import org.keycloak.models.jpa.entities.RevokedTokenEntity;
 import org.keycloak.models.session.RevokedToken;
 import org.keycloak.models.session.RevokedTokenPersisterProvider;
-
-import java.util.stream.Stream;
 
 /**
  * @author Alexander Schwartz
@@ -43,9 +44,20 @@ public class JpaRevokedTokensPersisterProvider implements RevokedTokenPersisterP
 
     @Override
     public void revokeToken(String tokenId, long lifetime) {
-        RevokedTokenEntity revokedTokenEntity = new RevokedTokenEntity();
+        RevokedTokenEntity revokedTokenEntity = em.find(RevokedTokenEntity.class, tokenId);
+        long expire = Time.currentTime() + lifetime;
+        if (revokedTokenEntity != null) {
+            // The token has already been revoked.
+            // There shouldn't be much need to update the expiry of the token, let's do it anyway to be on the safe side.
+            if (revokedTokenEntity.getExpire() < expire) {
+                revokedTokenEntity.setExpire(expire);
+            }
+            return;
+        }
+
+        revokedTokenEntity = new RevokedTokenEntity();
         revokedTokenEntity.setId(tokenId);
-        revokedTokenEntity.setExpire(Time.currentTime() + lifetime);
+        revokedTokenEntity.setExpire(expire);
         em.persist(revokedTokenEntity);
     }
 

@@ -17,9 +17,10 @@
 
 package org.keycloak.testsuite.pages;
 
-import org.jboss.arquillian.graphene.page.Page;
 import org.keycloak.testsuite.auth.page.AccountFields;
 import org.keycloak.testsuite.util.UIUtils;
+
+import org.jboss.arquillian.graphene.page.Page;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebElement;
@@ -41,10 +42,10 @@ public class VerifyProfilePage extends AbstractPage {
 
     @FindBy(name = "email")
     private WebElement emailInput;
-    
+
     @FindBy(name = "department")
     private WebElement departmentInput;
-    
+
 
     @FindBy(css = "input[type=\"submit\"]")
     private WebElement submitButton;
@@ -64,9 +65,9 @@ public class VerifyProfilePage extends AbstractPage {
             lastNameInput.sendKeys(lastName);
         }
 
-        submitButton.click();
+        UIUtils.clickLink(submitButton);
     }
-    
+
     public void update(String firstName, String lastName, String department) {
         departmentInput.clear();
         if (department != null) {
@@ -93,7 +94,7 @@ public class VerifyProfilePage extends AbstractPage {
             lastNameInput.sendKeys(lastName);
         }
 
-        submitButton.click();
+        UIUtils.clickLink(submitButton);
     }
 
     public String getAlertError() {
@@ -103,9 +104,9 @@ public class VerifyProfilePage extends AbstractPage {
             return null;
         }
     }
-    
+
     public String getLabelForField(String fieldId) {
-        return driver.findElement(By.cssSelector("label[for="+fieldId+"]")).getText();
+        return driver.findElement(By.cssSelector("label[for="+fieldId+"]")).getText().replaceAll("\\s\\*$", "");
     }
 
     public String getFirstName() {
@@ -167,11 +168,6 @@ public class VerifyProfilePage extends AbstractPage {
 
     public AccountFields.AccountErrors getInputAccountErrors(){
         return accountErrors;
-    }
-
-    @Override
-    public void open() {
-        throw new UnsupportedOperationException();
     }
 
 }

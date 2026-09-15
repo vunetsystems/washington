@@ -17,20 +17,13 @@
 
 package org.keycloak.storage.ldap.idm.store.ldap;
 
-import org.jboss.logging.Logger;
-import org.keycloak.common.util.Time;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.LDAPConstants;
-import org.keycloak.models.ModelException;
-import org.keycloak.storage.ldap.LDAPConfig;
-import org.keycloak.storage.ldap.idm.model.LDAPDn;
-import org.keycloak.storage.ldap.idm.query.Condition;
-import org.keycloak.storage.ldap.idm.query.internal.LDAPQuery;
-import org.keycloak.storage.ldap.idm.query.internal.LDAPQueryConditionsBuilder;
-import org.keycloak.storage.ldap.idm.store.ldap.extended.PasswordModifyRequest;
-import org.keycloak.storage.ldap.mappers.LDAPOperationDecorator;
-import org.keycloak.truststore.TruststoreProvider;
-
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.List;
+import java.util.Set;
 import javax.naming.AuthenticationException;
 import javax.naming.Binding;
 import javax.naming.Context;
@@ -43,6 +36,7 @@ import javax.naming.directory.DirContext;
 import javax.naming.directory.ModificationItem;
 import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
+import javax.naming.ldap.BasicControl;
 import javax.naming.ldap.Control;
 import javax.naming.ldap.InitialLdapContext;
 import javax.naming.ldap.LdapContext;
@@ -52,13 +46,24 @@ import javax.naming.ldap.PagedResultsResponseControl;
 import javax.naming.ldap.StartTlsResponse;
 import javax.net.ssl.SSLSocketFactory;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Hashtable;
-import java.util.List;
-import java.util.Set;
+import org.keycloak.common.util.Time;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.LDAPConstants;
+import org.keycloak.models.ModelException;
+import org.keycloak.storage.ldap.LDAPConfig;
+import org.keycloak.storage.ldap.idm.model.LDAPDn;
+import org.keycloak.storage.ldap.idm.query.Condition;
+import org.keycloak.storage.ldap.idm.query.internal.LDAPQuery;
+import org.keycloak.storage.ldap.idm.query.internal.LDAPQueryConditionsBuilder;
+import org.keycloak.storage.ldap.idm.store.ldap.control.PasswordPolicyControl;
+import org.keycloak.storage.ldap.idm.store.ldap.control.PasswordPolicyControlFactory;
+import org.keycloak.storage.ldap.idm.store.ldap.control.PasswordPolicyPasswordChangeException;
+import org.keycloak.storage.ldap.idm.store.ldap.extended.PasswordModifyRequest;
+import org.keycloak.storage.ldap.mappers.LDAPOperationDecorator;
+import org.keycloak.tracing.TracingProvider;
+import org.keycloak.truststore.TruststoreProvider;
+
+import org.jboss.logging.Logger;
 
 /**
  * <p>This class provides a set of operations to manage LDAP trees.</p>
@@ -487,19 +492,23 @@ public class LDAPOperationManager {
         LdapContext authCtx = null;
         StartTlsResponse tlsResponse = null;
 
+        var tracing = session.getProvider(TracingProvider.class);
+        tracing.startSpan(LDAPOperationManager.class, "authenticate");
+
         try {
             Hashtable<Object, Object> env = LDAPContextManager.getNonAuthConnectionProperties(config);
 
             // Never use connection pool to prevent password caching
             env.put("com.sun.jndi.ldap.connect.pool", "false");
 
-            if(!this.config.isStartTls()) {
-                env.put(Context.SECURITY_AUTHENTICATION, "simple");
-                env.put(Context.SECURITY_PRINCIPAL, dn.toString());
-                env.put(Context.SECURITY_CREDENTIALS, password);
-            }
+            // Prepare to receive password policy response control.
+            env.put(LdapContext.CONTROL_FACTORIES, PasswordPolicyControlFactory.class.getName());
 
+            // Create connection but avoid triggering automatic bind request by not setting security principal and credentials yet.
+            // That allows us to send optional StartTLS request before binding.
             authCtx = new InitialLdapContext(env, null);
+
+            // Send StartTLS request and setup SSL context if needed.
             if (config.isStartTls()) {
                 SSLSocketFactory sslSocketFactory = null;
                 if (LDAPUtil.shouldUseTruststoreSpi(config)) {
@@ -507,28 +516,51 @@ public class LDAPOperationManager {
                     sslSocketFactory = provider.getSSLSocketFactory();
                 }
 
-                tlsResponse = LDAPContextManager.startTLS(authCtx, "simple", dn.toString(), password, sslSocketFactory);
+                tlsResponse = LDAPContextManager.startTLS(authCtx, sslSocketFactory);
 
                 // Exception should be already thrown by LDAPContextManager.startTLS if "startTLS" could not be established, but rather do some additional check
                 if (tlsResponse == null) {
                     throw new AuthenticationException("Null TLS Response returned from the authentication");
                 }
             }
+
+            // Configure given credentials.
+            authCtx.addToEnvironment(Context.SECURITY_AUTHENTICATION, "simple");
+            authCtx.addToEnvironment(Context.SECURITY_PRINCIPAL, dn.toString());
+            authCtx.addToEnvironment(Context.SECURITY_CREDENTIALS, password);
+
+            // Send bind request. Throws AuthenticationException when authentication fails.
+            authCtx.reconnect(getControls());
+
+            // Check for password policy response control in the response.
+            // If present and forced password change is required, throw an exception.
+            Control[] responseControls = authCtx.getResponseControls();
+            if (responseControls != null) {
+                for (Control control : responseControls) {
+                    if (control instanceof PasswordPolicyControl) {
+                        PasswordPolicyControl response = (PasswordPolicyControl) control;
+                        if (response.changeAfterReset()) {
+                            throw new PasswordPolicyPasswordChangeException();
+                        }
+                    }
+                }
+            }
+
         } catch (AuthenticationException ae) {
             if (logger.isDebugEnabled()) {
                 logger.debugf(ae, "Authentication failed for DN [%s]", dn);
             }
-
+            tracing.error(ae);
             throw ae;
         } catch(RuntimeException re){
             if (logger.isDebugEnabled()) {
                 logger.debugf(re, "LDAP Connection TimeOut for DN [%s]", dn);
             }
-            
+            tracing.error(re);
             throw re;
-
         } catch (Exception e) {
             logger.errorf(e, "Unexpected exception when validating password of DN [%s]", dn);
+            tracing.error(e);
             throw new AuthenticationException("Unexpected exception when validating password of user");
         } finally {
             if (tlsResponse != null) {
@@ -546,6 +578,7 @@ public class LDAPOperationManager {
                     e.printStackTrace();
                 }
             }
+            tracing.endSpan();
         }
     }
 
@@ -655,6 +688,14 @@ public class LDAPOperationManager {
         }
     }
 
+    private Control[] getControls() {
+        // If enabled, send a passwordPolicyRequest control as non-critical.
+        if (config.isEnableLdapPasswordPolicy()) {
+            return new Control[] { new BasicControl(PasswordPolicyControl.OID, false, null) };
+        }
+        return null;
+    }
+
     private String getUuidAttributeName() {
         return this.config.getUuidLDAPAttributeName();
     }
@@ -721,13 +762,25 @@ public class LDAPOperationManager {
             start = Time.currentTimeMillis();
         }
 
+        var tracing = session.getProvider(TracingProvider.class);
+        var span = tracing.startSpan(LDAPOperationManager.class, "execute");
+
         try {
+            if (span.isRecording()) {
+                span.setAttribute(Context.PROVIDER_URL, context.getEnvironment().get(Context.PROVIDER_URL).toString());
+                span.setAttribute("operation", operation.toString());
+            }
+
             if (decorator != null) {
                 decorator.beforeLDAPOperation(context, operation);
             }
 
             return operation.execute(context);
+        } catch (NamingException e) {
+            tracing.error(e);
+            throw e;
         } finally {
+            tracing.endSpan();
             if (perfLogger.isDebugEnabled()) {
                 long took = Time.currentTimeMillis() - start;
 

@@ -17,6 +17,18 @@
 
 package org.keycloak.operator.testsuite.integration;
 
+import java.util.Map;
+
+import org.keycloak.operator.Constants;
+import org.keycloak.operator.controllers.KeycloakController;
+import org.keycloak.operator.controllers.KeycloakIngressDependentResource;
+import org.keycloak.operator.crds.v2beta1.deployment.Keycloak;
+import org.keycloak.operator.crds.v2beta1.deployment.spec.HostnameSpecBuilder;
+import org.keycloak.operator.crds.v2beta1.deployment.spec.IngressSpec;
+import org.keycloak.operator.crds.v2beta1.deployment.spec.IngressSpecBuilder;
+import org.keycloak.operator.testsuite.apiserver.DisabledIfApiServerTest;
+import org.keycloak.operator.testsuite.utils.K8sUtils;
+
 import io.fabric8.kubernetes.api.model.networking.v1.Ingress;
 import io.fabric8.kubernetes.api.model.networking.v1.IngressBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.ServiceBackendPortBuilder;
@@ -24,21 +36,14 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import io.quarkus.logging.Log;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
-
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
-import org.keycloak.operator.Constants;
-import org.keycloak.operator.controllers.KeycloakController;
-import org.keycloak.operator.controllers.KeycloakIngressDependentResource;
-import org.keycloak.operator.crds.v2alpha1.deployment.Keycloak;
-import org.keycloak.operator.crds.v2alpha1.deployment.spec.HostnameSpecBuilder;
-import org.keycloak.operator.crds.v2alpha1.deployment.spec.IngressSpec;
-import org.keycloak.operator.crds.v2alpha1.deployment.spec.IngressSpecBuilder;
-import org.keycloak.operator.testsuite.utils.K8sUtils;
-
-import java.util.Map;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
+
+import static org.keycloak.operator.testsuite.utils.K8sUtils.disableHttps;
+import static org.keycloak.operator.testsuite.utils.K8sUtils.enableHttp;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,11 +51,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 @QuarkusTest
 public class KeycloakIngressTest extends BaseOperatorTest {
 
+    @DisabledIfApiServerTest
     @Test
     public void testIngressOnHTTP() {
         var kc = getTestKeycloakDeployment(false);
-        kc.getSpec().getHttpSpec().setTlsSecret(null);
-        kc.getSpec().getHttpSpec().setHttpEnabled(true);
+        disableHttps(kc);
+        enableHttp(kc, false);
         var hostnameSpecBuilder = new HostnameSpecBuilder()
                 .withStrict(false)
                 .withStrictBackchannel(false);
@@ -74,6 +80,7 @@ public class KeycloakIngressTest extends BaseOperatorTest {
         testIngressURLs(baseUrl);
     }
 
+    @DisabledIfApiServerTest
     @Test
     public void testIngressOnHTTPSAndProxySettings() {
         var kc = getTestKeycloakDeployment(false);
@@ -102,6 +109,37 @@ public class KeycloakIngressTest extends BaseOperatorTest {
         assertThat(envVars)
                 .noneMatch(e -> "KC_PROXY".equals(e.getName()))
                 .anyMatch(e -> "KC_PROXY_HEADERS".equals(e.getName()) && "xforwarded".equals(e.getValue()));
+    }
+
+    @DisabledIfApiServerTest
+    @Test
+    public void testIngressTLSTermination() {
+        var kc = getTestKeycloakDeployment(false);
+        var hostnameSpecBuilder = new HostnameSpecBuilder()
+                .withStrict(false)
+                .withStrictBackchannel(false);
+        IngressSpec ingressSpec = new IngressSpec();
+        ingressSpec.setIngressEnabled(true);
+        kc.getSpec().setIngressSpec(ingressSpec);
+        if (isOpenShift) {
+            ingressSpec.setIngressClassName(KeycloakController.OPENSHIFT_DEFAULT);
+        }
+        kc.getSpec().setHostnameSpec(hostnameSpecBuilder.build());
+        String secret = kc.getSpec().getHttpSpec().getTlsSecret();
+        kc.getSpec().getHttpSpec().setHttpEnabled(true);
+        kc.getSpec().getHttpSpec().setTlsSecret(null);
+        ingressSpec.setTlsSecret(secret);
+
+        K8sUtils.deployKeycloak(k8sclient, kc, true);
+
+        String testHostname;
+        if (isOpenShift) {
+            testHostname = k8sclient.resource(kc).get().getSpec().getHostnameSpec().getHostname();
+        } else {
+            testHostname = kubernetesIp;
+        }
+
+        testIngressURLs("https://" + testHostname + ":443");
     }
 
     private void testIngressURLs(String baseUrl) {
@@ -214,9 +252,7 @@ public class KeycloakIngressTest extends BaseOperatorTest {
         K8sUtils.deployKeycloak(k8sclient, kc, true);
 
         Awaitility.await()
-                .untilAsserted(() -> {
-                    assertThat(k8sclient.network().v1().ingresses().inNamespace(namespace).list().getItems().size()).isEqualTo(0);
-                });
+                .untilAsserted(() -> assertThat(k8sclient.network().v1().ingresses().inNamespace(namespace).list().getItems()).isEmpty());
     }
 
     @Test
@@ -237,9 +273,9 @@ public class KeycloakIngressTest extends BaseOperatorTest {
                     .inNamespace(namespace)
                     .withName(customIngressCreatedManually.getMetadata().getName());
 
-            Awaitility.await().atMost(1, MINUTES).untilAsserted(() -> {
-                assertThat(k8sclient.network().v1().ingresses().inNamespace(namespace).list().getItems().size()).isEqualTo(1);
-            });
+            Awaitility.await()
+                    .atMost(1, MINUTES)
+                    .untilAsserted(() -> assertThat(k8sclient.network().v1().ingresses().inNamespace(namespace).list().getItems().size()).isEqualTo(1));
 
             Log.info("Deploying the Keycloak CR with default Ingress disabled");
             defaultKeycloakDeployment.getSpec().setIngressSpec(new IngressSpec());
@@ -256,9 +292,8 @@ public class KeycloakIngressTest extends BaseOperatorTest {
             Log.info("Destroying the Custom Ingress created manually to avoid errors in others Tests methods");
             if (customIngressDeployedManuallySelector != null && customIngressDeployedManuallySelector.isReady()) {
                 assertThat(customIngressDeployedManuallySelector.delete()).isNotNull();
-                Awaitility.await().untilAsserted(() -> {
-                    assertThat(k8sclient.network().v1().ingresses().inNamespace(namespace).list().getItems().size()).isEqualTo(0);
-                });
+                Awaitility.await()
+                        .untilAsserted(() -> assertThat(k8sclient.network().v1().ingresses().inNamespace(namespace).list().getItems()).isEmpty());
             }
         }
     }

@@ -16,13 +16,9 @@
  */
 package org.keycloak.testsuite.model.events;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.is;
+import java.util.List;
+import java.util.stream.Collectors;
 
-import org.apache.commons.lang3.RandomStringUtils;
-import org.junit.Test;
 import org.keycloak.common.ClientConnection;
 import org.keycloak.events.EventStoreProvider;
 import org.keycloak.events.admin.AdminEvent;
@@ -40,9 +36,13 @@ import org.keycloak.services.resources.admin.AdminEventBuilder;
 import org.keycloak.testsuite.model.KeycloakModelTest;
 import org.keycloak.testsuite.model.RequireProvider;
 
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
+import org.apache.commons.lang3.RandomStringUtils;
+import org.junit.Test;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
 
 @RequireProvider(EventStoreProvider.class)
 public class AdminEventQueryTest extends KeycloakModelTest {
@@ -70,10 +70,10 @@ public class AdminEventQueryTest extends KeycloakModelTest {
     public void testQuery() {
         withRealm(realmId, (session, realm) -> {
             EventStoreProvider eventStore = session.getProvider(EventStoreProvider.class);
-            eventStore.onEvent(createClientEvent(realm, OperationType.CREATE), false);
-            eventStore.onEvent(createClientEvent(realm, OperationType.UPDATE), false);
-            eventStore.onEvent(createClientEvent(realm, OperationType.DELETE), false);
-            eventStore.onEvent(createClientEvent(realm, OperationType.CREATE), false);
+            eventStore.onEvent(createClientEvent(realm, session, OperationType.CREATE), false);
+            eventStore.onEvent(createClientEvent(realm, session, OperationType.UPDATE), false);
+            eventStore.onEvent(createClientEvent(realm, session, OperationType.DELETE), false);
+            eventStore.onEvent(createClientEvent(realm, session, OperationType.CREATE), false);
         return null;
         });
 
@@ -93,9 +93,9 @@ public class AdminEventQueryTest extends KeycloakModelTest {
     public void testQueryOrder() {
         withRealm(realmId, (session, realm) -> {
             EventStoreProvider eventStore = session.getProvider(EventStoreProvider.class);
-            AdminEvent firstEvent = createClientEvent(realm, OperationType.CREATE);
+            AdminEvent firstEvent = createClientEvent(realm, session, OperationType.CREATE);
             firstEvent.setTime(1L);
-            AdminEvent secondEvent = createClientEvent(realm, OperationType.DELETE);
+            AdminEvent secondEvent = createClientEvent(realm, session, OperationType.DELETE);
             secondEvent.setTime(2L);
             eventStore.onEvent(firstEvent, false);
             eventStore.onEvent(secondEvent, false);
@@ -126,7 +126,7 @@ public class AdminEventQueryTest extends KeycloakModelTest {
 
         withRealm(realmId, (session, realm) -> {
 
-            AdminEvent event = createClientEvent(realm, OperationType.CREATE);
+            AdminEvent event = createClientEvent(realm, session, OperationType.CREATE);
             event.setRepresentation(longValue);
 
             session.getProvider(EventStoreProvider.class).onEvent(event, true);
@@ -144,8 +144,8 @@ public class AdminEventQueryTest extends KeycloakModelTest {
         });
     }
 
-    private AdminEvent createClientEvent(RealmModel realm, OperationType operation) {
-        return new AdminEventBuilder(realm, new DummyAuth(realm), null, DummyClientConnection.DUMMY_CONNECTION)
+    private AdminEvent createClientEvent(RealmModel realm, KeycloakSession session, OperationType operation) {
+        return new AdminEventBuilder(realm, new DummyAuth(realm), session, DummyClientConnection.DUMMY_CONNECTION)
                 .resource(ResourceType.CLIENT).operation(operation).getEvent();
     }
 

@@ -4,16 +4,17 @@ import {
 } from "@keycloak/keycloak-ui-shared";
 
 import OrganizationRepresentation from "@keycloak/keycloak-admin-client/lib/defs/organizationRepresentation";
-import { joinPath } from "../utils/joinPath";
 import { parseResponse } from "./parse-response";
 import {
   ClientRepresentation,
   CredentialContainer,
   DeviceRepresentation,
   Group,
+  IssuedUserVerifiableCredentialRepresentation,
   LinkedAccountRepresentation,
   Permission,
   UserRepresentation,
+  UserVerifiableCredentialRepresentation,
 } from "./representations";
 import { request } from "./request";
 
@@ -90,7 +91,9 @@ export async function deleteConsent(
   context: KeycloakContext<BaseEnvironment>,
   id: string,
 ) {
-  return request(`/applications/${id}/consent`, context, { method: "DELETE" });
+  return request(`/applications/${encodeURIComponent(id)}/consent`, context, {
+    method: "DELETE",
+  });
 }
 
 export async function deleteSession(
@@ -109,8 +112,22 @@ export async function getCredentials({ signal, context }: CallOptions) {
   return parseResponse<CredentialContainer[]>(response);
 }
 
-export async function getLinkedAccounts({ signal, context }: CallOptions) {
-  const response = await request("/linked-accounts", context, { signal });
+export type LinkedAccountQueryParams = PaginationParams & {
+  search?: string;
+  linked?: boolean;
+};
+
+export async function getLinkedAccounts(
+  { signal, context }: CallOptions,
+  query: LinkedAccountQueryParams,
+) {
+  const response = await request("/linked-accounts", context, {
+    searchParams: Object.entries(query).reduce(
+      (acc, [key, value]) => ({ ...acc, [key]: value.toString() }),
+      {},
+    ),
+    signal,
+  });
   return parseResponse<LinkedAccountRepresentation[]>(response);
 }
 
@@ -129,28 +146,6 @@ export async function unLinkAccount(
   return parseResponse(response);
 }
 
-export async function linkAccount(
-  context: KeycloakContext<BaseEnvironment>,
-  account: LinkedAccountRepresentation,
-) {
-  const redirectUri = encodeURIComponent(
-    joinPath(
-      context.environment.serverBaseUrl,
-      "realms",
-      context.environment.realm,
-      "account",
-    ),
-  );
-  const response = await request(
-    "/linked-accounts/" + account.providerName,
-    context,
-    {
-      searchParams: { providerId: account.providerName, redirectUri },
-    },
-  );
-  return parseResponse<{ accountLinkUri: string }>(response);
-}
-
 export async function getGroups({ signal, context }: CallOptions) {
   const response = await request("/groups", context, {
     signal,
@@ -161,4 +156,55 @@ export async function getGroups({ signal, context }: CallOptions) {
 export async function getUserOrganizations({ signal, context }: CallOptions) {
   const response = await request("/organizations", context, { signal });
   return parseResponse<OrganizationRepresentation[]>(response);
+}
+
+export async function getVerifiableCredentials({
+  signal,
+  context,
+}: CallOptions): Promise<UserVerifiableCredentialRepresentation[]> {
+  const response = await request("/verifiable-credentials", context, {
+    signal,
+  });
+  return parseResponse<UserVerifiableCredentialRepresentation[]>(response);
+}
+
+export async function deleteVerifiableCredential(
+  context: KeycloakContext<BaseEnvironment>,
+  credentialScopeName: string,
+): Promise<void> {
+  const response = await request(
+    `/verifiable-credentials/${credentialScopeName}`,
+    context,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const error = await parseResponse(response);
+    throw error;
+  }
+}
+
+export async function getIssuedVerifiableCredentials({
+  signal,
+  context,
+}: CallOptions): Promise<IssuedUserVerifiableCredentialRepresentation[]> {
+  const response = await request("/issued-verifiable-credentials", context, {
+    signal,
+  });
+  return parseResponse<IssuedUserVerifiableCredentialRepresentation[]>(
+    response,
+  );
+}
+
+export async function revokeIssuedVerifiableCredential(
+  context: KeycloakContext<BaseEnvironment>,
+  issuedVerifiableCredentialId: string,
+): Promise<void> {
+  const response = await request(
+    `/issued-verifiable-credentials/${issuedVerifiableCredentialId}`,
+    context,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw await parseResponse(response);
+  }
 }

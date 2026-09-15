@@ -1,27 +1,30 @@
 import UserRepresentation from "@keycloak/keycloak-admin-client/lib/defs/userRepresentation";
 import {
-  Button,
-  Dropdown,
-  DropdownItem,
-  DropdownList,
-  MenuToggle,
-  PageSection,
-  ToolbarItem,
-} from "@patternfly/react-core";
+  Action,
+  KeycloakDataTable,
+  ListEmptyState,
+  useAlerts,
+} from "@keycloak/keycloak-ui-shared";
+import { Button, ToolbarItem } from "@patternfly/react-core";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useAdminClient } from "../admin-client";
-import { useAlerts } from "@keycloak/keycloak-ui-shared";
-import { ListEmptyState } from "@keycloak/keycloak-ui-shared";
-import { KeycloakDataTable } from "@keycloak/keycloak-ui-shared";
+import { CheckboxFilterComponent } from "../components/dynamic/CheckboxFilterComponent";
+import { SearchInputComponent } from "../components/dynamic/SearchInputComponent";
 import { useRealm } from "../context/realm-context/RealmContext";
 import { MemberModal } from "../groups/MembersModal";
 import { toUser } from "../user/routes/User";
+import { translationFormatter } from "../utils/translationFormatter";
 import { useParams } from "../utils/useParams";
 import useToggle from "../utils/useToggle";
-import { InviteMemberModal } from "./InviteMemberModal";
 import { EditOrganizationParams } from "./routes/EditOrganization";
+import { MembershipsModal } from "../groups/MembershipsModal";
+import { GroupResourceContext } from "../context/group-resource/GroupResourceContext";
+
+type MembershipTypeRepresentation = UserRepresentation & {
+  membershipType?: string;
+};
 
 const UserDetailLink = (user: any) => {
   const { realm } = useRealm();
@@ -37,19 +40,79 @@ export const Members = () => {
   const { adminClient } = useAdminClient();
   const { id: orgId } = useParams<EditOrganizationParams>();
   const { addAlert, addError } = useAlerts();
-
   const [key, setKey] = useState(0);
   const refresh = () => setKey(key + 1);
-
-  const [open, toggle] = useToggle();
   const [openAddMembers, toggleAddMembers] = useToggle();
-  const [openInviteMembers, toggleInviteMembers] = useToggle();
   const [selectedMembers, setSelectedMembers] = useState<UserRepresentation[]>(
     [],
   );
+  const [searchText, setSearchText] = useState<string>("");
+  const [searchTriggerText, setSearchTriggerText] = useState<string>("");
+  const [filteredMembershipTypes, setFilteredMembershipTypes] = useState<
+    string[]
+  >([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [showMemberships, toggleShowMemberships] = useToggle();
+  const [selectedMember, setSelectedMember] = useState<UserRepresentation>();
 
-  const loader = (first?: number, max?: number, search?: string) =>
-    adminClient.organizations.listMembers({ orgId, first, max, search });
+  const membershipOptions = [
+    { value: "Managed", label: "Managed" },
+    { value: "Unmanaged", label: "Unmanaged" },
+  ];
+
+  const onToggleClick = () => {
+    setIsOpen(!isOpen);
+  };
+
+  const onSelect = (_event: any, value: string) => {
+    if (filteredMembershipTypes.includes(value)) {
+      setFilteredMembershipTypes(
+        filteredMembershipTypes.filter((item) => item !== value),
+      );
+    } else {
+      setFilteredMembershipTypes([...filteredMembershipTypes, value]);
+    }
+    setIsOpen(false);
+    refresh();
+  };
+
+  const loader = async (first?: number, max?: number) => {
+    try {
+      const membershipType =
+        filteredMembershipTypes.length === 1
+          ? filteredMembershipTypes[0]
+          : undefined;
+
+      const memberships: MembershipTypeRepresentation[] =
+        await adminClient.organizations.listMembers({
+          orgId,
+          first,
+          max,
+          search: searchTriggerText,
+          membershipType,
+        });
+
+      return memberships;
+    } catch (error) {
+      addError("organizationsMembersListError", error);
+      return [];
+    }
+  };
+
+  const handleChange = (value: string) => {
+    setSearchText(value);
+  };
+
+  const handleSearch = () => {
+    setSearchTriggerText(searchText);
+    refresh();
+  };
+
+  const clearInput = () => {
+    setSearchText("");
+    setSearchTriggerText("");
+    refresh();
+  };
 
   const removeMember = async (selectedMembers: UserRepresentation[]) => {
     try {
@@ -68,8 +131,9 @@ export const Members = () => {
 
     refresh();
   };
+
   return (
-    <PageSection variant="light">
+    <>
       {openAddMembers && (
         <MemberModal
           membersQuery={() => adminClient.organizations.listMembers({ orgId })}
@@ -79,7 +143,7 @@ export const Members = () => {
                 selectedRows.map((user) =>
                   adminClient.organizations.addMember({
                     orgId,
-                    userId: user.id!,
+                    userId: `"${user.id!}"`,
                   }),
                 ),
               );
@@ -96,53 +160,40 @@ export const Members = () => {
           }}
         />
       )}
-      {openInviteMembers && (
-        <InviteMemberModal orgId={orgId} onClose={toggleInviteMembers} />
+      {showMemberships && (
+        <GroupResourceContext value={adminClient.organizations.groups(orgId)}>
+          <MembershipsModal
+            onClose={() => {
+              toggleShowMemberships();
+            }}
+            user={selectedMember!}
+            orgId={orgId}
+          />
+        </GroupResourceContext>
       )}
       <KeycloakDataTable
         key={key}
         loader={loader}
         isPaginated
         ariaLabelKey="membersList"
-        searchPlaceholderKey="searchMember"
         onSelect={(members) => setSelectedMembers([...members])}
         canSelectAll
         toolbarItem={
           <>
             <ToolbarItem>
-              <Dropdown
-                onOpenChange={toggle}
-                toggle={(ref) => (
-                  <MenuToggle
-                    ref={ref}
-                    onClick={toggle}
-                    isExpanded={open}
-                    variant="primary"
-                  >
-                    {t("addMember")}
-                  </MenuToggle>
-                )}
-                isOpen={open}
-              >
-                <DropdownList>
-                  <DropdownItem
-                    onClick={() => {
-                      toggleAddMembers();
-                      toggle();
-                    }}
-                  >
-                    {t("addRealmUser")}
-                  </DropdownItem>
-                  <DropdownItem
-                    onClick={() => {
-                      toggleInviteMembers();
-                      toggle();
-                    }}
-                  >
-                    {t("inviteMember")}
-                  </DropdownItem>
-                </DropdownList>
-              </Dropdown>
+              <SearchInputComponent
+                value={searchText}
+                onChange={handleChange}
+                onSearch={handleSearch}
+                onClear={clearInput}
+                placeholder={t("searchMembers")}
+                aria-label={t("searchMembers")}
+              />
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button variant="primary" onClick={toggleAddMembers}>
+                {t("addMember")}
+              </Button>
             </ToolbarItem>
             <ToolbarItem>
               <Button
@@ -153,6 +204,18 @@ export const Members = () => {
                 {t("removeMember")}
               </Button>
             </ToolbarItem>
+            <ToolbarItem>
+              <CheckboxFilterComponent
+                filterPlaceholderText={t("filterByMembershipType")}
+                isOpen={isOpen}
+                options={membershipOptions}
+                onOpenChange={(nextOpen) => setIsOpen(nextOpen)}
+                onToggleClick={onToggleClick}
+                onSelect={onSelect}
+                selectedItems={filteredMembershipTypes}
+                width={"260px"}
+              />
+            </ToolbarItem>
           </>
         }
         actions={[
@@ -162,6 +225,13 @@ export const Members = () => {
               await removeMember([member]);
             },
           },
+          {
+            title: t("showGroupMemberships"),
+            onRowClick: (member) => {
+              setSelectedMember(member);
+              toggleShowMemberships();
+            },
+          } as Action<UserRepresentation>,
         ]}
         columns={[
           {
@@ -177,6 +247,10 @@ export const Members = () => {
           {
             name: "lastName",
           },
+          {
+            name: "membershipType",
+            cellFormatters: [translationFormatter(t)],
+          },
         ]}
         emptyState={
           <ListEmptyState
@@ -187,14 +261,13 @@ export const Members = () => {
                 text: t("addRealmUser"),
                 onClick: toggleAddMembers,
               },
-              {
-                text: t("inviteMember"),
-                onClick: toggleInviteMembers,
-              },
             ]}
           />
         }
+        isSearching={
+          filteredMembershipTypes.length > 0 || searchTriggerText.length > 0
+        }
       />
-    </PageSection>
+    </>
   );
 };

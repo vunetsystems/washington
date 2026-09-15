@@ -18,10 +18,11 @@
 
 package org.keycloak.credential;
 
-import org.jboss.logging.Logger;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RequiredActionProviderModel;
+
+import org.jboss.logging.Logger;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -243,6 +244,9 @@ public class CredentialTypeMetadata implements Comparable<CredentialTypeMetadata
             // Assume credential can't have both createAction and updateAction.
             if (instance.createAction != null && instance.updateAction != null) {
                 throw new IllegalStateException("Both createAction and updateAction are not null when building CredentialTypeMetadata for the credential type '" + instance.type);
+            }
+            if (!verifyRequiredAction(session, "delete_credential")) {
+                instance.removeable = false;
             }
 
             return instance;

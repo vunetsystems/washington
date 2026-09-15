@@ -17,10 +17,9 @@
 
 package org.keycloak.quarkus.runtime;
 
-import static org.keycloak.quarkus.runtime.configuration.Configuration.getBuildTimeProperty;
-
 import java.io.File;
 import java.io.FilenameFilter;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
@@ -30,27 +29,28 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.keycloak.common.Profile;
+import org.keycloak.common.util.NetworkUtils;
+import org.keycloak.quarkus.runtime.configuration.Configuration;
+
 import io.quarkus.runtime.LaunchMode;
 import io.smallrye.config.SmallRyeConfig;
 
-import org.apache.commons.lang3.SystemUtils;
-import org.keycloak.common.Profile;
-import org.keycloak.common.profile.PropertiesFileProfileConfigResolver;
-import org.keycloak.common.profile.PropertiesProfileConfigResolver;
-import org.keycloak.quarkus.runtime.cli.command.AbstractCommand;
-import org.keycloak.quarkus.runtime.configuration.PersistedConfigSource;
-
 public final class Environment {
 
-    public static final String NON_SERVER_MODE = "nonserver";
+    public static final String KC_RUN_IN_CONTAINER = "KC_RUN_IN_CONTAINER";
+    public static final String KC_CONFIG_REBUILD_CHECK = "kc.config.rebuild-check";
+    public static final String KC_SCRIPT_PID = "kc.script.pid";
+    public static final String KC_CONFIG_BUILT = "kc.config.built";
+    public static final String KC_HOME_DIR = "kc.home.dir";
     public static final String PROFILE ="kc.profile";
     public static final String ENV_PROFILE ="KC_PROFILE";
     public static final String DATA_PATH = File.separator + "data";
     public static final String DEFAULT_THEMES_PATH = File.separator +  "themes";
     public static final String PROD_PROFILE_VALUE = "prod";
     public static final String LAUNCH_MODE = "kc.launch.mode";
-
-    private static volatile AbstractCommand parsedCommand;
+    public static final String LAUNCH_MODE_EXIT_AFTER_START = "exit_after_start";
+    public static final String LAUNCH_MODE_EXIT_BEFORE_BOOTSTRAP = "exit_before_bootstrap";
 
     private Environment() {}
 
@@ -58,40 +58,24 @@ public final class Environment {
         return Boolean.getBoolean("quarkus.launch.rebuild");
     }
 
-    public static Boolean isRuntimeMode() {
-        return !isRebuild();
+    public static Optional<String> getHomeDir() {
+        return Optional.ofNullable(System.getProperty(KC_HOME_DIR));
     }
 
-    public static String getHomeDir() {
-        return System.getProperty("kc.home.dir");
+    public static Optional<Path> getHomePath() {
+        return getHomeDir().map(Paths::get);
     }
 
-    public static Path getHomePath() {
-        String homeDir = getHomeDir();
-
-        if (homeDir != null) {
-            return Paths.get(homeDir);
-        }
-
-        return null;
+    public static Optional<String> getDataDir() {
+        return getHomeDir().map(p -> p.concat(DATA_PATH));
     }
 
-    public static String getDataDir() {
-        return getHomeDir() + DATA_PATH;
+    public static Optional<String> getDefaultThemeRootDir() {
+        return getHomeDir().map(p -> p.concat(DEFAULT_THEMES_PATH));
     }
 
-    public static String getDefaultThemeRootDir() {
-        return getHomeDir() + DEFAULT_THEMES_PATH;
-    }
-
-    public static Path getProvidersPath() {
-        Path homePath = Environment.getHomePath();
-
-        if (homePath != null) {
-            return homePath.resolve("providers");
-        }
-
-        return null;
+    public static Optional<Path> getProvidersPath() {
+        return Environment.getHomePath().map(p -> p.resolve("providers"));
     }
 
     public static String getCommand() {
@@ -106,47 +90,25 @@ public final class Environment {
         System.setProperty(org.keycloak.common.util.Environment.PROFILE, profile);
         System.setProperty(LaunchMode.current().getProfileKey(), profile);
         System.setProperty(SmallRyeConfig.SMALLRYE_CONFIG_PROFILE, profile);
-        if (isTestLaunchMode()) {
-            System.setProperty("mp.config.profile", profile);
-        }
     }
 
-    public static String getCurrentOrPersistedProfile() {
-        String profile = org.keycloak.common.util.Environment.getProfile();
-        if(profile == null) {
-            profile = PersistedConfigSource.getInstance().getValue(org.keycloak.common.util.Environment.PROFILE);
-        }
-        return profile;
-    }
-
-    public static String getProfileOrDefault(String defaultProfile) {
-        String profile = org.keycloak.common.util.Environment.getProfile();
-
-        if (profile == null) {
-            profile = defaultProfile;
-        }
-
-        return profile;
-    }
-
+    /**
+     * Check if the we're currently in or built as dev mode.
+     */
     public static boolean isDevMode() {
         if (org.keycloak.common.util.Environment.isDevMode()) {
             return true;
         }
 
-        return org.keycloak.common.util.Environment.DEV_PROFILE_VALUE.equals(getBuildTimeProperty(org.keycloak.common.util.Environment.PROFILE).orElse(null));
+        return org.keycloak.common.util.Environment.DEV_PROFILE_VALUE.equals(Configuration.getNonPersistedConfigValue(org.keycloak.common.util.Environment.PROFILE).getValue());
     }
 
     public static boolean isDevProfile(){
-        return Optional.ofNullable(org.keycloak.common.util.Environment.getProfile()).orElse("").equalsIgnoreCase(org.keycloak.common.util.Environment.DEV_PROFILE_VALUE);
-    }
-
-    public static boolean isNonServerMode() {
-        return NON_SERVER_MODE.equalsIgnoreCase(org.keycloak.common.util.Environment.getProfile());
+        return org.keycloak.common.util.Environment.isDevMode();
     }
 
     public static boolean isWindows() {
-        return SystemUtils.IS_OS_WINDOWS;
+        return NetworkUtils.checkForWindows();
     }
 
     public static void forceDevProfile() {
@@ -154,9 +116,9 @@ public final class Environment {
     }
 
     public static Map<String, File> getProviderFiles() {
-        Path providersPath = Environment.getProvidersPath();
+        Path providersPath = Environment.getProvidersPath().orElse(null);
 
-        if (providersPath == null) {
+        if (providersPath == null || !Files.exists(providersPath)) {
             return Collections.emptyMap();
         }
 
@@ -174,12 +136,13 @@ public final class Environment {
         })).collect(Collectors.toMap(File::getName, Function.identity()));
     }
 
-    public static boolean isTestLaunchMode() {
-        return "test".equals(System.getProperty(LAUNCH_MODE));
+    public static boolean hasEarlyExitLaunchMode() {
+        String mode = System.getProperty(LAUNCH_MODE);
+        return LAUNCH_MODE_EXIT_AFTER_START.equals(mode) || LAUNCH_MODE_EXIT_BEFORE_BOOTSTRAP.equals(mode);
     }
 
-    public static void forceTestLaunchMode() {
-        System.setProperty(LAUNCH_MODE, "test");
+    public static void forceExitAfterStartLaunchMode() {
+        System.setProperty(LAUNCH_MODE, LAUNCH_MODE_EXIT_AFTER_START);
     }
 
     /**
@@ -212,23 +175,20 @@ public final class Environment {
         return profile;
     }
 
-    public static boolean isDistribution() {
-        if (LaunchMode.current().isDevOrTest()) {
-            return false;
-        }
-        return getHomeDir() != null;
+    public static boolean isRebuildCheck() {
+        return Boolean.getBoolean(KC_CONFIG_REBUILD_CHECK);
     }
 
-    public static boolean isRebuildCheck() {
-        return Boolean.getBoolean("kc.config.build-and-exit");
+    public static void setRebuildCheck(boolean check) {
+        System.setProperty(KC_CONFIG_REBUILD_CHECK, Boolean.toString(check));
     }
 
     public static boolean isRebuilt() {
-        return Boolean.getBoolean("kc.config.built");
+        return Boolean.getBoolean(KC_CONFIG_BUILT);
     }
 
     public static void setHomeDir(Path path) {
-        System.setProperty("kc.home.dir", path.toFile().getAbsolutePath());
+        System.setProperty(KC_HOME_DIR, path.toFile().getAbsolutePath());
     }
 
     /**
@@ -242,24 +202,24 @@ public final class Environment {
         Profile profile = Profile.getInstance();
 
         if (profile == null) {
-            profile = Profile.configure(new QuarkusProfileConfigResolver(), new PropertiesProfileConfigResolver(QuarkusProfileConfigResolver::getConfig), new PropertiesFileProfileConfigResolver());
+            profile = Profile.configure(new QuarkusSingleProfileConfigResolver(), new QuarkusProfileConfigResolver());
         }
 
         return profile;
     }
 
+    public static void setRebuild() {
+        System.setProperty("quarkus.launch.rebuild", "true");
+    }
+    
     /**
-     * Get parsed AbstractCommand we obtained from the CLI
+     * The process id of the script used to launch the server. Will be null if a script other than kc.sh is used
      */
-    public static Optional<AbstractCommand> getParsedCommand() {
-        return Optional.ofNullable(parsedCommand);
+    public static Optional<String> getScriptPid() {
+        return Optional.ofNullable(System.getProperty(KC_SCRIPT_PID));
     }
-
-    public static boolean isParsedCommand(String commandName) {
-        return getParsedCommand().filter(f -> f.getName().equals(commandName)).isPresent();
-    }
-
-    public static void setParsedCommand(AbstractCommand command) {
-        Environment.parsedCommand = command;
+    
+    public static boolean isRunInContainer() {
+        return Configuration.getOptionalBooleanKcValue("run-in-container").orElse(false);
     }
 }

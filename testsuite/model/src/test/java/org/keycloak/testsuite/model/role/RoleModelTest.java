@@ -1,7 +1,14 @@
 package org.keycloak.testsuite.model.role;
 
-import org.hamcrest.Matcher;
-import org.junit.Test;
+import java.util.Collection;
+import java.util.List;
+import java.util.Random;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientProvider;
 import org.keycloak.models.Constants;
@@ -13,21 +20,17 @@ import org.keycloak.models.RoleProvider;
 import org.keycloak.testsuite.model.KeycloakModelTest;
 import org.keycloak.testsuite.model.RequireProvider;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
-
+import org.hamcrest.Matcher;
 import org.junit.Assume;
+import org.junit.Test;
+
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 
 @RequireProvider(RealmProvider.class)
@@ -303,6 +306,93 @@ public class RoleModelTest extends KeycloakModelTest {
             assertThat(role, nullValue());
             return null;
         });
+    }
+
+    @Test
+    public void getRoleByNameFromTheDatabaseAndTheCache() {
+        String roleName = "role-" + new Random().nextInt();
+
+        // Look up a non-existent role from the database
+        withRealm(realmId, (session, realm) -> {
+            RoleModel role = session.roles().getRealmRole(realm, roleName);
+            assertThat(role, nullValue());
+            return null;
+        });
+
+        // Look up a non-existent role from the cache
+        withRealm(realmId, (session, realm) -> {
+            RoleModel role = session.roles().getRealmRole(realm, roleName);
+            assertThat(role, nullValue());
+            return null;
+        });
+
+        // Create the role, and invalidate the cache
+        withRealm(realmId, (session, realm) -> {
+            RoleModel role = session.roles().addRealmRole(realm, roleName);
+            assertThat(role, notNullValue());
+            return null;
+        });
+
+        // Find the role from the database
+        withRealm(realmId, (session, realm) -> {
+            RoleModel role = session.roles().getRealmRole(realm, roleName);
+            assertThat(role, notNullValue());
+            return null;
+        });
+
+        // Find the role from the cache
+        withRealm(realmId, (session, realm) -> {
+            RoleModel role = session.roles().getRealmRole(realm, roleName);
+            assertThat(role, notNullValue());
+            return null;
+        });
+
+    }
+
+    @Test
+    public void getClientRoleByNameFromTheDatabaseAndTheCache() {
+        String roleName = "role-" + new Random().nextInt();
+
+        // Look up a non-existent role from the database
+        withRealm(realmId, (session, realm) -> {
+            ClientModel client = session.clients().getClientByClientId(realm, CLIENT_NAME);
+            RoleModel role = session.roles().getClientRole(client, roleName);
+            assertThat(role, nullValue());
+            return null;
+        });
+
+        // Look up a non-existent role from the cache
+        withRealm(realmId, (session, realm) -> {
+            ClientModel client = session.clients().getClientByClientId(realm, CLIENT_NAME);
+            RoleModel role = session.roles().getClientRole(client, roleName);
+            assertThat(role, nullValue());
+            return null;
+        });
+
+        // Create the role, and invalidate the cache
+        withRealm(realmId, (session, realm) -> {
+            ClientModel client = session.clients().getClientByClientId(realm, CLIENT_NAME);
+            RoleModel role = session.roles().addClientRole(client, roleName);
+            assertThat(role, notNullValue());
+            return null;
+        });
+
+        // Find the role from the database
+        withRealm(realmId, (session, realm) -> {
+            ClientModel client = session.clients().getClientByClientId(realm, CLIENT_NAME);
+            RoleModel role = session.roles().getClientRole(client, roleName);
+            assertThat(role, notNullValue());
+            return null;
+        });
+
+        // Find the role from the cache
+        withRealm(realmId, (session, realm) -> {
+            ClientModel client = session.clients().getClientByClientId(realm, CLIENT_NAME);
+            RoleModel role = session.roles().getClientRole(client, roleName);
+            assertThat(role, notNullValue());
+            return null;
+        });
+
     }
 
     public void testRolesWithIdsPaginationSearchQueries(GetResult resultProvider) {

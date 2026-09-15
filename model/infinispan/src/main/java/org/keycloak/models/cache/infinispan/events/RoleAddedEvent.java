@@ -19,10 +19,12 @@ package org.keycloak.models.cache.infinispan.events;
 
 import java.util.Set;
 
-import org.infinispan.protostream.annotations.ProtoFactory;
-import org.infinispan.protostream.annotations.ProtoTypeId;
 import org.keycloak.marshalling.Marshalling;
 import org.keycloak.models.cache.infinispan.RealmCacheManager;
+
+import org.infinispan.protostream.annotations.ProtoFactory;
+import org.infinispan.protostream.annotations.ProtoField;
+import org.infinispan.protostream.annotations.ProtoTypeId;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -30,17 +32,21 @@ import org.keycloak.models.cache.infinispan.RealmCacheManager;
 @ProtoTypeId(Marshalling.ROLE_ADDED_EVENT)
 public class RoleAddedEvent extends BaseRoleEvent {
 
+    @ProtoField(3)
+    final String roleName;
+
     @ProtoFactory
-    RoleAddedEvent(String id, String containerId) {
+    RoleAddedEvent(String id, String containerId, String roleName) {
         super(id, containerId);
+        this.roleName = roleName;
     }
 
-    public static RoleAddedEvent create(String roleId, String containerId) {
-        return new RoleAddedEvent(roleId, containerId);
+    public static RoleAddedEvent create(String roleId, String containerId, String roleName) {
+        return new RoleAddedEvent(roleId, containerId, roleName);
     }
 
     @Override
     public void addInvalidations(RealmCacheManager realmCache, Set<String> invalidations) {
-        realmCache.roleAdded(containerId, invalidations);
+        realmCache.roleAdded(containerId, roleName, invalidations);
     }
 }

@@ -17,33 +17,37 @@
 
 package org.keycloak.it.cli.dist;
 
+import org.keycloak.it.junit5.extension.CLIResult;
+import org.keycloak.it.junit5.extension.DistributionTest;
+import org.keycloak.it.junit5.extension.RawDistOnly;
+import org.keycloak.it.junit5.extension.StopServer.Mode;
+
 import io.quarkus.test.junit.main.Launch;
 import io.quarkus.test.junit.main.LaunchResult;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.keycloak.it.junit5.extension.CLIResult;
-import org.keycloak.it.junit5.extension.DistributionTest;
-import org.keycloak.it.junit5.extension.RawDistOnly;
 
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@DistributionTest
+@DistributionTest(stopServer = Mode.BEFORE_BOOTSTRAP)
 @RawDistOnly(reason = "Containers are immutable")
 public class TracingDistTest {
 
-    private void assertTracingEnabled(CLIResult result) {
+    static void assertTracingEnabled(CLIResult result) {
         result.assertMessage("opentelemetry");
         result.assertMessage("service.name=\"keycloak\"");
-        result.assertMessage("Preview features enabled: opentelemetry");
     }
 
-    private void assertTracingDisabled(CLIResult result) {
+    static void assertTracingDisabled(CLIResult result) {
         result.assertMessage("opentelemetry");
         result.assertNoMessage("service.name=\"keycloak\"");
+        assertSamplingDisabled(result);
+    }
+
+    private static void assertSamplingDisabled(CLIResult result) {
         result.assertNoMessage("Failed to export spans.");
         result.assertNoMessage("Connection refused: localhost/127.0.0.1:4317");
-        result.assertNoMessage("Preview features enabled: opentelemetry");
     }
 
     @Test
@@ -62,12 +66,12 @@ public class TracingDistTest {
     void disabledOption(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
-        cliResult.assertError("Disabled option: '--tracing-service-name'. Available only when 'opentelemetry' feature and Tracing is enabled");
+        cliResult.assertError("Disabled option: '--tracing-service-name'. Available only when Tracing is enabled");
     }
 
     @Test
     @Order(3)
-    @Launch({"start-dev", "--tracing-enabled=true"})
+    @Launch({"start-dev", "--features-disabled=opentelemetry", "--tracing-enabled=true"})
     void disabledFeature(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
@@ -76,16 +80,16 @@ public class TracingDistTest {
 
     @Test
     @Order(4)
-    @Launch({"start-dev", "--features=opentelemetry", "--tracing-enabled=false", "--tracing-endpoint=something"})
+    @Launch({"start-dev", "--tracing-enabled=false", "--tracing-endpoint=something"})
     void disabledTracing(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
-        cliResult.assertError("Disabled option: '--tracing-endpoint'. Available only when 'opentelemetry' feature and Tracing is enabled");
+        cliResult.assertError("Disabled option: '--tracing-endpoint'. Available only when Tracing is enabled");
     }
 
     @Test
     @Order(5)
-    @Launch({"build", "--tracing-enabled=true", "--features=opentelemetry"})
+    @Launch({"build", "--db=dev-file", "--tracing-enabled=true"})
     void buildTracingEnabled(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
@@ -104,6 +108,16 @@ public class TracingDistTest {
     }
 
     @Test
+    @Launch({"start", "--hostname-strict=false", "--http-enabled=true", "--optimized", "--tracing-sampler-ratio=0.0", "--log-level=io.opentelemetry:fine"})
+    void samplingDisabledViaRatioZero(LaunchResult result) {
+        CLIResult cliResult = (CLIResult) result;
+
+        cliResult.assertStarted();
+        assertTracingEnabled(cliResult);
+        assertSamplingDisabled(cliResult);
+    }
+
+    @Test
     @Launch({"start", "--hostname-strict=false", "--http-enabled=true", "--optimized", "--tracing-endpoint=http://endpoint:8888", "--log-level=io.opentelemetry:fine"})
     void differentEndpoint(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
@@ -117,7 +131,7 @@ public class TracingDistTest {
     void emptyEndpoint(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
-        cliResult.assertError("URL specified in 'tracing-endpoint' option must not be empty.");
+        cliResult.assertError("Specified Endpoint URL must not be empty.");
     }
 
     @Test
@@ -125,7 +139,7 @@ public class TracingDistTest {
     void invalidUrl(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
-        cliResult.assertError("URL specified in 'tracing-endpoint' option is invalid.");
+        cliResult.assertError("Specified Endpoint URL is invalid.");
     }
 
     @Test
@@ -145,11 +159,11 @@ public class TracingDistTest {
     }
 
     @Test
-    @Launch({"start", "--hostname-strict=false", "--http-enabled=true", "--optimized", "--tracing-sampler-ratio=0.0"})
+    @Launch({"start", "--hostname-strict=false", "--http-enabled=true", "--optimized", "--tracing-sampler-ratio=1.1"})
     void wrongSamplerRatio(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
-        cliResult.assertError("Ratio in 'tracing-sampler-ratio' option must be a double value in interval <0,1).");
+        cliResult.assertError("Ratio in 'tracing-sampler-ratio' option must be a double value in interval [0,1].");
     }
 
     @Test
@@ -175,6 +189,7 @@ public class TracingDistTest {
     void differentServiceName(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
 
+        cliResult.assertMessage("- tracing-service-name: Service name is not directly related to Tracing and you should use the Telemetry option which takes precedence. Use telemetry-service-name.");
         cliResult.assertMessage("opentelemetry");
         cliResult.assertMessage("service.name=\"my-service\"");
 
@@ -198,10 +213,19 @@ public class TracingDistTest {
         CLIResult cliResult = (CLIResult) result;
 
         assertTracingEnabled(cliResult);
-
+        cliResult.assertMessage("- tracing-resource-attributes: Resource attributes are not directly related to Tracing and you should use the Telemetry option which takes precedence. Use telemetry-resource-attributes.");
         cliResult.assertMessage("some.key1=\"some.val1\"");
         cliResult.assertMessage("some.key2=\"some.val2\"");
 
+        cliResult.assertStarted();
+    }
+
+    @Test
+    @Launch({"start", "--hostname-strict=false", "--http-enabled=true", "--optimized", "--log-level=io.opentelemetry:fine", "--tracing-header-Authorization=\"Bearer asdlkfjadsflkj\"", "--tracing-header-Host=localhost:8080"})
+    void headers(CLIResult cliResult) {
+        assertTracingEnabled(cliResult);
+
+        // There is no message in the attributes about headers
         cliResult.assertStarted();
     }
 }

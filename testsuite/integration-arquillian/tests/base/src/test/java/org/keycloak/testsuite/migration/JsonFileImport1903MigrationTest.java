@@ -16,7 +16,11 @@
  */
 package org.keycloak.testsuite.migration;
 
-import org.junit.Test;
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.keycloak.OAuth2Constants;
 import org.keycloak.exportimport.util.ImportUtils;
 import org.keycloak.representations.idm.ComponentRepresentation;
@@ -27,16 +31,14 @@ import org.keycloak.testsuite.utils.io.IOUtil;
 import org.keycloak.userprofile.config.UPConfigUtils;
 import org.keycloak.util.JsonSerialization;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import org.junit.Test;
+
+import static org.keycloak.userprofile.DeclarativeUserProfileProvider.UP_COMPONENT_CONFIG_KEY;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
-import static org.junit.Assert.assertEquals;
-import static org.keycloak.userprofile.DeclarativeUserProfileProvider.UP_COMPONENT_CONFIG_KEY;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Tests that we can import json file from previous version. MigrationTest only tests DB.
@@ -70,6 +72,7 @@ public class JsonFileImport1903MigrationTest extends AbstractJsonFileImportMigra
         testMigrationTo24_x(true, true);
         testMigrationTo25_0_0();
         testMigrationTo26_0_0(true);
+        testMigrationTo26_3_0();
     }
 
     @Test

@@ -17,12 +17,7 @@
 
 package org.keycloak.federation.kerberos.impl;
 
-import org.jboss.logging.Logger;
-import org.keycloak.common.util.KerberosJdkProvider;
-import org.keycloak.federation.kerberos.CommonKerberosConfig;
-import org.keycloak.federation.kerberos.KerberosPrincipal;
-import org.keycloak.models.ModelException;
-
+import java.io.IOException;
 import javax.security.auth.Subject;
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
@@ -32,7 +27,13 @@ import javax.security.auth.callback.UnsupportedCallbackException;
 import javax.security.auth.login.Configuration;
 import javax.security.auth.login.LoginContext;
 import javax.security.auth.login.LoginException;
-import java.io.IOException;
+
+import org.keycloak.common.util.KerberosJdkProvider;
+import org.keycloak.federation.kerberos.CommonKerberosConfig;
+import org.keycloak.federation.kerberos.KerberosPrincipal;
+import org.keycloak.models.ModelException;
+
+import org.jboss.logging.Logger;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -102,21 +103,28 @@ public class KerberosUsernamePasswordAuthenticator {
     }
 
     protected void checkKerberosServerAvailable(LoginException le) {
-        String message = le.getMessage().toUpperCase();
-        if (message.contains("PORT UNREACHABLE") ||
-            message.contains("CANNOT LOCATE") ||
-            message.contains("CANNOT CONTACT") ||
-            message.contains("CANNOT FIND") ||
-            message.contains("UNKNOWN ERROR") ||
-            message.contains("RECEIVE TIMED OUT")) {
+        if (le.getMessage() != null) {
+            String message = le.getMessage().toUpperCase();
+            if (message.contains("PORT UNREACHABLE") ||
+                message.contains("CANNOT LOCATE") ||
+                message.contains("CANNOT CONTACT") ||
+                message.contains("CANNOT FIND") ||
+                message.contains("UNKNOWN ERROR") ||
+                message.contains("RECEIVE TIMED OUT")) {
+                throw new ModelException("Kerberos unreachable", le);
+            }
+        } else if (le.getCause() instanceof IOException) {
+            // for example, a PortUnreachable exception if the server is not running
             throw new ModelException("Kerberos unreachable", le);
         }
     }
 
     protected void checkKerberosUsername(LoginException le) {
-        String message = le.getMessage();
-        if (message.contains("IllegalArgumentException")) {
-            throw new ModelException("Kerberos illegal username", le);
+        if (le.getMessage() != null) {
+            String message = le.getMessage();
+            if (message.contains("IllegalArgumentException")) {
+                throw new ModelException("Kerberos illegal username", le);
+            }
         }
     }
 
