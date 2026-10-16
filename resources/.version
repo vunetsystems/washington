@@ -1,8 +1,8 @@
 {
-    "platform_info": {
-        "version": "NG 3.2.0"
-    },
-    "application_info":{
-        "version": "26.7.2"
-    }
+  "platform_info": {
+    "version": "NG 3.3.0"
+  },
+  "application_info": {
+    "version": "26.7.2"
+  }
 }
