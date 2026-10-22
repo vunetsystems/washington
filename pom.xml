@@ -128,7 +128,10 @@
         <apacheds.version>2.0.0.AM26</apacheds.version>
         <apacheds.codec.version>2.0.0</apacheds.codec.version>
         <google.zxing.version>3.4.0</google.zxing.version>
-        <freemarker.version>2.3.32</freemarker.version>
+        <freemarker.version>2.3.35</freemarker.version> <!-- CVE-2026-84939 -->
+        <jackson-bom.version>2.21.7</jackson-bom.version> <!-- CVE-2026-89407, CVE-2026-89425, CVE-2026-68497, CVE-2026-91776, CVE-2026-91777, CVE-2026-19032, CVE-2026-83557 -->
+        <bouncycastle.version>1.86</bouncycastle.version> <!-- CVE-2026-8763, CVE-2026-13506 -->
+        <opentelemetry-api.version>1.62.0</opentelemetry-api.version> <!-- CVE-2026-45292 -->
         <sundrio.version>0.200.0</sundrio.version>
         <antlr4.version>4.13.2</antlr4.version>
         <dbus-java.version>5.2.0</dbus-java.version>
@@ -335,6 +338,15 @@
                 <groupId>org.infinispan</groupId>
                 <artifactId>infinispan-bom</artifactId>
                 <version>${infinispan.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Must stay above quarkus-bom: for an artifact managed by two imported BOMs, the first import wins.
+                 Remove when quarkus.version's own BOM ships jackson >= 2.21.7 -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson-bom.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -1479,10 +1491,45 @@
                 <version>4.1.137.Final</version>
             </dependency>
 
-            <!-- CVE-2026-45292: opentelemetry-api bump reverted, breaks Quarkus's matched 1.57.0 OTel
-                 set (NoClassDefFoundError). Mitigated by Vert.x's default max-header-size; revisit once
-                 quarkus.version ships opentelemetry-api >= 1.62.0. Dependency itself is needed because
-                 quarkus-opentelemetry has no transport impl, so enabling tracing crashes without it. -->
+            <!-- CVE-2026-8763, CVE-2026-13506: bcprov, bcpkix and bcutil are released as a matched set and must
+                 move together (bcpkix 1.84 still carries its own unfixed name-constraint validator). 1.86 is the set
+                 Quarkus 3.33.4 ships. Remove when quarkus.version's own BOM ships bouncycastle >= 1.86 -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcpkix-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcutil-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+
+            <!-- CVE-2026-45292: the W3C baggage fix lives in opentelemetry-api, which needs context and common at the
+                 same version, so only those three move to 1.62.0. The SDK, exporters and opentelemetry-api-incubator
+                 stay on Quarkus's 1.57.0: Quarkus 3.33's opentelemetry extension uses SDK internals that 1.62.0 moved,
+                 so a full OTel bump fails with NoClassDefFoundError. Remove when quarkus.version ships opentelemetry >= 1.62.0 -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-api</artifactId>
+                <version>${opentelemetry-api.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-context</artifactId>
+                <version>${opentelemetry-api.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-common</artifactId>
+                <version>${opentelemetry-api.version}</version>
+            </dependency>
+            <!-- Needed because quarkus-opentelemetry has no transport impl, so enabling tracing crashes without it -->
             <dependency>
                 <groupId>io.opentelemetry</groupId>
                 <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
