@@ -132,6 +132,7 @@
         <jackson-bom.version>2.21.7</jackson-bom.version> <!-- CVE-2026-89407, CVE-2026-89425, CVE-2026-68497, CVE-2026-91776, CVE-2026-91777, CVE-2026-19032, CVE-2026-83557 -->
         <bouncycastle.version>1.86</bouncycastle.version> <!-- CVE-2026-8763, CVE-2026-13506 -->
         <opentelemetry-api.version>1.62.0</opentelemetry-api.version> <!-- CVE-2026-45292 -->
+        <guava.version>33.7.2-jre</guava.version> <!-- CVE-2026-102554 -->
         <sundrio.version>0.200.0</sundrio.version>
         <antlr4.version>4.13.2</antlr4.version>
         <dbus-java.version>5.2.0</dbus-java.version>
@@ -160,7 +161,7 @@
         <postgresql-jdbc.version>42.7.13</postgresql-jdbc.version>
         <mariadb.version>11.8</mariadb.version>
         <mariadb.container>mirror.gcr.io/mariadb:${mariadb.version}</mariadb.container>
-        <mariadb-jdbc.version>3.5.9</mariadb-jdbc.version>
+        <mariadb-jdbc.version>3.5.11</mariadb-jdbc.version>
         <mssql.version>2022</mssql.version>
         <mssql.container>mcr.microsoft.com/mssql/server:${mssql.version}-latest</mssql.container>
         <mssql.collation>Latin1_General_100_CI_AS_SC_UTF8</mssql.collation>
@@ -1508,6 +1509,22 @@
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcutil-jdk18on</artifactId>
                 <version>${bouncycastle.version}</version>
+            </dependency>
+
+            <!-- CVE-2026-102554: Quarkus 3.33 ships guava 33.5.0-jre. Remove when quarkus.version ships guava >= 33.7.2 -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
+            </dependency>
+
+            <!-- CVE-2026-119210, CVE-2026-119276, CVE-2026-119279, CVE-2026-119280, CVE-2026-119281: the shipped driver
+                 comes from quarkus-jdbc-mariadb, which Quarkus 3.33 pins to 3.5.9. Remove when quarkus.version ships
+                 mariadb-java-client >= 3.5.11 -->
+            <dependency>
+                <groupId>org.mariadb.jdbc</groupId>
+                <artifactId>mariadb-java-client</artifactId>
+                <version>${mariadb-jdbc.version}</version>
             </dependency>
 
             <!-- CVE-2026-45292: the W3C baggage fix lives in opentelemetry-api, which needs context and common at the
